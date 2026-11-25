@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>glance fixture: sign in</title>
+<link rel="stylesheet" href="../page.css">
+<form onsubmit="return false">
+  <label>User <input id="user" name="user" autocomplete="off"></label>
+  <label>Password <input id="editor" name="pw" type="password" autocomplete="off"></label>
+</form>
+<textarea id="notes" aria-label="notes"></textarea>
+<script type="module">
+import { install, cpIndex, utf16Index } from "../bridge.js";
+const el = document.getElementById("notes");
+install({
+  getText: () => el.value,
+  getCaret: () => cpIndex(el.value, el.selectionEnd),
+  setCaret: (n) => { el.focus(); const i = utf16Index(el.value, n); el.setSelectionRange(i, i); },
+  setText: (s) => { el.value = s; el.dispatchEvent(new Event("input", { bubbles: true })); },
+  focus: () => el.focus(),
+});
+</script>

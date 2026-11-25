@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000003"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"The quick brown fox jumps over the lazy dog. I think it looks fine!"}}
+{"type":"turn.completed","usage":{"input_tokens":14965,"cached_input_tokens":10880,"cache_write_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0}}
+[exit=0]

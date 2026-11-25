@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Test double for the opencode CLI. `error` replays the recorded shape (fixtures/backends/opencode-error.txt);
+the success event shapes are SYNTHETIC (documented `run --format json` text events) because opencode never
+produced a reply on the spike machine (findings S6.5). Appends one record per invocation to $FAKE_LOG."""
+import json
+import os
+import sys
+import time
+
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "backends")
+GOOD = {"tone": "casual", "mismatch": False, "reason": None, "flags": [], "issues": []}
+argv = sys.argv[1:]
+log = os.environ.get("FAKE_LOG")
+
+
+def record(**kw):
+    if log:
+        with open(log, "a") as f:
+            f.write(json.dumps({"argv": argv, "cwd": os.getcwd(),
+                                "password": os.environ.get("OPENCODE_SERVER_PASSWORD"),
+                                "config": os.environ.get("OPENCODE_CONFIG_CONTENT"), **kw}) + "\n")
+
+
+if argv[:1] == ["serve"]:
+    record(stdin="")
+    print("opencode server listening on http://127.0.0.1:4096", flush=True)
+    time.sleep(60)
+    sys.exit(0)
+if argv[:2] == ["auth", "list"]:
+    n = int(os.environ.get("FAKE_CREDS", "1"))
+    print(f"\n┌  Credentials\n│\n●  OpenCode api\n│\n└  {n} credentials")
+    sys.exit(0)
+if argv[:2] == ["session", "delete"]:
+    record(stdin="")
+    print(f"Session {argv[2]} deleted")
+    sys.exit(0)
+
+stdin = sys.stdin.read()
+if os.environ.get("FAKE_STDIN_LOG"):  # privacy proofs: everything any backend is ever sent
+    with open(os.environ["FAKE_STDIN_LOG"], "a") as f:
+        f.write(json.dumps({"argv": argv, "stdin": stdin}) + "\n")
+record(stdin=stdin)
+mode = os.environ.get("FAKE_MODE", "analyze")
+sid = "ses_fake1"
+print(json.dumps({"type": "step_start", "sessionID": sid, "part": {"type": "step-start"}}), flush=True)
+if mode == "hang":
+    time.sleep(30)
+if mode == "error":
+    with open(os.path.join(FIX, "opencode-error.txt")) as f:
+        for line in f:
+            if line.startswith("{"):
+                print(line.rstrip(), flush=True)
+    sys.exit(1)
+if mode == "analyze":
+    text = json.dumps(GOOD)
+elif mode == "prose":  # first reply invalid, then valid
+    n = os.environ.get("FAKE_LOG") and sum(1 for l in open(log) if '"run"' in l) or 1
+    text = "not json at all" if n == 1 else json.dumps(GOOD)
+else:
+    text = "The quick brown fox."
+print(json.dumps({"type": "text", "sessionID": sid, "part": {"type": "text", "text": text}}), flush=True)
+print(json.dumps({"type": "step_finish", "sessionID": sid, "part": {"type": "step-finish"}}), flush=True)

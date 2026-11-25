@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>glance fixture: textarea</title>
+<link rel="stylesheet" href="page.css">
+<textarea id="editor" rows="6" aria-label="editor"></textarea>
+<script type="module">
+import { install, cpIndex, utf16Index } from "./bridge.js";
+const el = document.getElementById("editor");
+install({
+  getText: () => el.value,
+  getCaret: () => cpIndex(el.value, el.selectionDirection === "backward" ? el.selectionStart : el.selectionEnd),
+  setCaret: (n) => { el.focus(); const i = utf16Index(el.value, n); el.setSelectionRange(i, i); },
+  setText: (s) => { el.value = s; el.dispatchEvent(new Event("input", { bubbles: true })); },
+  focus: () => el.focus(),
+});
+</script>

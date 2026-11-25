@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Test double for the codex CLI: records argv/stdin/cwd/schema to $FAKE_LOG, replays a recorded fixture."""
+import json
+import os
+import sys
+import time
+
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "backends")
+argv = sys.argv[1:]
+
+if argv[:2] == ["login", "status"]:
+    state = os.environ.get("FAKE_AUTH", "in")
+    if state == "in":
+        print("Logged in using ChatGPT")
+        sys.exit(0)
+    print("Not logged in", file=sys.stderr)
+    sys.exit(1)
+
+stdin = sys.stdin.read()
+if os.environ.get("FAKE_STDIN_LOG"):  # privacy proofs: everything any backend is ever sent
+    with open(os.environ["FAKE_STDIN_LOG"], "a") as f:
+        f.write(json.dumps({"argv": argv, "stdin": stdin}) + "\n")
+log = os.environ.get("FAKE_LOG")
+if log:
+    schema = None
+    if "--output-schema" in argv:
+        with open(argv[argv.index("--output-schema") + 1]) as f:
+            schema = f.read()
+    with open(log, "a") as f:
+        f.write(json.dumps({"argv": argv, "stdin": stdin, "cwd": os.getcwd(), "schema": schema}) + "\n")
+
+mode = os.environ.get("FAKE_MODE", "analyze")
+if mode == "hang":
+    time.sleep(30)
+name = {"analyze": "codex-analyze.txt", "rewrite": "codex-rewrite.txt", "error": "codex-error.txt"}[mode]
+with open(os.path.join(FIX, name)) as f:
+    for line in f:
+        if line.startswith("{"):
+            sys.stdout.write(line)
+sys.stdout.flush()
+sys.exit(1 if mode == "error" else 0)

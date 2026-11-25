@@ -1,0 +1,15 @@
+[Unit]
+Description=Glance writing assistant
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@VENV@/bin/glanced
+Restart=on-failure
+RestartSec=200ms
+RestartPreventExitStatus=78
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target

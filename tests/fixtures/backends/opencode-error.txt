@@ -1,0 +1,2 @@
+{"type":"error","timestamp":1795593370959,"sessionID":"ses_fake1","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_fake"}}}
+[exit=1]

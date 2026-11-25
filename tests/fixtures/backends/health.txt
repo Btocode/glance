@@ -1,0 +1,21 @@
+$ claude auth status --json          (exit 0; account metadata removed)
+{
+  "loggedIn": true,
+  "authMethod": "claude.ai",
+  "apiProvider": "firstParty",
+  "storedClaudeAiLogin": true
+}
+
+$ codex login status                 (exit 0)
+Logged in using ChatGPT
+
+$ opencode auth list                 (exit 0; ANSI colour codes stripped, path redacted)
+
+┌  Credentials ~/.local/share/opencode/auth.json
+│
+●  OpenCode api
+│
+└  1 credentials
+
+gemini: ~/.gemini/oauth_creds.json exists; GEMINI_API_KEY unset; GOOGLE_API_KEY unset.
+(Presence does not mean usable: see gemini-error.txt, the account is rejected with IneligibleTierError.)

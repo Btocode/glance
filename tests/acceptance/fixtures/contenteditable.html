@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>glance fixture: contenteditable</title>
+<link rel="stylesheet" href="page.css">
+<div id="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="editor"></div>
+<script type="module">
+import { install, domText, domCaret, setDomCaret } from "./bridge.js";
+const el = document.getElementById("editor");
+install({
+  getText: () => domText(el),
+  getCaret: () => domCaret(el),
+  setCaret: (n) => { el.focus(); setDomCaret(el, n); },
+  setText: (s) => { el.textContent = s; el.dispatchEvent(new Event("input", { bubbles: true })); },
+  focus: () => el.focus(),
+});
+</script>

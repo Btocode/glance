@@ -1,0 +1,21 @@
+{
+  "name": "glance-fixtures",
+  "private": true,
+  "description": "Editor bundles for the Glance acceptance fixture pages (build-time only).",
+  "dependencies": {
+    "@lexical/plain-text": "0.53.0",
+    "esbuild": "0.28.2",
+    "lexical": "0.53.0",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.13",
+    "prosemirror-schema-basic": "1.2.5",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.44.0",
+    "quill": "2.0.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "slate": "0.147.4",
+    "slate-react": "0.147.6"
+  }
+}

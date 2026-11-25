@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Test double for the claude CLI: records argv/stdin/cwd to $FAKE_LOG, replays a fixture."""
+import json
+import os
+import sys
+import time
+
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "backends")
+argv = sys.argv[1:]
+
+if argv[:1] == ["auth"]:
+    state = os.environ.get("FAKE_AUTH", "in")
+    if state == "in":
+        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai"}))
+    elif state == "pretty":  # what the real CLI prints: indented, one key per line
+        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai"}, indent=2))
+    elif state == "out":
+        print(json.dumps({"loggedIn": False}))
+        sys.exit(1)
+    else:
+        print("garbage")
+    sys.exit(0)
+
+stdin = sys.stdin.read()
+if os.environ.get("FAKE_STDIN_LOG"):  # privacy proofs: everything any backend is ever sent
+    with open(os.environ["FAKE_STDIN_LOG"], "a") as f:
+        f.write(json.dumps({"argv": argv, "stdin": stdin}) + "\n")
+log = os.environ.get("FAKE_LOG")
+if log:
+    with open(log, "a") as f:
+        f.write(json.dumps({"argv": argv, "stdin": stdin, "cwd": os.getcwd()}) + "\n")
+
+mode = os.environ.get("FAKE_MODE", "analyze")
+if mode == "hang":
+    time.sleep(30)
+name = {"analyze": "claude-analyze.txt", "rewrite": "claude-rewrite.txt", "error": "claude-error.txt"}[mode]
+with open(os.path.join(FIX, name)) as f:
+    for line in f:
+        if line.startswith("{"):
+            sys.stdout.write(line)
+sys.stdout.flush()
+sys.exit(1 if mode == "error" else 0)
