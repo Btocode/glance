@@ -1,0 +1,17 @@
+#!/bin/sh
+# Glance .deb: remove what postinst made. Per-user files are each user's: `glance setup --undo`.
+set -e
+
+case "${1:-remove}" in
+    remove | upgrade | deconfigure | 0 | 1)
+        for cmd in glance glanced glance-capture glance-edit; do
+            if [ -L "/usr/bin/$cmd" ]; then rm -f "/usr/bin/$cmd"; fi
+        done
+        rm -rf /opt/glance/.venv
+        if [ "${1:-remove}" = remove ] || [ "${1:-}" = 0 ]; then
+            echo "Glance removed. Users who ran glance setup still have its systemd user unit;"
+            echo "remove it with: systemctl --user disable --now glance; rm ~/.config/systemd/user/glance.service"
+        fi
+        ;;
+esac
+exit 0

@@ -20,6 +20,7 @@ from glance.backends.base import (
     analyze_budget,
 )
 from glance.backends.budget import Budget
+from glance.backends.partial import analyze_progress
 from glance.backends.usage import Usage, UsageLedger
 from glance.clock import Clock
 from glance.config import CLI_MODEL_BACKENDS, BackendCfg, update_config
@@ -401,13 +402,35 @@ class BackendSupervisor:
     def _gave_up(self) -> AiUnavailable:
         return AiUnavailable("none" if self._notify() == "none" else "failed")
 
+    def prepare(self, ctx: Ctx) -> None:
+        """A field got the focus: get the next call's start-up out of the way. Health is
+        refreshed (when stale) so the check does not wait for it, and the backend the next
+        call goes to may start a process or open a connection (`prepare(ctx)`). Nothing of
+        the field's text goes anywhere. Blocks: call it off the UI thread."""
+        try:
+            self.status()
+            if self.cost_limited():
+                return
+            name = self.active()
+            backend = self._backends.get(name) if name is not None else None
+            prepare = getattr(backend, "prepare", None)
+            if prepare is not None:
+                self.sync()  # model and warm switch first: a spare is started for them
+                prepare(ctx)
+        except Exception as e:  # noqa: BLE001 - only a head start: never an error
+            log_event("prepare_error", kind=type(e).__name__)
+
     def analyze(self, text: str, ctx: Ctx, speculative: bool = False,
-                explicit: bool = False) -> Analysis:
+                explicit: bool = False,
+                on_partial: Callable[[str], None] | None = None) -> Analysis:
         """`explicit=True` when the user asked for this analysis: only then does it preempt,
-        and each backend gets the longer CHECK_TIMEOUT_S (else ANALYZE_TIMEOUT_S)."""
+        and each backend gets the longer CHECK_TIMEOUT_S (else ANALYZE_TIMEOUT_S).
+        `on_partial` gets the corrected text as far as it has streamed in (on this thread),
+        from a backend that streams it."""
         budget = CHECK_TIMEOUT_S if explicit else ANALYZE_TIMEOUT_S
         self._calls.error = None
-        with self._lane(speculative, explicit), analyze_budget(budget):
+        with self._lane(speculative, explicit), analyze_budget(budget), \
+                analyze_progress(on_partial):
             for name, backend in self._plan("analyze", speculative):
                 if not self._begin(name):
                     continue

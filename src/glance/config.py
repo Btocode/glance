@@ -24,6 +24,9 @@ SUGGESTIONS_MODES = ("on_click", "auto")  # `[ui] suggestions`
 # `[general] check`: "shortcut" checks only when asked (the check hotkey, a click on the
 # status icon); "typing" checks as the user types.
 CHECK_MODES = ("shortcut", "typing")
+# `[general] correction`: "minimal" corrects mistakes only, in the writer's words; "fluent"
+# may also reword a sentence a little to make it grammatical (never its meaning, names or code).
+CORRECTION_MODES = ("minimal", "fluent")
 
 POLL_MS = 1000
 
@@ -68,6 +71,7 @@ class GeneralCfg:
     # "shortcut" (default): nothing is checked while typing; the check hotkey (or a click on
     # the status icon) checks the field and opens the strip. "typing": check as you type.
     check: str = "shortcut"
+    correction: str = "minimal"  # CORRECTION_MODES
     hotkeys: dict[str, str] = field(default_factory=_default_hotkeys)
 
 
@@ -338,6 +342,9 @@ def _parse(data: dict[str, Any]) -> Config:
     if general.check not in CHECK_MODES:
         log_event("config_value_ignored", key="general.check")
         general = dataclasses.replace(general, check=GeneralCfg.check)
+    if general.correction not in CORRECTION_MODES:
+        log_event("config_value_ignored", key="general.correction")
+        general = dataclasses.replace(general, correction=GeneralCfg.correction)
     selection = _build(SelectionCfg, data.get("selection", {}), "selection")
     lo, hi = MIN_WORDS_RANGE
     if not lo <= selection.min_words <= hi:
@@ -378,11 +385,24 @@ def load_config(path: Path) -> Config:
     return _parse(data)
 
 
-def update_config(path: Path, dotted_key: str, value: Any) -> None:
+def validate_text(text: str) -> Config:
+    """The config `text` would load as, with load_config's checks; ConfigError otherwise."""
+    try:
+        data = tomli.loads(text)
+    except tomli.TOMLDecodeError as e:
+        raise ConfigError("config.toml", f"invalid TOML: {e}") from e
+    return _parse(data)
+
+
+def update_config(path: Path, dotted_key: str | tuple[str, ...], value: Any,
+                  check: Callable[[str], Any] | None = None) -> None:
     """Set one key (e.g. `backend.choice`) keeping the user's comments and layout.
 
     `None` removes the key. The file and its directory are created when missing; the write is
     an atomic replace. A file that is not valid TOML is left untouched (ConfigError).
+    `dotted_key` may be the parts themselves (a window class such as `org.gnome.gedit` has
+    dots of its own). `check(new_text)` runs before anything is written: when it raises
+    (e.g. `validate_text`'s ConfigError) the file stays as it was.
     """
     target = path.resolve() if path.is_symlink() else path  # keep a symlinked dotfile a symlink
     try:
@@ -393,7 +413,8 @@ def update_config(path: Path, dotted_key: str, value: Any) -> None:
         raise ConfigError(str(path), f"unreadable: {e.__class__.__name__}") from e
     except TOMLKitError as e:
         raise ConfigError(str(path), f"invalid TOML: {e}") from e
-    *parents, leaf = dotted_key.split(".")
+    parts = tuple(dotted_key.split(".")) if isinstance(dotted_key, str) else tuple(dotted_key)
+    *parents, leaf = parts
     table: Any = doc
     for i, part in enumerate(parents):
         if part not in table:
@@ -409,11 +430,14 @@ def update_config(path: Path, dotted_key: str, value: Any) -> None:
         del table[leaf]
     else:
         table[leaf] = list(value) if isinstance(value, tuple) else value
+    text = tomlkit.dumps(doc)
+    if check is not None:
+        check(text)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".config-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(tomlkit.dumps(doc))
+            f.write(text)
         if target.exists():
             os.chmod(tmp, target.stat().st_mode & 0o777)
         else:

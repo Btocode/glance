@@ -209,7 +209,8 @@ def main(argv: list[str] | None = None) -> int:
                    on_auto_suggest=lambda on: set_suggestions(
                        update_config, config_path(), on, watcher.reload),
                    auto_suggest=watcher.current.ui.suggestions == "auto",
-                   on_update=lambda: launch_update(notifier.notify, update_log_path()),
+                   on_update=lambda: launch_update(notifier.notify, update_log_path(),
+                                                    args=update_state.update_args()),
                    on_usage_open=lambda: refresh_usage(),
                    on_usage_details=lambda: show_usage_details(),
                    on_check_mode=lambda mode: set_check_mode(
@@ -218,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
                    check_hint=check_label(
                        mac_hotkeys(watcher.current.general.hotkeys).get("check", ""), mac=True),
                    on_shortcuts=lambda: show_shortcuts(),
+                   on_settings=lambda: show_settings(),
                    on_feature=lambda name, on: set_feature(
                        update_config, config_path(), name, on, watcher.reload),
                    features=menu_rows(watcher.current))
@@ -319,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     # Glance Shot: the picker (ScreenCaptureKit / CGWindowListCreateImage), the bar
     from glance.daemon.shot_wiring import ShotSwitch, build_shot, shot_request
     from glance.platform.macos.shot import MacShot
+    from glance.ui.settings_model import settings_request
 
     shot_ui = MacShot(lambda key: shot.action(key), clock.post, notifier.notify)
     shot = build_shot(ui=shot_ui, controller=controller, supervisor=ai_supervisor,
@@ -330,7 +333,19 @@ def main(argv: list[str] | None = None) -> int:
         controller, panels.action,
         backend_control=BackendControl(ai_supervisor, ai, keys, current_config, overrides,
                                        run_ai, config_path()),
-        extra={"shot": shot_request(shot)})
+        extra={"shot": shot_request(shot), "settings_open": settings_request(
+            lambda section: show_settings(section))})
+
+    settings_window: list[Any] = []
+
+    def show_settings(section: str | None = None) -> None:  # main loop: "Settings…"
+        from glance.platform.macos.settings import SettingsWindow
+        from glance.ui.settings_model import SettingsModel
+
+        if not settings_window:
+            model = SettingsModel(config_path(), on_written=watcher.reload, overrides=overrides)
+            settings_window.append(SettingsWindow(model, on_usage_details=show_usage_details))
+        settings_window[0].show(section)
 
     def remember_setting(key: str, value: Any) -> None:  # main thread
         try:
@@ -521,14 +536,16 @@ def main(argv: list[str] | None = None) -> int:
     def update_check() -> None:
         if watcher.current.general.check_updates:
             run_update_check(update_state.refresh,
-                             lambda _s: tray.set_update_available(update_state.status == "available"))
+                             lambda _s: tray.set_update_available(update_state.status == "available",
+                                                                  update_state.result.label))
 
     def first_update_check() -> None:
         update_check()
         clock.every(CHECK_EVERY_S * 1000, update_check)
 
     clock.call_later(CHECK_FIRST_S * 1000, first_update_check)
-    controller.extra_status.append(lambda: {"update": update_state.status})
+    controller.extra_status.append(lambda: {"update": update_state.status,
+                                            "version": update_state.result.installed})
     rebind()
     session_events.start()
     if screen_locked():

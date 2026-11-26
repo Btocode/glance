@@ -1,0 +1,25 @@
+#!/bin/sh
+# Glance .deb: build /opt/glance/.venv from the shipped wheels (offline) and link the commands.
+set -e
+
+ROOT=/opt/glance
+VENV="$ROOT/.venv"
+
+case "${1:-configure}" in
+    configure | 1 | 2)
+        rm -rf "$VENV"
+        python3 -m venv --system-site-packages "$VENV"
+        "$VENV/bin/python" -m pip install --quiet --no-index --find-links "$ROOT/wheels" \
+            glance glance_core
+        site="$("$VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+        printf '%s\n' "the glance .deb|install the newer .deb from https://github.com/Btocode/glance/releases" \
+            >"$site/glance/_packaged"
+        for cmd in glance glanced glance-capture glance-edit; do
+            ln -sfn "$VENV/bin/$cmd" "/usr/bin/$cmd"
+        done
+        echo "Glance is installed. Each user who wants it runs, once, in their desktop session:"
+        echo "    glance setup"
+        echo "(already set up? restart it: systemctl --user restart glance)"
+        ;;
+esac
+exit 0

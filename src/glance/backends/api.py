@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import threading
+import time
 from collections.abc import Iterator
 from urllib.parse import urlsplit
 
@@ -23,6 +24,10 @@ ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_URL = "https://api.anthropic.com"
 OPENAI_URL = "https://api.openai.com/v1"
 MAX_TOKENS = 4096  # a whole message of `[ai] max_words` (600) words, rewritten, fits
+# Connections are kept open between calls (httpx's default drops an idle one after 5 s), and
+# one is opened when a field gets the focus (`prepare`): a check then skips DNS, TCP and TLS.
+KEEPALIVE_S = 120.0
+PREPARE_EVERY_S = 30.0  # at most one connection-opening request per this many seconds
 
 
 def _status_error(status: int) -> BackendError:
@@ -39,7 +44,7 @@ def _api_usage(u: object) -> Usage | None:
     """Tokens from an Anthropic (`input_tokens`) or OpenAI (`prompt_tokens`) usage object."""
     if not isinstance(u, dict):
         return None
-    pick = lambda *keys: next((u[k] for k in keys if k in u), None)  # noqa: E731
+    pick = lambda *keys: next((u[k] for k in keys if k in u), None)
     return make_usage(pick("input_tokens", "prompt_tokens"),
                       pick("output_tokens", "completion_tokens"))
 
@@ -70,7 +75,9 @@ class ApiBackend(BaseBackend):
     ) -> None:
         self._keys = keys
         self.configure(provider, model, base_url)
-        self._client = client or httpx.Client()
+        self._client = client or httpx.Client(
+            limits=httpx.Limits(keepalive_expiry=KEEPALIVE_S))
+        self._prepared_at: float | None = None
         self._lock = threading.Lock()
         self._resp: httpx.Response | None = None
         self._cancelled = False
@@ -109,6 +116,21 @@ class ApiBackend(BaseBackend):
     def see(self, png: bytes, system: str, user: str) -> Iterator[str]:
         yield from self._stream_content(system, image_content(self._provider, png, user),
                                         VISION_TIMEOUT_S)
+
+    def prepare(self, _ctx: object = None) -> None:
+        """A field got the focus: open the connection the next call will use, with a bare
+        HEAD request to the server's base URL. No key and nothing of the text is sent; any
+        answer will do. Skipped without a key, and when done in the last PREPARE_EVERY_S."""
+        now = time.monotonic()
+        if self._prepared_at is not None and now - self._prepared_at < PREPARE_EVERY_S:
+            return
+        if not self._keys.get(self._provider):
+            return
+        self._prepared_at = now
+        try:
+            self._client.head(self._base + "/", timeout=httpx.Timeout(3.0))
+        except httpx.HTTPError:
+            pass  # only a head start
 
     def cancel(self) -> None:
         with self._lock:

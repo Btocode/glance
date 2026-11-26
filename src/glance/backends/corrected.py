@@ -19,7 +19,13 @@ from __future__ import annotations
 import difflib
 import re
 
-from glance.grammar.corrections import minimal_edit, near_miss
+from glance.grammar.corrections import (
+    is_function_word,
+    minimal_edit,
+    negations,
+    related,
+    swap_ok,
+)
 from glance.grammar.issues import Issue
 from glance.privacy.entities import find_protected
 
@@ -32,6 +38,7 @@ MESSAGES = {
     "spelling": "Spelling",
     "missing_word": "Missing word",
     "grammar": "Grammar",
+    "rephrase": "Grammar (reworded)",
 }
 
 
@@ -40,7 +47,7 @@ def _kind(old: str, new: str) -> str:
         return "capitalization"
     if re.sub(r"[\W_]+", "", old).lower() == re.sub(r"[\W_]+", "", new).lower():
         return "punctuation"
-    a, b = re.findall(r"\w+", old), re.findall(r"\w+", new)
+    a, b = _words(old), _words(new)
     if len(b) > len(a):
         return "missing_word"
     if len(a) == len(b) == 1:
@@ -83,19 +90,106 @@ def _hunks(text: str, corrected: str) -> tuple[list[tuple[int, int, str]], float
     return out, (same / words if words else 1.0)
 
 
+def _words(s: str) -> list[str]:
+    return re.findall(r"\w+(?:['’]\w+)*", s)
+
+
 def _no_swap(old: str, new: str) -> bool:
-    """No word swapped for a different one ("plan" -> "strategy"), but for near misses
-    ("seem" -> "seems", "teh" -> "the") and short function words ("is" -> "are")."""
-    a = [w.lower() for w in re.findall(r"\w+(?:['’]\w+)*", old)]
-    b = [w.lower() for w in re.findall(r"\w+(?:['’]\w+)*", new)]
+    """No word swapped for a different one ("plan" -> "strategy"), but for related words
+    ("seem" -> "seems", "teh" -> "the", "their" -> "there") and function words ("is" ->
+    "are", "dont" -> "doesn't")."""
+    a = [w.lower() for w in _words(old)]
+    b = [w.lower() for w in _words(new)]
     sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
     for op, i1, i2, j1, j2 in sm.get_opcodes():
         if op != "replace" or "".join(a[i1:i2]) == "".join(b[j1:j2]):
             continue
         for w in a[i1:i2]:
-            if not any(near_miss(w, n) or (len(w) <= 4 and len(n) <= 4) for n in b[j1:j2]):
+            if not any(swap_ok(w, n) for n in b[j1:j2]):
                 return False
     return True
+
+
+_END_PUNCT = re.compile(r"[.!]+\Z")
+
+
+def _unended(body: str, x1: int, old: str, new: str) -> str:
+    """`new` without a full stop (or "!") it adds at the end of the text or of a line: the
+    writer's choice ("sounds good" stays without one), not a mistake. A question mark
+    for a question stays."""
+    if x1 < len(body) and body[x1] != "\n":
+        return new
+    m = _END_PUNCT.search(new)
+    if m is None or _END_PUNCT.search(old):
+        return new
+    return new[:m.start()]
+
+
+# ---------------------------------------------------------------- fluent mode
+
+MAX_DROPPED = 0.3  # fluent: a reworded sentence keeps at least 70% of its content words
+
+
+def _content(s: str) -> list[str]:
+    return [w.lower() for w in _words(s) if not is_function_word(w)]
+
+
+def fluent_ok(old: str, new: str) -> bool:
+    """A sentence reworded for grammar, not for meaning: it drops at most MAX_DROPPED of
+    its content words, adds none that are not an inflection, typo fix or homophone of one
+    it had ("seem" -> "seems", "simple" -> "simpler"), and keeps every negation."""
+    if "\n" in old or "\n" in new or negations(_words(old)) != negations(_words(new)):
+        return False
+    a, b = _content(old), _content(new)
+    if any(not any(related(w, n) for w in a) for n in b):
+        return False  # a new idea, or a synonym for the writer's word
+    dropped = sum(1 for w in a if not any(related(w, n) for n in b))
+    return dropped <= MAX_DROPPED * len(a)
+
+
+def _sentences(body: str) -> list[tuple[int, int]]:
+    out, start = [], 0
+    for i, ch in enumerate(body):
+        if ch == "\n" or (ch in ".!?…" and (i + 1 == len(body) or body[i + 1].isspace())):
+            out.append((start, i + 1))
+            start = i + 1
+    if start < len(body):
+        out.append((start, len(body)))
+    return out
+
+
+def _compose(body: str, x0: int, x1: int, hs: list[tuple[int, int, str]]) -> str:
+    parts, pos = [], x0
+    for h0, h1, rep in hs:
+        parts += [body[pos:h0], rep]
+        pos = h1
+    parts.append(body[pos:x1])
+    return "".join(parts)
+
+
+def _fluent(body: str, merged: list[tuple[int, int, list[tuple[int, int, str]]]]
+            ) -> tuple[list[tuple[int, int, str]], list[tuple[int, int, list]]]:
+    """Fluent mode: the changes of each sentence taken together. A sentence whose changes
+    are not all minimal edits but read as a grammatical rewording of it (`fluent_ok`)
+    becomes one change; the rest go on to the minimal check."""
+    taken: list[tuple[int, int, str]] = []
+    rest = list(merged)
+    for s0, s1 in _sentences(body):
+        group = [m for m in rest if m[0] < s1 and m[1] > s0]
+        if not group:
+            continue
+        if all(minimal_edit(body[x0:x1], _compose(body, x0, x1, hs))
+               and _no_swap(body[x0:x1], _compose(body, x0, x1, hs)) for x0, x1, hs in group):
+            continue
+        g0, g1 = min(m[0] for m in group), max(m[1] for m in group)
+        if g0 < s0 or g1 > s1:
+            continue  # it reaches into another sentence: judged piece by piece
+        new = _compose(body, g0, g1, [h for m in group for h in m[2]])
+        sentence = body[s0:g0] + new + body[g1:s1]
+        if fluent_ok(body[s0:s1], sentence):
+            taken.append((g0, g1, new))
+            rest = [m for m in rest if m not in group]
+    return taken, rest
 
 
 def _widen(text: str, start: int, end: int) -> tuple[int, int]:
@@ -141,9 +235,24 @@ def _pieces(body: str, merged: list[tuple[int, int, list[tuple[int, int, str]]]]
     return out
 
 
-def corrected_issues(text: str, corrected: str) -> list[Issue] | None:
+def _bag_kept(text: str, corrected: str) -> float:
+    """The share of the draft's words still in the answer, wherever they are."""
+    a = [w.lower() for w in _words(text)]
+    left = [w.lower() for w in _words(corrected)]
+    same = 0
+    for w in a:
+        if w in left:
+            left.remove(w)
+            same += 1
+    return same / len(a) if a else 1.0
+
+
+def corrected_issues(text: str, corrected: str, correction: str = "minimal"
+                     ) -> list[Issue] | None:
     """The corrections the model made to `text`, as issues of source "llm"; None when its
-    answer is a rewrite rather than a correction (then it corrects nothing)."""
+    answer is a rewrite rather than a correction (then it corrects nothing). `correction`
+    "fluent" also takes a sentence reworded for its grammar (`fluent_ok`), as one issue of
+    kind "rephrase"."""
     lead = len(text) - len(text.lstrip())
     trail = len(text.rstrip())
     body = text[lead:trail]
@@ -151,6 +260,8 @@ def corrected_issues(text: str, corrected: str) -> list[Issue] | None:
     if not body or corrected == body:
         return []
     hunks, kept = _hunks(body, corrected)
+    if correction == "fluent":  # a reworded sentence may move its words around
+        kept = max(kept, _bag_kept(body, corrected))
     if kept < MIN_SAME:
         return None  # a rewrite, not a correction
     # Widen each change to whole words; changes whose words touch are one issue.
@@ -162,17 +273,26 @@ def corrected_issues(text: str, corrected: str) -> list[Issue] | None:
         else:
             merged.append((x0, x1, [h]))
     protected = find_protected(text)
+    fluent: list[tuple[int, int, str]] = []
+    if correction == "fluent":
+        fluent, merged = _fluent(body, merged)
     out: list[Issue] = []
-    for x0, x1, new in _pieces(body, merged):
+    changes = [(x0, x1, new, True) for x0, x1, new in fluent] + \
+        [(x0, x1, new, False) for x0, x1, new in _pieces(body, merged)]
+    for x0, x1, new, reworded in sorted(changes):
         old = body[x0:x1]
-        if old == new or not minimal_edit(old, new) or not _no_swap(old, new):
+        new = _unended(body, x1, old, new)
+        if old == new:
+            continue
+        if not reworded and (not minimal_edit(old, new) or not _no_swap(old, new)):
             continue
         if _PLACEHOLDER.search(old) or _PLACEHOLDER.search(new):
             continue  # protected content is never retyped
         start, end = x0 + lead, x1 + lead
         if any(start < p.end and p.start < end for p in protected):
             continue
-        kind = _kind(old, new)
+        kind = "rephrase" if reworded and not (minimal_edit(old, new) and _no_swap(old, new)) \
+            else _kind(old, new)
         rule = f"llm:{kind}"
         out.append(Issue(f"llm:{rule}:{start}:{end}", "llm", rule, MESSAGES[kind],
                          start, end, (new,), False))

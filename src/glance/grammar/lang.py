@@ -16,12 +16,16 @@ ami amra tumi tomra apni tui amar tomar apnar amader ki keno kothay kobe kivabe 
 oita ekta ekhon ekhane okhane kintu karon tai jodi tahole ache achi acho achen nai nei hobe hoye
 hoyeche hocche korbo korbe korte korchi korcho korlam koro koren kora bolo bolen bolchi jani
 janina lagbe parbo parbe thik bhalo valo khub onek ektu aro shob kaj bhai apu dhonnobad accha
-hae na
+hae na abar amake tomake apnake kalke ajke ekhono jabo jacchi jabe ashbo ashchi dekhbo dekhchi
+dekhbe dekhlam dekhtesi diyechi pathabo pathiye pathano korben korechi korlo koreche korche
+hoise hoyni hoyeche lagche bujhte parchi parba shesh sokale tay bolche bollo deri pagol shobai
+kal aj ta re ke naki dio hoy
 """
 BANGLISH_MARKERS: frozenset[str] = frozenset(_MARKER_WORDS.split())
 
 # Words that are also plain English or too generic: they count only next to a strong marker.
-_WEAK = frozenset({"na", "ki", "tai", "kora", "ache"})
+_WEAK = frozenset({"na", "ki", "tai", "kora", "ache", "kal", "aj", "ta", "re", "ke", "naki",
+                   "dio", "hoy"})
 
 _BENGALI = re.compile("[ঀ-৿]")
 _WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)?", re.UNICODE)

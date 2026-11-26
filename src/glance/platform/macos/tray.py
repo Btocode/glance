@@ -57,11 +57,15 @@ class MacTray:
                  on_shortcuts: Callable[[], None] = lambda: None,
                  on_feature: Callable[[str, bool], None] = lambda name, on: None,
                  features: tuple[object, ...] = (),
-                 on_shot: Callable[[], None] | None = None) -> None:
+                 on_shot: Callable[[], None] | None = None,
+                 on_settings: Callable[[], None] = lambda: None) -> None:
         from glance.ui.tray_gtk import (
             FEATURES_LABEL,
+            SETTINGS_LABEL,
             SHORTCUTS_LABEL,
             SHOT_LABEL,
+            UPDATE_LABEL,
+            about_label,
             check_mode_labels,
         )
 
@@ -89,7 +93,7 @@ class MacTray:
         self._menu.setDelegate_(self._t)
         self._headline = self._add(self._menu, _STATES["active"][1], None)
         self._headline.setEnabled_(False)
-        self._update = self._add(self._menu, "Update available — Update now", on_update)
+        self._update = self._add(self._menu, UPDATE_LABEL, on_update)
         self._update.setHidden_(True)
         self._on_shot = on_shot
         self._shot = self._add(self._menu, SHOT_LABEL, lambda: self._on_shot and self._on_shot())
@@ -122,8 +126,10 @@ class MacTray:
         self._auto = self._add(self._menu, "Show suggestions automatically", self._auto_clicked)
         self._auto.setState_(1 if auto_suggest else 0)
         self._add(self._menu, SHORTCUTS_LABEL, on_shortcuts)
+        self._add(self._menu, SETTINGS_LABEL, on_settings)
         self._toggle = self._add(self._menu, "Pause", self._toggle_clicked)
         self._menu.addItem_(NSMenuItem.separatorItem())
+        self._add(self._menu, about_label(), None).setEnabled_(False)
         self._add(self._menu, "Quit Glance", on_quit)
         self._item.setMenu_(self._menu)
         self.set_backends(())
@@ -156,7 +162,10 @@ class MacTray:
         self._usage.addItem_(NSMenuItem.separatorItem())
         self._add(self._usage, "Details…", self._on_usage_details)
 
-    def set_update_available(self, available: bool) -> None:
+    def set_update_available(self, available: bool, label: str | None = None) -> None:
+        from glance.ui.tray_gtk import UPDATE_LABEL
+
+        self._update.setTitle_(label or UPDATE_LABEL)
         self._update.setHidden_(not available)
 
     def set_state(self, state: str) -> None:

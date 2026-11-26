@@ -31,6 +31,7 @@ def _never_run_the_real_installer_or_network(monkeypatch):
 
     monkeypatch.setattr(update, "installer_argv", refuse)
     monkeypatch.setattr(update, "_git", refuse)
+    monkeypatch.setattr(update, "_http_get", refuse)
 
 
 @pytest.fixture(autouse=True)

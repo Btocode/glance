@@ -1,0 +1,14 @@
+post_install() {
+    echo "==> Glance is installed. Each user who wants it runs, once, in their desktop session:"
+    echo "==>     glance setup"
+    echo "==> (systemd user unit, GNOME Shell extension on Wayland, harper-ls, glance doctor --fix)"
+}
+
+post_upgrade() {
+    echo "==> Glance updated: restart it with  systemctl --user restart glance"
+    echo "==> (on GNOME Wayland, run glance setup again and log out and in if the extension changed)"
+}
+
+pre_remove() {
+    echo "==> Before removing Glance, each user should run:  glance setup --undo"
+}

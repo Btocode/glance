@@ -1,0 +1,87 @@
+name: release
+
+# A Glance release: push a tag v<version> (the version in pyproject.toml, with a section in
+# CHANGELOG.md). The default test suite runs first; then Glance's wheel and source archive are
+# built and published as a GitHub Release with SHA256SUMS and that CHANGELOG section as notes.
+# The grammar engine is released separately (core-v* tags, core-wheels.yml).
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glance-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  build:
+    needs: tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches pyproject.toml and CHANGELOG.md
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
+          [ "$want" = "$have" ] || { echo "tag $want != pyproject.toml $have"; exit 1; }
+          scripts/changelog-section.sh "$want" > release-notes.md
+          cat release-notes.md
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build the wheel and the source archive
+        run: |
+          uv build --out-dir dist
+          ls -l dist
+
+      - name: The wheel installs and knows its version
+        shell: bash
+        run: |
+          uv venv /tmp/check
+          uv pip install --python /tmp/check/bin/python dist/*.whl
+          /tmp/check/bin/python -c 'import sys; from glance.version import version
+          print(version()); sys.exit(version() != sys.argv[1])' "${GITHUB_REF_NAME#v}"
+
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/*
+            release-notes.md
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+
+      - name: Create the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          flags=(--latest)
+          case "$tag" in *-*) flags=(--prerelease) ;; esac  # v0.5.0-rc1
+          gh release create "$tag" dist/* --verify-tag --title "Glance ${tag#v}" \
+            --notes-file release-notes.md "${flags[@]}"

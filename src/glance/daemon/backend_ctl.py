@@ -30,7 +30,7 @@ MAX_KEY_CHARS = 4096
 MAX_TEXT_CHARS = 20_000
 CLI_CTX = Ctx(profile="default", target_tone="neutral", strictness="normal", app_label="glance")
 MESSAGES = ("backend_list", "backend_use", "backend_test", "backend_key", "backend_api", "backend_model",
-            "usage", "rewrite", "profile_show", "profile_set", "profile_clear")
+            "backend_keys", "backend_key_delete", "usage", "rewrite", "profile_show", "profile_set", "profile_clear")
 
 Reply = Callable[[dict[str, Any]], None]
 
@@ -144,6 +144,27 @@ class BackendControl:
         def work() -> dict[str, Any]:
             self._keys.set(provider, key)  # libsecret only: never config, never a log line
             self._sup.healths(True)  # so the onboarding row turns green
+            return {"ok": True, "provider": provider}
+
+        self._bg(work, reply, refresh_status=True)
+
+    def _backend_keys(self, _p: dict[str, Any], reply: Reply) -> None:
+        """Which providers have a key stored: yes or no only, never the key."""
+        def work() -> dict[str, Any]:
+            return {"ok": True, "keys": {p: self._keys.get(p) is not None
+                                         for p in API_PROVIDERS}}
+
+        self._bg(work, reply)
+
+    def _backend_key_delete(self, p: dict[str, Any], reply: Reply) -> None:
+        provider = p.get("provider") or self._backend_cfg().api_provider
+        if provider not in API_PROVIDERS:
+            reply(_fail("unknown provider"))
+            return
+
+        def work() -> dict[str, Any]:
+            self._keys.delete(provider)
+            self._sup.healths(True)  # the api row turns signed out
             return {"ok": True, "provider": provider}
 
         self._bg(work, reply, refresh_status=True)

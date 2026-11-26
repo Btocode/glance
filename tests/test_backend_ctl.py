@@ -208,3 +208,19 @@ def test_rewrite_too_long_has_its_own_error(rig):
 
 def test_profile_set_non_string_is_refused_not_raised(rig):
     assert rig.send("profile_set", {"name": 5}) == {"ok": False, "error": "unknown profile"}
+
+
+def test_backend_keys_says_yes_or_no_and_never_the_key(rig):
+    rig.keys.set("anthropic", "sk-ant-secret")
+    reply = rig.send("backend_keys")
+    assert reply == {"ok": True, "keys": {"anthropic": True, "openai": False}}
+    assert "sk-ant-secret" not in repr(reply)
+
+
+def test_backend_key_delete(rig):
+    rig.keys.set("openai", "sk-x")
+    assert rig.send("backend_key_delete", {"provider": "openai"}) == {
+        "ok": True, "provider": "openai"}
+    assert rig.keys.get("openai") is None
+    assert rig.sup.healths_calls[-1] is True  # the api row turns signed out now
+    assert rig.send("backend_key_delete", {"provider": "nope"})["ok"] is False

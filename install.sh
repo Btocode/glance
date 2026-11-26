@@ -3,7 +3,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash -s -- --with-apt
+#   curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash -s -- --ref main
 #   ./install.sh --from-local        from a checkout
+#   glance setup                     (runs ./install.sh --setup-only from a package install)
 #
 # Safe to run again: it updates the source and repairs whatever is missing. Everything it
 # creates is recorded in ~/.local/share/glance/install-manifest.json, and uninstall.sh
@@ -18,7 +20,14 @@ Usage: install.sh [options]
 
   --from-local            install from the checkout this script sits in (the default when it
                           sits in one); otherwise the source is cloned to
-                          ~/.local/share/glance-src and updated with `git pull --ff-only`
+                          ~/.local/share/glance-src and updated in place
+  --ref REF               what to install: `latest` (the default: the newest release tag
+                          v*, or the main branch while there is no release yet), `main` (the
+                          bleeding edge), or a release tag such as v0.4.0. Also GLANCE_REF.
+  --setup-only            the per-user part only (systemd unit, GNOME extension, harper-ls,
+                          glance doctor --fix) for a Glance installed by a package; the
+                          commands are taken from --app-bin DIR (or GLANCE_APP_BIN).
+                          `glance setup` runs this.
   --with-apt              install missing system packages with `sudo apt-get install -y`
                           (without it the command is printed and nothing runs as root)
   --yes                   answer yes to the question about the `claude` Ctrl+G wrapper
@@ -31,8 +40,9 @@ Usage: install.sh [options]
   -h, --help              show this help
 
 Environment (for tests and unusual setups): GLANCE_HOME (use instead of $HOME), GLANCE_SRC,
-GLANCE_REPO_URL, GLANCE_TARBALL_URL, GLANCE_SYSTEM_PYTHON, GLANCE_NO_GIT, GLANCE_SKIP_CLONE,
-GLANCE_SKIP_VENV, GLANCE_SKIP_FETCH, GLANCE_SKIP_SYSTEMCTL, GLANCE_SKIP_GSETTINGS.
+GLANCE_REPO_URL, GLANCE_TARBALL_URL, GLANCE_REF, GLANCE_APP_BIN, GLANCE_SYSTEM_PYTHON,
+GLANCE_NO_GIT, GLANCE_SKIP_CLONE, GLANCE_SKIP_VENV, GLANCE_SKIP_FETCH, GLANCE_SKIP_SYSTEMCTL,
+GLANCE_SKIP_GSETTINGS.
 
 On GNOME Wayland it also installs Glance's GNOME Shell extension into
 ~/.local/share/gnome-shell/extensions and enables it; log out and in once afterwards.
@@ -47,16 +57,23 @@ have_git() { [ -z "${GLANCE_NO_GIT:-}" ] && have git; }
 
 step() {
     STEP=$((STEP + 1))
-    printf '\n==> [%d/8] %s\n' "$STEP" "$*"
+    printf '\n==> [%d/%d] %s\n' "$STEP" "${STEPS:-8}" "$*"
 }
 
 # ---------------------------------------------------------------------- options and paths
 
 parse_args() {
     FROM_LOCAL=0 WITH_APT=0 YES=0 NO_WRAPPER=0 NO_OVERRIDES=0 NO_START=0 WITH_RUST=0
+    SETUP_ONLY=0 REF="${GLANCE_REF:-latest}" APP_BIN="${GLANCE_APP_BIN:-}"
     while [ $# -gt 0 ]; do
         case "$1" in
             --from-local) FROM_LOCAL=1 ;;
+            --ref) [ $# -ge 2 ] || die "--ref needs a value (latest, main or a tag)"
+                REF="$2"; shift ;;
+            --ref=*) REF="${1#--ref=}" ;;
+            --setup-only) SETUP_ONLY=1 ;;
+            --app-bin) [ $# -ge 2 ] || die "--app-bin needs a directory"
+                APP_BIN="$2"; shift ;;
             --with-apt) WITH_APT=1 ;;
             --yes | -y) YES=1 ;;
             --no-wrapper) NO_WRAPPER=1 ;;
@@ -106,12 +123,23 @@ setup_paths() {
     if [ -n "$here" ] && is_checkout "$here"; then
         FROM_LOCAL=1
         SRC="$here"
+    elif [ "$SETUP_ONLY" = 1 ]; then
+        die "--setup-only runs from an installed Glance's own install.sh (glance setup)"
     elif [ "$FROM_LOCAL" = 1 ]; then
         die "--from-local needs a Glance checkout: run it as ./install.sh inside one"
     else
         SRC="${GLANCE_SRC:-$DATA_ROOT/glance-src}"  # not under $DATA_DIR: uninstall deletes that
     fi
     VENV="$SRC/.venv"
+    if [ "$SETUP_ONLY" = 1 ]; then
+        # A package's install: its commands live in APP_BIN (/usr/bin, /opt/glance/.venv/bin);
+        # the unit runs APP_BIN/glanced and uninstall.sh finds APP_BIN/glance through VENV.
+        [ -n "$APP_BIN" ] || die "--setup-only needs --app-bin DIR (where glance and glanced are)"
+        [ -x "$APP_BIN/glance" ] && [ -x "$APP_BIN/glanced" ] \
+            || die "$APP_BIN has no glance and glanced commands"
+        APP_BIN="$(cd "$APP_BIN" && pwd -P)"
+        VENV="$(dirname "$APP_BIN")"
+    fi
 }
 
 # ---------------------------------------------------------------------- manifest
@@ -344,7 +372,7 @@ sys.exit(0 if (3, 10) <= v < (3, 15) else 1)' 2>/dev/null)" || {
     fi
 
     local need_venv=1 tray="gir1.2-ayatanaappindicator3-0.1" missing
-    if have uv || [ -n "${GLANCE_SKIP_VENV:-}" ]; then need_venv=0; fi
+    if have uv || [ -n "${GLANCE_SKIP_VENV:-}" ] || [ "$SETUP_ONLY" = 1 ]; then need_venv=0; fi
     missing="$(missing_packages "$need_venv")"
     if [ "$WITH_APT" = 1 ]; then
         local -a pkgs
@@ -428,7 +456,14 @@ install_links() {
 # ---------------------------------------------------------------------- steps 2-3: source, venv
 
 fetch_tarball() {
-    local url="${GLANCE_TARBALL_URL:-https://github.com/Btocode/glance/archive/refs/heads/main.tar.gz}"
+    local url="${GLANCE_TARBALL_URL:-}"
+    if [ -z "$url" ]; then
+        if [ "$REF_KIND" = tag ]; then
+            url="https://github.com/Btocode/glance/archive/refs/tags/$REF_NAME.tar.gz"
+        else
+            url="https://github.com/Btocode/glance/archive/refs/heads/main.tar.gz"
+        fi
+    fi
     note "git is not installed: downloading $url"
     have tar || die "neither git nor tar is installed (sudo apt install git)."
     # Unpacked next to $SRC (same filesystem) and renamed into place only once complete, so a
@@ -454,6 +489,81 @@ fetch_tarball() {
     fi
 }
 
+# The newest release tag (v1.2.3, no pre-releases) from the GitHub API, for installs
+# without git; nothing when there is none or it cannot be read.
+latest_release_api() {
+    curl -fsSL --connect-timeout 15 --max-time 30 \
+        "https://api.github.com/repos/Btocode/glance/releases?per_page=30" </dev/null 2>/dev/null \
+        | "$SYS_PY" -c '
+import json, re, sys
+try:
+    items = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+tags = [r.get("tag_name", "") for r in items if isinstance(r, dict)
+        and not r.get("draft") and not r.get("prerelease")]
+tags = [t for t in tags if re.fullmatch(r"v[0-9]+(\.[0-9]+)*", t)]
+if tags:
+    print(max(tags, key=lambda t: tuple(int(x) for x in t[1:].split("."))))
+' 2>/dev/null || true
+}
+
+# Sets REF_NAME and REF_KIND (tag or branch) from REF: latest, main or a tag.
+resolve_ref() {
+    local url="$1" tag=""
+    case "$REF" in
+        latest)
+            if have_git; then
+                tag="$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$url" 'refs/tags/v*' \
+                    </dev/null 2>/dev/null | sed -n 's|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p' \
+                    | sort -V | tail -n 1)" || tag=""
+            elif [ -z "${GLANCE_TARBALL_URL:-}" ]; then
+                tag="$(latest_release_api)"
+            fi
+            if [ -n "$tag" ]; then
+                REF_NAME="$tag" REF_KIND=tag
+                note "latest release: $tag"
+            else
+                REF_NAME=main REF_KIND=branch
+                note "no release published yet: installing the main branch"
+            fi
+            ;;
+        main) REF_NAME=main REF_KIND=branch ;;
+        v[0-9]*) REF_NAME="$REF" REF_KIND=tag ;;
+        *) die "--ref takes latest, main or a release tag such as v0.4.0 (not '$REF')" ;;
+    esac
+}
+
+# An existing clone to REF: a tag is checked out (detached); main is fast-forwarded, or
+# switched back to from a tag.
+git_update() {
+    local -a g=(git -C "$SRC")
+    export GIT_TERMINAL_PROMPT=0
+    if [ "$REF_KIND" = tag ]; then
+        local -a depth=()
+        if [ "$("${g[@]}" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+            depth=(--depth 1)
+        fi
+        note "updating $SRC to $REF_NAME"
+        "${g[@]}" fetch --quiet "${depth[@]}" origin "+refs/tags/$REF_NAME:refs/tags/$REF_NAME" \
+            </dev/null || die "could not fetch $REF_NAME into $SRC (is it a release tag?)"
+        "${g[@]}" -c advice.detachedHead=false checkout --quiet "refs/tags/$REF_NAME" </dev/null \
+            || die "could not check out $REF_NAME in $SRC. Resolve it there (git status), then" \
+                "run again."
+        return
+    fi
+    note "updating $SRC (main)"
+    "${g[@]}" fetch --quiet origin "+refs/heads/main:refs/remotes/origin/main" </dev/null \
+        || die "could not fetch main into $SRC"
+    if [ "$("${g[@]}" symbolic-ref -q --short HEAD 2>/dev/null)" = main ]; then
+        "${g[@]}" merge --ff-only --quiet refs/remotes/origin/main </dev/null \
+            || die "could not fast-forward $SRC. Resolve it there (git status), then run again."
+    else
+        "${g[@]}" checkout --quiet -B main refs/remotes/origin/main </dev/null \
+            || die "could not switch $SRC to main. Resolve it there (git status), then run again."
+    fi
+}
+
 get_source() {
     step "Getting Glance"
     if [ "$FROM_LOCAL" = 1 ]; then
@@ -471,15 +581,15 @@ get_source() {
     elif ! is_checkout "$SRC"; then
         die "$SRC exists and is not a Glance checkout. Move it away, or set GLANCE_SRC."
     fi
+    resolve_ref "$url"
     if [ -d "$SRC/.git" ]; then
         have_git || die "$SRC is a git clone but git is not installed (sudo apt install git)."
-        note "updating $SRC"
-        GIT_TERMINAL_PROMPT=0 git -C "$SRC" pull --ff-only --quiet </dev/null \
-            || die "could not fast-forward $SRC. Resolve it there (git status), then run again."
+        git_update
     elif [ "$fresh" = 1 ] && have_git; then
-        note "cloning $url into $SRC"
+        note "cloning $url ($REF_NAME) into $SRC"
         ensure_dir "$(dirname "$SRC")"
-        GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 "$url" "$SRC" </dev/null || die "could not clone $url"
+        GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --quiet --depth 1 \
+            --branch "$REF_NAME" "$url" "$SRC" </dev/null || die "could not clone $url ($REF_NAME)"
     else
         fetch_tarball
     fi
@@ -807,7 +917,11 @@ if backend and backend.status != "ok":
     say "Glance is installed."
     say "    glance doctor    check the setup again at any time"
     say "    glance status    what Glance is doing right now"
-    say "    uninstall        $SRC/uninstall.sh"
+    if [ "$SETUP_ONLY" = 1 ]; then
+        say "    undo             glance setup --undo (then remove the package)"
+    else
+        say "    uninstall        $SRC/uninstall.sh"
+    fi
     if [ -n "${SUPERSEDED:-}" ]; then
         say ""
         say "Glance now runs from $SRC. The earlier copy in $SUPERSEDED is no longer used;"
@@ -824,6 +938,10 @@ main() {
     export PYTHONUNBUFFERED=1
     parse_args "$@"
     setup_paths
+    if [ "$SETUP_ONLY" = 1 ]; then
+        setup_only
+        return
+    fi
     check_prerequisites            # 1
     load_previous
     refuse_foreign_binaries
@@ -838,6 +956,21 @@ main() {
     install_extension              # 6 (GNOME on Wayland)
     run_doctor                     # 7
     print_report                   # 8
+}
+
+# `glance setup`: Glance itself came from a package (AUR, .deb); only what belongs to this
+# user is done here, recorded in the same manifest, and undone by uninstall.sh.
+setup_only() {
+    STEPS=6
+    check_prerequisites            # 1
+    load_previous
+    ensure_dir "$DATA_DIR"
+    write_manifest
+    fetch_harper                   # 2
+    install_unit                   # 3
+    install_extension              # 3 (GNOME on Wayland)
+    run_doctor                     # 4
+    print_report                   # 5
 }
 
 # >>> macOS: everything above is Linux-only (and needs bash 4). On a Mac this hands off to

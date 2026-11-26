@@ -9,8 +9,13 @@
     glance backend list|use NAME|test [NAME]|set-key [--provider P]|model NAME [MODEL|--default]
     glance rewrite --tone TONE      stdin -> stdout, through the chosen AI
     glance profile [show|set NAME|clear]   the focused field's audience
-    glance update [--check]     run the published installer; --check only compares versions
+    glance update [--check] [--main]   install the latest release (--main: the main branch);
+                                --check only compares versions
+    glance setup [--undo]       per-user setup after a package install (AUR, .deb, Homebrew)
+    glance report [--stdout]    a diagnostics file to attach to an issue (no text, no secrets)
+    glance --version
     glance features [NAME [on|off]]   list the features, or switch one (applies live)
+    glance settings [SECTION]   open the Settings window
 """
 
 from __future__ import annotations
@@ -32,6 +37,8 @@ SLOW_REQUEST_S = 60.0  # a real backend call: 8 s analyze / 20 s rewrite, plus a
 _DURATION = re.compile(r"([0-9]+)([smh]?)")
 BACKENDS = ("claude", "codex", "gemini", "opencode", "api")
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "": 60}
+# settings_model.SECTIONS' keys (a test keeps them equal; not imported: `glance` starts fast)
+SETTINGS_SECTIONS = ("general", "features", "ai", "shortcuts", "apps", "privacy", "about")
 
 
 def parse_duration(s: str) -> int:
@@ -350,6 +357,10 @@ def _doctor(args: argparse.Namespace) -> int:
     # <<< macOS
     if args.undo:
         undo_all(env, CHECKS)
+    if not args.json:
+        from glance.version import version
+
+        print(f"Glance {version()}", flush=True)
     # Each line as soon as its check is done, and a note before the slow ones: the AI CLI
     # checks can take seconds on a cold start, and a silent terminal looks like a hang.
     show = None if args.json else (lambda r: print(render([r]), flush=True))
@@ -365,15 +376,21 @@ def _doctor(args: argparse.Namespace) -> int:
     return exit_code(results)
 
 
-def _update(check_only: bool) -> int:
+def _update(check_only: bool, main: bool) -> int:
     from glance import update
 
-    if not check_only:
-        return update.run_installer()
-    _progress("Checking for a newer Glance...")
-    line, code = update.report(*update.check())
-    print(line)
-    return code
+    if check_only:
+        _progress("Checking for a newer Glance...")
+        line, code = update.report(update.check())
+        print(line)
+        return code
+    packaged = update.packaged_by()
+    if packaged:
+        manager, _, command = packaged.partition("|")
+        print(f"Glance was installed with {manager}; update it there"
+              + (f": {command}" if command else "."), file=sys.stderr)
+        return update.EXIT_PACKAGED
+    return update.run_installer(ref="main" if main else "latest")
 
 
 def _features(name: str | None, state: str | None) -> int:
@@ -405,6 +422,28 @@ def _features(name: str | None, state: str | None) -> int:
     return 0
 
 
+def _settings(section: str | None) -> int:
+    """Open the Settings window: in the running glanced (one window, its live config), else
+    in this process on its own."""
+    reply = _request("settings_open", {"section": section} if section else {})
+    if reply is not None and reply.get("ok"):
+        return 0
+    if reply is not None and reply.get("error") != "unknown request":
+        return _refused(reply)
+    # >>> macOS: the AppKit window; src/glance/platform/macos
+    if sys.platform == "darwin":
+        from glance.platform.macos.settings import main as mac_settings
+
+        return mac_settings(section)
+    # <<< macOS
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        print("glance: no display to open the Settings window on", file=sys.stderr)
+        return 1
+    from glance.ui.settings_gtk import main as gtk_settings
+
+    return gtk_settings(section)
+
+
 def main(argv: list[str] | None = None) -> int:
     from glance.log import quiet
 
@@ -413,7 +452,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main(argv: list[str] | None) -> int:
+    from glance.version import version
+
     ap = argparse.ArgumentParser(prog="glance")
+    ap.add_argument("--version", action="version", version=f"Glance {version()}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("wrapper", help="claude zsh wrapper for Ctrl+G")
     w.add_argument("action", choices=["install", "uninstall", "status"])
@@ -454,15 +496,27 @@ def _main(argv: list[str] | None) -> int:
     pr = sub.add_parser("profile", help="the focused field's audience profile")
     pr.add_argument("action", nargs="?", default="show", choices=["show", "set", "clear"])
     pr.add_argument("name", nargs="?")
-    up = sub.add_parser("update", help="update Glance by re-running the installer")
+    up = sub.add_parser("update", help="install the latest release (re-runs the installer)")
     up.add_argument("--check", action="store_true",
                     help="only say whether an update exists (exit 10 if so)")
+    up.add_argument("--main", action="store_true",
+                    help="install the main branch (the bleeding edge) instead of a release")
+    se = sub.add_parser("setup", help="per-user setup after a package install")
+    se.add_argument("--undo", action="store_true", help="remove what setup did for this user")
+    se.add_argument("--no-start", action="store_true", help="enable at login, do not start now")
+    rp = sub.add_parser("report", help="write a diagnostics file for a bug report")
+    rp.add_argument("--stdout", action="store_true", help="print it instead of writing a file")
+    rp.add_argument("--output", "-o", metavar="FILE", help="where to write it")
     from glance.feature_switches import NAMES as FEATURE_NAMES
 
     fe = sub.add_parser("features", help="list the features, or turn one on or off")
     fe.add_argument("name", nargs="?", choices=FEATURE_NAMES)
     fe.add_argument("state", nargs="?", choices=("on", "off"))
+    se = sub.add_parser("settings", help="open the Settings window")
+    se.add_argument("section", nargs="?", choices=SETTINGS_SECTIONS)
     args = ap.parse_args(argv)
+    if args.cmd == "settings":
+        return _settings(args.section)
     if args.cmd == "features":
         return _features(args.name, args.state)
     if args.cmd in ("status", "pause", "resume"):
@@ -492,7 +546,15 @@ def _main(argv: list[str] | None) -> int:
             ap.error("usage: glance profile [show | set NAME | clear]")
         return _profile(args.action, args.name)
     if args.cmd == "update":
-        return _update(args.check)
+        return _update(args.check, args.main)
+    if args.cmd == "setup":
+        from glance import setup
+
+        return setup.main(undo=args.undo, no_start=args.no_start)
+    if args.cmd == "report":
+        from glance import report
+
+        return report.main(to_stdout=args.stdout, output=args.output)
     if args.cmd == "shot":
         return _shot()
     if args.cmd == "doctor":

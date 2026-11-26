@@ -11,7 +11,16 @@ from glance.ui.onboarding_model import ORDER, TITLES, BackendRow, headline
 
 INSTALL_HINT = "sudo apt install gir1.2-ayatanaappindicator3-0.1"
 SHORTCUTS_LABEL = "Keyboard shortcuts…"
+SETTINGS_LABEL = "Settings…"
 SHOT_LABEL = "Take a Glance Shot"
+UPDATE_LABEL = "Update available \u2014 Update now"
+
+
+def about_label() -> str:
+    """The tray's About line: which Glance this is."""
+    from glance.version import version
+
+    return f"Glance {version()}"
 # The brand mark as a flat white tray icon (packaging/icons/symbolic in the checkout).
 _BRAND_ICONS = Path(__file__).resolve().parents[3] / "packaging" / "icons" / "symbolic"
 # state -> (icon name, line shown at the top of the menu)
@@ -84,7 +93,8 @@ class GtkTray:
     Menu: status line, "AI backend ▸", "Features ▸" ("Check: on shortcut / while typing", two
     radio items for `[general] check`, then one check item per switch of
     `glance.feature_switches`), "Show suggestions automatically" (a check item: on is
-    `[ui] suggestions = "auto"`), "Keyboard shortcuts…" (a window listing them), Pause/Resume,
+    `[ui] suggestions = "auto"`), "Keyboard shortcuts…" (a window listing them), "Settings…"
+    (the Settings window), Pause/Resume,
     Quit. `set_backends` takes rows built by the
     caller (never a blocking health check here)."""
 
@@ -102,9 +112,11 @@ class GtkTray:
                  on_shortcuts: Callable[[], None] = lambda: None,
                  on_feature: Callable[[str, bool], None] = lambda name, on: None,
                  features: tuple[Any, ...] = (),
-                 on_shot: Callable[[], None] | None = None) -> None:
+                 on_shot: Callable[[], None] | None = None,
+                 on_settings: Callable[[], None] = lambda: None) -> None:
         """`features`: the "Features ▸" check items (`feature_switches.menu_rows`).
-        `on_shot`: "Take a Glance Shot" (absent when None: Glance Shot is off)."""
+        `on_shot`: "Take a Glance Shot" (absent when None: Glance Shot is off).
+        `on_settings`: "Settings…" (the Settings window)."""
         self._indicator = None
         self._on_feature = on_feature
         self._feature_items: dict[str, Any] = {}
@@ -166,7 +178,7 @@ class GtkTray:
         self._auto = Gtk.CheckMenuItem(label="Show suggestions automatically")
         self._auto.set_active(auto_suggest)
         self._auto.connect("toggled", self._auto_toggled)
-        self._update = Gtk.MenuItem(label="Update available \u2014 Update now")
+        self._update = Gtk.MenuItem(label=UPDATE_LABEL)
         self._update.connect("activate", lambda _i: on_update())
         self._usage_lines: list[Any] = []
         self._usage_menu = Gtk.Menu()
@@ -178,13 +190,16 @@ class GtkTray:
         self.set_usage(())
         shortcuts = Gtk.MenuItem(label=SHORTCUTS_LABEL)
         shortcuts.connect("activate", lambda _i: on_shortcuts())
+        settings = Gtk.MenuItem(label=SETTINGS_LABEL)
+        settings.connect("activate", lambda _i: on_settings())
         self._on_shot = on_shot
         self._shot = Gtk.MenuItem(label=SHOT_LABEL)
         self._shot.connect("activate", lambda _i: self._on_shot and self._on_shot())
         for item in (self._headline, self._update, self._shot, Gtk.SeparatorMenuItem(),
                      self._backends.item,
                      self._usage_item, Gtk.SeparatorMenuItem(), features_item,
-                     self._auto, shortcuts, Gtk.SeparatorMenuItem(), self._toggle, quit_item):
+                     self._auto, shortcuts, settings, Gtk.SeparatorMenuItem(), self._toggle,
+                     Gtk.MenuItem(label=about_label(), sensitive=False), quit_item):
             menu.append(item)
         menu.show_all()
         self._update.hide()
@@ -217,9 +232,10 @@ class GtkTray:
         if self._indicator is not None:
             self._shot.set_visible(on_shot is not None)
 
-    def set_update_available(self, available: bool) -> None:
-        """Show or hide "Update available — Update now" (main thread)."""
+    def set_update_available(self, available: bool, label: str | None = None) -> None:
+        """Show or hide "Update to Glance 0.5.0 — Update now" (main thread)."""
         if self._indicator is not None:
+            self._update.set_label(label or UPDATE_LABEL)
             self._update.set_visible(available)
 
     def set_state(self, state: str) -> None:

@@ -89,6 +89,9 @@ LIGHT: dict[str, str] = {
     "dot_warn": "#c98a12",
     "dot_info": "#0B7A52",
     "ghost": "#16875c",         # the completion after the caret, in italics
+    "page": "#f6f8fa",          # the Settings window behind its groups ...
+    "group": "#ffffff",         # ... and the groups themselves
+    "switch_off": "#c9d1d9",
 }
 
 DARK: dict[str, str] = {
@@ -124,6 +127,9 @@ DARK: dict[str, str] = {
     "dot_warn": "#e0a43a",
     "dot_info": "#3ECF8E",
     "ghost": "#3ECF8E",
+    "page": "#151b23",
+    "group": "#1b222c",
+    "switch_off": "#3a4554",
 }
 
 # The changed-word tint as one opaque colour on the box it sits in (the card).
@@ -138,6 +144,8 @@ TEXT_PAIRS = (
     ("text", "card"), ("muted", "card"), ("accent", "card"),
     ("text", "highlight"), ("text", "hover"), ("muted", "hover"),
     ("keycap_text", "keycap_bg"), ("warn_text", "warn_bg"),
+    ("text", "page"), ("muted", "page"), ("text", "group"), ("muted", "group"),
+    ("accent", "group"), ("warn_text", "group"),
 )
 
 
@@ -318,6 +326,75 @@ def css(t: dict[str, str]) -> str:
 .glance-window entry, .glance-window combobox button {{ border-radius: 8px; }}
 .glance-window .glance-plus {{ color: {t['muted']}; font-size: 12px; }}
 .glance-window .glance-what {{ color: {t['body']}; font-size: 13px; }}
+
+/* the Settings window: a section list on the left, groups of rows on the right */
+.glance-settings {{ background-color: {t['page']}; }}
+.glance-settings .glance-nav {{ border-right: 1px solid {t['hairline']}; padding: 16px 10px; }}
+.glance-nav-item {{
+    background-color: transparent; border: none; border-radius: 7px; padding: 7px 12px; }}
+.glance-nav-item label {{ color: {t['body']}; font-size: 13.5px; }}
+.glance-nav-item:hover {{ background-color: {t['hover']}; }}
+.glance-nav-item.glance-on {{ background-color: {t['highlight']}; }}
+.glance-nav-item.glance-on label {{ color: {t['text']}; font-weight: 600; }}
+.glance-settings .glance-headline {{ color: {t['text']}; font-size: 20px; font-weight: 600; }}
+.glance-group {{
+    background-color: {t['group']}; border: 1px solid {t['card_border']};
+    border-radius: 10px; }}
+.glance-set-row {{ padding: 12px 16px; }}
+.glance-set-row.glance-sep {{ border-top: 1px solid {t['hairline']}; }}
+.glance-root label.glance-set-title {{ color: {t['text']}; font-size: 13.5px; }}
+.glance-root label.glance-set-help {{ color: {t['muted']}; font-size: 12px; }}
+.glance-root label.glance-set-error {{ color: {t['warn_text']}; font-size: 12px;
+                                       font-weight: 600; }}
+.glance-root label.glance-set-ok {{ color: {t['accent']}; font-size: 12px; }}
+.glance-root label.glance-tag {{
+    color: {t['muted']}; background-color: {t['page']}; border: 1px solid {t['card_border']};
+    border-radius: 6px; padding: 1px 7px; font-size: 12px; }}
+.glance-root label.glance-tag.glance-on {{
+    color: {t['accent']}; border-color: {t['accent']}; }}
+.glance-settings switch {{
+    background-color: {t['switch_off']}; background-image: none; border: none;
+    border-radius: 12px; min-height: 22px; min-width: 40px; box-shadow: none;
+    color: transparent; font-size: 0; }}
+.glance-settings switch:checked {{ background-color: {t['accent_fill']}; }}
+.glance-settings switch:disabled {{ opacity: 0.45; }}
+.glance-settings switch slider {{
+    background-color: #ffffff; background-image: none; border: none; border-radius: 11px;
+    min-width: 18px; min-height: 18px; margin: 2px; box-shadow: 0 1px 2px {t['shadow']}; }}
+.glance-seg button {{
+    background-color: {t['group']}; border: 1px solid {t['card_border']}; border-radius: 0;
+    padding: 5px 12px; margin-left: -1px; }}
+.glance-seg button:first-child {{ border-radius: 7px 0 0 7px; margin-left: 0; }}
+.glance-seg button:last-child {{ border-radius: 0 7px 7px 0; }}
+.glance-seg button:only-child {{ border-radius: 7px; }}
+.glance-seg button label {{ color: {t['body']}; font-size: 12.5px; }}
+.glance-seg button:hover {{ background-color: {t['hover']}; }}
+.glance-seg button.glance-on {{ background-color: {t['accent_fill']};
+                                border-color: {t['accent_fill']}; }}
+.glance-seg button.glance-on label {{ color: {t['on_accent']}; font-weight: 600; }}
+.glance-settings entry {{
+    background-color: {t['page']}; border: 1px solid {t['card_border']}; min-height: 0;
+    padding: 5px 9px; }}
+.glance-settings button:disabled {{ opacity: 0.45; }}
+.glance-settings .glance-secondary {{ padding: 5px 11px; }}
+.glance-settings popover {{
+    background-color: transparent; border: none; box-shadow: none; padding: 0; }}
+.glance-settings .glance-item.glance-on label {{ color: {t['accent']}; font-weight: 600; }}
+.glance-settings entry:focus {{ border-color: {t['accent']}; }}
+.glance-settings entry.glance-bad {{ border-color: {t['dot_warn']}; }}
+.glance-settings combobox button {{
+    background-color: {t['page']}; background-image: none; border: 1px solid
+    {t['card_border']}; border-radius: 7px; padding: 3px 8px; box-shadow: none; }}
+.glance-settings combobox button label {{ color: {t['text']}; font-size: 12.5px; }}
+.glance-settings button.glance-capture {{
+    background-color: {t['page']}; border: 1px solid {t['card_border']}; border-radius: 7px;
+    padding: 4px 8px; }}
+.glance-settings button.glance-capture:hover {{ border-color: {t['accent']}; }}
+.glance-settings button.glance-capture.glance-on {{
+    border-color: {t['accent_fill']}; background-color: {t['highlight']}; }}
+.glance-settings button.glance-capture.glance-on label {{ color: {t['accent']}; font-size: 12.5px; }}
+.glance-settings .glance-banner {{ margin-bottom: 2px; }}
+.glance-root label.glance-mono {{ font-family: {MONO}; font-size: 12px; color: {t['body']}; }}
 """
 
 

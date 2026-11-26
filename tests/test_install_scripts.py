@@ -98,6 +98,7 @@ class Sandbox:
             "GLANCE_SKIP_GSETTINGS": "1",
             "GLANCE_SKIP_FETCH": "1",
             "GLANCE_SKIP_VENV": "1",
+            "GLANCE_NO_UPDATE_CHECK": "1",  # doctor's Updates line never asks github.com
             "skip_global_compinit": "1",  # Ubuntu's /etc/zsh/zshrc would write ~/.zcompdump
             "LANG": "C.UTF-8",
             "SHELL": "/usr/bin/zsh",  # with the claude shim: the wrapper question is asked
@@ -855,3 +856,94 @@ def test_installer_says_what_it_waits_for():
     assert venv.index("installing Glance's Python packages") < venv.index("uv pip install")
     assert "downloading harper-ls" in (REPO / "scripts/fetch-harper.sh").read_text()
     assert "downloading glance_core" in (REPO / "scripts/fetch-core.sh").read_text()
+
+
+# ------------------------------------------------------------------ releases: --ref
+
+
+def test_default_installs_the_newest_release_tag_and_main_on_request(sb):
+    origin = sb.origin()
+    sb.git(origin, "tag", "v0.4.0")
+    sb.git(origin, "tag", "core-v9.0.0")  # the grammar engine's tags never count
+    released = sb.git(origin, "rev-parse", "HEAD")
+    (origin / "NEWS").write_text("after the release\n")
+    sb.commit(origin, "unreleased work")
+    head = sb.git(origin, "rev-parse", "HEAD")
+    src = sb.home / ".local/share/glance-src"
+
+    p = pipe_install(sb, origin, "--no-start")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "latest release: v0.4.0" in p.stdout
+    assert sb.git(src, "rev-parse", "HEAD") == released and not (src / "NEWS").exists()
+
+    p = pipe_install(sb, origin, "--no-start", "--ref", "main")  # the bleeding edge
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert sb.git(src, "rev-parse", "HEAD") == head
+    assert sb.git(src, "symbolic-ref", "--short", "HEAD") == "main"
+
+    (origin / "NEWS").write_text("0.5.0\n")
+    sb.commit(origin, "release 0.5.0")
+    sb.git(origin, "tag", "v0.5.0")
+    sb.git(origin, "tag", "v0.10.0-rc1")  # a pre-release is never "latest"
+    p = pipe_install(sb, origin, "--no-start")  # back to releases: the newest one
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "latest release: v0.5.0" in p.stdout
+    assert (src / "NEWS").read_text() == "0.5.0\n"
+
+    p = pipe_install(sb, origin, "--no-start", "--ref=v0.4.0")  # an exact tag
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert sb.git(src, "rev-parse", "HEAD") == released
+    sb.ok("uninstall.sh", src=src)
+    assert tree(sb.home) == {}
+
+
+def test_without_any_release_main_is_installed(sb):
+    p = pipe_install(sb, sb.origin(), "--no-start")
+    assert p.returncode == 0 and "no release published yet" in p.stdout
+
+
+def test_ref_from_the_environment_and_a_bad_ref(sb):
+    origin = sb.origin()
+    p = sb.bash(["-s", "--", "--no-start"], stdin=(REPO / "install.sh").read_text(),
+                env={**piped_env(sb, origin), "GLANCE_REF": "nonsense"})
+    assert p.returncode != 0 and "--ref takes latest, main or a release tag" in p.stderr
+    p = pipe_install(sb, origin, "--no-start", "--ref", "v9.9.9")
+    assert p.returncode != 0 and "could not clone" in p.stderr
+
+
+# ------------------------------------------------------------------ packages: --setup-only
+
+
+def test_setup_only_does_the_per_user_part_for_a_package_install(sb):
+    """A package put Glance's commands in /usr/bin-like APP_BIN and its support files in a
+    read-only tree: setup writes the unit (running APP_BIN/glanced) and the manifest, links
+    nothing and builds nothing; uninstall.sh from the tree takes back exactly that."""
+    sb.seed()
+    before = tree(sb.home)
+    system = sb.tmp / "usr"
+    make_stub_venv(system)
+    share = sb.tmp / "usr/share/glance"
+    shutil.copytree(sb.checkout, share, ignore=shutil.ignore_patterns(".venv"))
+    frozen = tree(sb.tmp / "usr")
+    p = sb.run("install.sh", "--setup-only", "--app-bin", str(system / "bin"), "--no-start",
+               src=share)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert f"ExecStart={system}/bin/glanced\n" in sb.read(UNIT)
+    assert not (sb.home / ".local/bin/glance").exists()
+    m = json.loads(sb.read(MANIFEST))
+    assert m["src_dir"] == str(share) and m["cloned"] is False and m["venv_created"] is False
+    assert m["venv"] == str(system) and m["symlinks"] == []
+    assert "glance setup --undo" in p.stdout and "[1/6]" in p.stdout
+    assert "venv-python -m pip" not in sb.log.read_text()  # nothing is installed
+    assert sb.calls("glance doctor --fix")
+    sb.ok("uninstall.sh", src=share)
+    assert tree(sb.home) == before
+    assert tree(sb.tmp / "usr") == frozen  # the package's files are the package's
+
+
+def test_setup_only_needs_the_package_commands(sb):
+    p = sb.run("install.sh", "--setup-only", "--app-bin", str(sb.tmp / "nowhere"))
+    assert p.returncode != 0 and "has no glance and glanced" in p.stderr
+    p = sb.run("install.sh", "--setup-only")
+    assert p.returncode != 0 and "--app-bin" in p.stderr
+    assert tree(sb.home) == {}

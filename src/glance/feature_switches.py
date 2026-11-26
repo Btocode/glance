@@ -73,6 +73,9 @@ FEATURES: tuple[Feature, ...] = (
             note="capture a screen region and act on it; tray: Take a Glance Shot"),
     Feature("autocomplete", "Autocomplete while typing", "backend.live_autocomplete", None,
             auto=_autocomplete_auto, note="unset: only with the api backend"),
+    Feature("fluent", "Fluent corrections", "general.correction", "minimal",
+            on="fluent", off="minimal",
+            note="off: mistakes only; on: may also reword a sentence to make it grammatical"),
 )
 NAMES = tuple(f.name for f in FEATURES)
 

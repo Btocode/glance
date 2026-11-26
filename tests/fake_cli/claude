@@ -21,6 +21,17 @@ if argv[:1] == ["auth"]:
         print("garbage")
     sys.exit(0)
 
+if os.environ.get("FAKE_NO_EFFORT") and "--effort" in argv:  # a CLI from before the flag
+    sys.stderr.write("error: unknown option '--effort'\n")
+    sys.exit(1)
+
+if os.environ.get("FAKE_FIRST_BYTE_S"):  # the real CLI: no stdin byte in 3 s, it gives up
+    import select
+
+    if not select.select([sys.stdin], [], [], float(os.environ["FAKE_FIRST_BYTE_S"]))[0]:
+        sys.stderr.write("Warning: no stdin data received\n")
+        sys.exit(1)
+
 stdin = sys.stdin.read()
 if os.environ.get("FAKE_STDIN_LOG"):  # privacy proofs: everything any backend is ever sent
     with open(os.environ["FAKE_STDIN_LOG"], "a") as f:
@@ -33,6 +44,25 @@ if log:
 mode = os.environ.get("FAKE_MODE", "analyze")
 if mode == "hang":
     time.sleep(30)
+streams = "--output-format" in argv and argv[argv.index("--output-format") + 1] == "stream-json"
+if mode == "analyze" and streams:
+    # The recorded one-JSON answer, replayed the way stream-json delivers it: text deltas,
+    # then the `result` line. FAKE_RESULT replaces the answer's text.
+    with open(os.path.join(FIX, "claude-analyze.txt")) as f:
+        res = json.loads(next(x for x in f if x.startswith("{")))
+    text = os.environ.get("FAKE_RESULT") or res["result"]
+    res["result"] = text
+    res.pop("structured_output", None)
+    res["type"] = "result"
+    step = int(os.environ.get("FAKE_CHUNK", "7"))
+    for i in range(0, len(text), step):
+        ev = {"type": "content_block_delta", "index": 0,
+              "delta": {"type": "text_delta", "text": text[i:i + step]}}
+        sys.stdout.write(json.dumps({"type": "stream_event", "event": ev}) + "\n")
+    sys.stdout.write(json.dumps(res) + "\n")
+    sys.stdout.flush()
+    time.sleep(float(os.environ.get("FAKE_LINGER", "0")))  # the real CLI exits ~1 s later
+    sys.exit(0)
 name = {"analyze": "claude-analyze.txt", "rewrite": "claude-rewrite.txt", "error": "claude-error.txt"}[mode]
 with open(os.path.join(FIX, name)) as f:
     for line in f:

@@ -49,6 +49,9 @@ class Ctx:
     strictness: str
     app_label: str
     mixed_language: bool = False
+    # `[general] correction`: "minimal" fixes mistakes only; "fluent" may also reword a
+    # sentence a little to make it grammatical (`backends.corrected.fluent_ok`).
+    correction: str = "minimal"
 
 
 @dataclass(frozen=True)

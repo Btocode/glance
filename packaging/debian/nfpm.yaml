@@ -1,0 +1,52 @@
+# A .deb of Glance for Debian and Ubuntu (amd64), built with nfpm (https://nfpm.goreleaser.com)
+# by packaging/debian/build-deb.sh, which stages the files in $STAGE and sets VERSION.
+#
+# The package holds Glance's wheels (no network at install time) and its support tree in
+# /opt/glance; postinst builds /opt/glance/.venv from them with the system Python and links
+# the commands into /usr/bin. Everything per user (systemd user unit, GNOME Shell extension,
+# harper-ls, doctor --fix) is done by each user running `glance setup`.
+name: glance
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: Btocode <https://github.com/Btocode/glance>
+description: |-
+  System-wide writing assistant
+  Grammar, tone rewrites and AI actions in any app's text fields, on X11 and GNOME on
+  Wayland. Each user runs `glance setup` once after installing.
+vendor: Btocode
+homepage: https://github.com/Btocode/glance
+license: MIT
+
+depends:
+  - python3 (>= 3.10)
+  - python3-venv
+  - python3-gi
+  - python3-gi-cairo
+  - gir1.2-gtk-3.0
+  - gir1.2-atspi-2.0
+  - gir1.2-wnck-3.0
+  - gir1.2-notify-0.7
+  - gir1.2-secret-1
+  - at-spi2-core
+  - libglib2.0-bin
+  - curl
+recommends:
+  - gir1.2-ayatanaappindicator3-0.1
+suggests:
+  - tesseract-ocr
+  - git
+
+contents:
+  - src: ${STAGE}/opt/glance
+    dst: /opt/glance
+    type: tree
+  - src: ${STAGE}/usr/share/doc/glance/copyright
+    dst: /usr/share/doc/glance/copyright
+
+scripts:
+  postinstall: ./postinst
+  preremove: ./prerm

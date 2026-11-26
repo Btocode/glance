@@ -161,20 +161,50 @@ def _context_line(ctx: Ctx) -> str:
     )
 
 
+_FIX_LIST = (
+    "spelling and typos; a lost apostrophe (\"dont\" -> \"don't\", \"im\" -> \"I'm\"); "
+    "homophones (its/it's, your/you're, their/there/they're, then/than, to/too, lose/loose); "
+    "grammar and agreement (\"the build seem\" -> \"the build seems\", \"he dont\" -> "
+    "\"he doesn't\"); a clearly missing small word; spacing and punctuation (no space "
+    "before , . ? ! :, one space after them, no doubled spaces); capitalisation: the first "
+    "letter of every sentence, \"i\" -> \"I\", days, months, languages and nationalities"
+)
+_KEEP = (
+    "Keep everything else exactly as written: the writer's words, word choice, slang and "
+    "abbreviations (\"u\", \"thx\", \"gonna\", \"lol\"), British or American spelling, "
+    "tone, line breaks and formatting. Never add a full stop or other end punctuation the "
+    "writer left off at the end of a message or line. Never touch names, @mentions, "
+    "#channels, code, commands, file names, paths, URLs, identifiers or numbers. "
+)
+_MINIMAL = (
+    "\"corrected\": the whole draft with only its mistakes corrected: " + _FIX_LIST + ". "
+    "Make the minimal edit for each mistake. " + _KEEP
+    + "Never reword, rephrase, formalise, shorten or 'improve' a phrase that is already "
+    "correct (\"handle it\" stays \"handle it\"). With nothing wrong, it is the draft "
+    "unchanged. "
+)
+_FLUENT = (
+    "\"corrected\": the whole draft corrected so it reads as fluent, grammatical "
+    "English: " + _FIX_LIST + "; and, where a sentence is ungrammatical or two sentences "
+    "run together, the smallest rephrasing that makes it correct, such as a missing or "
+    "misplaced word, word order, or a full stop between run-on sentences (\"how to get in "
+    "place the new process\" -> \"how do we get the new process in place\", \"it don't "
+    "work it crashes\" -> \"it doesn't work. It crashes\"). Keep the writer's meaning, tone "
+    "and vocabulary: never replace a correct word with a synonym, never add an idea, never "
+    "formalise, shorten or 'improve' a sentence that is already correct. " + _KEEP
+    + "With nothing wrong, it is the draft unchanged. "
+)
+
+
 def analyze_system(ctx: Ctx) -> str:
+    fluent = getattr(ctx, "correction", "minimal") == "fluent"
     return (
         "You proofread a draft message. "
         + _context_line(ctx)
         + " <glance_text> holds the whole draft (or, for a very long one, the part around the "
         "writer's cursor). Reply with one JSON object with exactly these keys, in this order. "
-        "\"corrected\": the whole draft with only its mistakes corrected: spelling and typos, "
-        "grammar and agreement, a clearly missing small word, punctuation (no space before a "
-        "comma, no doubled spaces) and capitalisation (sentence starts, \"I\"). Make the "
-        "minimal edit for each mistake and keep everything else exactly as written: the "
-        "writer's words, word choice, slang, tone, line breaks and formatting. Never reword, "
-        "rephrase, formalise, shorten or 'improve' a phrase that is already correct (\"handle "
-        "it\" stays \"handle it\"). With nothing wrong, it is the draft unchanged. "
-        "\"tone\": the draft's tone in one or two words. \"mismatch\": whether that tone "
+        + (_FLUENT if fluent else _MINIMAL)
+        + "\"tone\": the draft's tone in one or two words. \"mismatch\": whether that tone "
         "mismatches the target tone. \"reason\": a short reason only when it does, else null. "
         f"\"suggestions\": at most {MAX_SUGGESTIONS} (usually none) for a phrase that is "
         "correct but could read better, each {\"quote\": the exact substring of the draft, "

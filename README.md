@@ -15,10 +15,9 @@ Fix spelling and grammar in any app. Offline, no AI needed.
 
 <br>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
-  <img alt="The Glance Assistant panel under a typed message with the Friendlier tone chip picked: its rewrite under Suggested with each change tinted green and an Apply (Alt+Enter) button, four tone chips, a Rewrite as… box, and the list of fixes." src="docs/assets/screenshots/panel-light.png" width="708">
-</picture>
+Type, press Super+Alt+G, then Alt+Enter. Or select text and click Explain.
+
+<img alt="Demo: a message is typed with mistakes, the Glance icon counts 6 fixes, Super+Alt+G shows the corrected sentence in a strip under the field, Alt+Enter puts it in; then a paragraph is selected, the Glance mark opens its action bar and Explain answers in a panel." src="docs/assets/demo.gif" width="800">
 
 </div>
 
@@ -64,7 +63,7 @@ Claude is the best tested. Codex, Gemini and OpenCode are experimental.
 4. Rest the pointer on the icon, or right-click it, for tones (Friendlier, Direct, Shorter, Professional) and "Rewrite…".
 5. Select text in any app and click the Glance mark that appears: Explain, Translate and more.
 6. Press <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> (⌃⌥C) for Glance Shot.
-7. Tray or menu bar icon → **Features** switches things on and off, including checking as you type.
+7. Tray or menu bar icon → **Features** switches things on and off, including checking as you type and **Fluent corrections** (the suggestion may reword a sentence a little to make it grammatical, keeping your meaning, names and code; the strip then says "Fluent").
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-dark.png">
@@ -92,11 +91,13 @@ The tray's **Keyboard shortcuts…** shows them as set on your computer. Change 
 ## Update and uninstall
 
 ```sh
-glance update                                  # same installer; keeps your config, keys and dictionary
+glance update                                  # the latest release; keeps your config, keys and dictionary
 ~/.local/share/glance-src/uninstall.sh         # remove Glance (--keep-data keeps your dictionary)
 ```
 
-`glance update --check` only says whether a newer version exists. Glance also checks once a day and adds "Update now" to the tray menu.
+`glance update --check` only says whether a newer version exists ("Glance 0.4.0 → 0.5.0"). `glance update --main` follows the main branch instead of releases. Glance also checks once a day and adds "Update now" to the tray menu. `glance --version` shows the version; [CHANGELOG.md](CHANGELOG.md) lists what changed.
+
+Packages for the AUR, Homebrew and Debian/Ubuntu are in [packaging/](packaging/README.md). After installing one, run `glance setup` once, as yourself.
 
 Uninstall keeps `~/.config/glance/config.toml`. It leaves the accessibility setting on: on GNOME turn it off with `gsettings set org.gnome.desktop.interface toolkit-accessibility false`, on macOS remove the Accessibility entry in System Settings.
 
@@ -115,6 +116,8 @@ Start with `glance doctor`. It checks everything and says what to do. `glance do
 
 Logs (they never contain your text): Linux `journalctl --user -u glance`, macOS `~/Library/Logs/Glance/glanced.log`.
 
+Reporting a bug? Run `glance report` and attach the file it writes. It holds versions, doctor results and a filtered log, and never your text, clipboard, window titles, keys or user name. Read it before you send it.
+
 ## More
 
 <details>
@@ -122,11 +125,12 @@ Logs (they never contain your text): Linux `journalctl --user -u glance`, macOS 
 
 <br>
 
-Settings live in `~/.config/glance/config.toml`. Glance reads changes while it runs.
+Change them in the Settings window: the tray's **Settings…** or `glance settings`. They live in `~/.config/glance/config.toml` (the window keeps your comments), and Glance reads changes while it runs.
 
 ```toml
 [general]
 check = "shortcut"            # or "typing": check as you type
+correction = "minimal"        # or "fluent": also reword a sentence a little to fix its grammar
 check_updates = true          # false: never look for a newer version
 
 [general.hotkeys]             # only the keys you set change
@@ -151,7 +155,8 @@ ocr = "auto"                  # auto, ocrs, tesseract or off
 ai_images = "ask"             # ask, allow or never (Explain / Ask send the image to the AI)
 
 [backend]
-warm = false                  # no idle claude process (default on, about 195 MB each)
+warm = false                  # no idle claude processes (default on: one for checks, one
+                              # for rewrites, 130-195 MB each, stopped after 10 idle minutes)
 
 [apps.slack]                  # per app, by window class
 capture = false               # stop automatic field capture in this app
@@ -163,7 +168,7 @@ Change a model with `glance backend model NAME MODEL`. Defaults are each tool's 
 
 **Claude Code Ctrl+G (Linux):** `glance wrapper install` adds a `claude()` function to `.zshrc` so Ctrl+G opens your prompt in Glance's editor. `glance wrapper uninstall` removes it.
 
-**Installer options:** add them after `bash -s --`. `--with-apt` installs missing system packages with one `sudo apt-get install -y` (never run otherwise), `--yes` / `--no-wrapper` answer the Claude Code wrapper question, `--no-desktop-overrides` leaves Chrome, Brave, Slack and Discord launchers alone, `--no-start` does not start the service, `--from-local` installs from a checkout. For the Linux tray icon install `gir1.2-ayatanaappindicator3-0.1`; without it Glance works with no icon.
+**Installer options:** add them after `bash -s --`. `--with-apt` installs missing system packages with one `sudo apt-get install -y` (never run otherwise), `--yes` / `--no-wrapper` answer the Claude Code wrapper question, `--no-desktop-overrides` leaves Chrome, Brave, Slack and Discord launchers alone, `--no-start` does not start the service, `--from-local` installs from a checkout, `--ref main` (or a tag such as `v0.4.0`) picks what to install; the default is the latest release. For the Linux tray icon install `gir1.2-ayatanaappindicator3-0.1`; without it Glance works with no icon.
 
 </details>
 

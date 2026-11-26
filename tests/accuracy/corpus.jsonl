@@ -1,0 +1,362 @@
+{"id": "correct-001", "input": "Sounds good, see you at 3.", "tags": ["chat", "correct"]}
+{"id": "correct-002", "input": "Can you send me the deck before the call?", "tags": ["chat", "correct"]}
+{"id": "correct-003", "input": "Running about ten minutes late, sorry!", "tags": ["chat", "correct"]}
+{"id": "correct-004", "input": "Thanks, that fixed it.", "tags": ["chat", "correct"]}
+{"id": "correct-005", "input": "No worries, take your time.", "tags": ["chat", "correct"]}
+{"id": "correct-006", "input": "Gonna grab lunch, back in 20.", "tags": ["chat", "correct"]}
+{"id": "correct-007", "input": "Lol, yeah, that's exactly what happened.", "tags": ["chat", "correct"]}
+{"id": "correct-008", "input": "Did anyone else get the invite for Friday?", "tags": ["chat", "correct"]}
+{"id": "correct-009", "input": "I'm out tomorrow, but Rafi can cover for me.", "tags": ["chat", "correct"]}
+{"id": "correct-010", "input": "Happy birthday! Hope you have a great one.", "tags": ["chat", "correct"]}
+{"id": "correct-011", "input": "Let me know when you're free to chat.", "tags": ["chat", "correct"]}
+{"id": "correct-012", "input": "Who's taking notes today?", "tags": ["chat", "correct"]}
+{"id": "correct-013", "input": "It's on the second floor, next to the kitchen.", "tags": ["chat", "correct"]}
+{"id": "correct-014", "input": "Their team said they'd ship it next week.", "tags": ["chat", "correct"]}
+{"id": "correct-015", "input": "Can't make it tonight, maybe next time?", "tags": ["chat", "correct"]}
+{"id": "correct-016", "input": "Back in 5.", "tags": ["chat", "correct"]}
+{"id": "correct-017", "input": "Honestly, I kinda like the old layout better.", "tags": ["chat", "correct"]}
+{"id": "correct-018", "input": "Y'all are the best 🙌", "tags": ["chat", "correct"]}
+{"id": "correct-019", "input": "We'll handle it.", "tags": ["chat", "correct"]}
+{"id": "correct-020", "input": "Hmm… not sure about that one", "tags": ["chat", "correct"]}
+{"id": "correct-021", "input": "Yep, already on it", "tags": ["chat", "correct"]}
+{"id": "correct-022", "input": "Nope, that's the old link", "tags": ["chat", "correct"]}
+{"id": "correct-023", "input": "Okay, merging now", "tags": ["chat", "correct"]}
+{"id": "correct-024", "input": "That's a wrap for today, folks!", "tags": ["chat", "correct"]}
+{"id": "correct-025", "input": "Cheers, mate", "tags": ["chat", "correct"]}
+{"id": "correct-026", "input": "Will do!", "tags": ["chat", "correct"]}
+{"id": "correct-027", "input": "FYI the office Wi-Fi password changed", "tags": ["chat", "correct"]}
+{"id": "correct-028", "input": "ETA 15 min", "tags": ["chat", "correct"]}
+{"id": "correct-029", "input": "Same here, my build is stuck too", "tags": ["chat", "correct"]}
+{"id": "correct-030", "input": "Then again, it's faster than it was.", "tags": ["chat", "correct"]}
+{"id": "correct-031", "input": "Hi Maria,\nThank you for the quick reply. I've attached the signed contract.\nBest,\nTom", "tags": ["email", "correct"]}
+{"id": "correct-032", "input": "Please find the updated invoice attached. Let me know if anything looks off.", "tags": ["email", "correct"]}
+{"id": "correct-033", "input": "I wanted to follow up on my previous email about the onboarding schedule.", "tags": ["email", "correct"]}
+{"id": "correct-034", "input": "We're happy to move the meeting to Thursday if that works better for you.", "tags": ["email", "correct"]}
+{"id": "correct-035", "input": "Could you confirm whether the payment was received?", "tags": ["email", "correct"]}
+{"id": "correct-036", "input": "Apologies for the delay; I was traveling last week.", "tags": ["email", "correct"]}
+{"id": "correct-037", "input": "The office will be closed on Monday for the holiday.", "tags": ["email", "correct"]}
+{"id": "correct-038", "input": "Looking forward to working with you.", "tags": ["email", "correct"]}
+{"id": "correct-039", "input": "I've cc'd Priya, who handles billing.", "tags": ["email", "correct"]}
+{"id": "correct-040", "input": "The colour scheme needs to be organised a bit better.", "tags": ["email", "correct"]}
+{"id": "correct-041", "input": "See attached.", "tags": ["email", "correct"]}
+{"id": "correct-042", "input": "Write a Python function that reverses a linked list and explain the time complexity.", "tags": ["prompt", "correct"]}
+{"id": "correct-043", "input": "Summarize this article in three bullet points.", "tags": ["prompt", "correct"]}
+{"id": "correct-044", "input": "Explain the difference between a process and a thread like I'm five.", "tags": ["prompt", "correct"]}
+{"id": "correct-045", "input": "Give me ten name ideas for a coffee shop that also sells books.", "tags": ["prompt", "correct"]}
+{"id": "correct-046", "input": "Rewrite this paragraph so it sounds less formal.", "tags": ["prompt", "correct"]}
+{"id": "correct-047", "input": "What are the pros and cons of using SQLite for a mobile app?", "tags": ["prompt", "correct"]}
+{"id": "correct-048", "input": "Translate the following sentence into Spanish: the meeting is at noon.", "tags": ["prompt", "correct"]}
+{"id": "correct-049", "input": "Act as a code reviewer and point out any bugs in the snippet below.", "tags": ["prompt", "correct"]}
+{"id": "correct-050", "input": "Can you make this email sound more professional: hey, the report is late cause the data came in late, sorry", "tags": ["prompt", "correct"]}
+{"id": "correct-051", "input": "Nice cleanup. One nit: this variable name could be more descriptive.", "tags": ["review", "correct"]}
+{"id": "correct-052", "input": "This looks good to me, but please add a test for the empty case.", "tags": ["review", "correct"]}
+{"id": "correct-053", "input": "Why do we need the extra lock here? The caller already holds one.", "tags": ["review", "correct"]}
+{"id": "correct-054", "input": "Can we move this check before the network call?", "tags": ["review", "correct"]}
+{"id": "correct-055", "input": "LGTM, ship it.", "tags": ["review", "correct"]}
+{"id": "correct-056", "input": "I'd rather not catch every exception here; it hides real errors.", "tags": ["review", "correct"]}
+{"id": "correct-057", "input": "Minor: there's a typo in the docstring.", "tags": ["review", "correct"]}
+{"id": "correct-058", "input": "This will break on Windows because of the path separator.", "tags": ["review", "correct"]}
+{"id": "correct-059", "input": "Agreed, let's do that in a follow-up PR.", "tags": ["review", "correct"]}
+{"id": "correct-060", "input": "The new test is flaky on CI; it passed on the second run.", "tags": ["review", "correct"]}
+{"id": "correct-061", "input": "Its value is cached, so the second call is cheap.", "tags": ["review", "correct"]}
+{"id": "correct-062", "input": "Your change looks fine; you're just missing the changelog entry.", "tags": ["review", "correct"]}
+{"id": "correct-063", "input": "There are three places where we parse the date, and they don't agree.", "tags": ["review", "correct"]}
+{"id": "correct-064", "input": "Fewer allocations would help, but it's not a blocker.", "tags": ["review", "correct"]}
+{"id": "correct-065", "input": "But what if the user is offline?", "tags": ["review", "correct"]}
+{"id": "protected-001", "input": "@rafi can you review https://github.com/acme/api/pull/412 when you get a chance?", "tags": ["review", "protected", "correct"]}
+{"id": "protected-002", "input": "hey @nadia , the build is green now", "minimal": "Hey @nadia, the build is green now", "tags": ["chat", "protected", "spacing", "caps"]}
+{"id": "protected-003", "input": "please run `npm run lint -- --fix` before pushing", "minimal": "Please run `npm run lint -- --fix` before pushing", "tags": ["chat", "protected", "caps"]}
+{"id": "protected-004", "input": "the bug is in parse_config(), it returns None when the file is empty", "minimal": "The bug is in parse_config(), it returns None when the file is empty", "alt": ["The bug is in parse_config(). It returns None when the file is empty"], "tags": ["review", "protected", "caps"]}
+{"id": "protected-005", "input": "Can you check the logs at /var/log/glance/daemon.log ? its huge", "minimal": "Can you check the logs at /var/log/glance/daemon.log? It's huge", "tags": ["chat", "protected", "spacing", "homophone"]}
+{"id": "protected-006", "input": "Email me at sam.lee@example.com if the link dosent work", "minimal": "Email me at sam.lee@example.com if the link doesn't work", "tags": ["email", "protected", "typo", "apostrophe"]}
+{"id": "protected-007", "input": "Merged in #1289, thx @jdoe", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-008", "input": "I pushed a fix to the feature/login-timeout branch.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-009", "input": "Set GLANCE_LOG=debug and try again.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-010", "input": "The API returns 429 when we exceed 60 req/min.", "tags": ["review", "protected", "correct"]}
+{"id": "protected-011", "input": "useEffect runs twice in dev because of StrictMode, thats expected", "minimal": "useEffect runs twice in dev because of StrictMode, that's expected", "tags": ["review", "protected", "apostrophe"]}
+{"id": "protected-012", "input": "iOS 17 broke our deep links again", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-013", "input": "Ask Nusrat and Tanvir about the Dhaka office lease.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-014", "input": "meeting moved to 4pm, link: https://meet.example.com/abc-defg-hij", "minimal": "Meeting moved to 4pm, link: https://meet.example.com/abc-defg-hij", "tags": ["chat", "protected", "caps"]}
+{"id": "protected-015", "input": "the config lives in ~/.config/glance/config.toml , not in /etc", "minimal": "The config lives in ~/.config/glance/config.toml, not in /etc", "tags": ["chat", "protected", "caps", "spacing"]}
+{"id": "protected-016", "input": "run `git rebase -i HEAD~3` and squash teh commits", "minimal": "Run `git rebase -i HEAD~3` and squash the commits", "tags": ["review", "protected", "caps", "typo"]}
+{"id": "protected-017", "input": "Thanks @Priya.S! I'll update the PR description.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-018", "input": "Shoutout to #design-team for the new icons 🎉", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-019", "input": "can u check if kubectl get pods shows anything in the staging namespace", "minimal": "Can u check if kubectl get pods shows anything in the staging namespace", "tags": ["chat", "protected", "caps"]}
+{"id": "protected-020", "input": "The function getUserById should return null, not undefined.", "tags": ["review", "protected", "correct"]}
+{"id": "protected-021", "input": "We use PostgreSQL 15 with pgvector for embeddings.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-022", "input": "my github handle is @kai-dev , add me to the repo", "minimal": "My GitHub handle is @kai-dev, add me to the repo", "alt": ["My github handle is @kai-dev, add me to the repo"], "tags": ["chat", "protected", "caps", "spacing"]}
+{"id": "protected-023", "input": "See section 4.2 of RFC 9110 for the semantics.", "tags": ["email", "protected", "correct"]}
+{"id": "protected-024", "input": "the CSV has 12,000 rows and the import takes ~3s", "minimal": "The CSV has 12,000 rows and the import takes ~3s", "tags": ["chat", "protected", "caps"]}
+{"id": "protected-025", "input": ":thumbsup: works on my machine", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-026", "input": "@channel reminder: standup is at 10:30 tomorrow", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-027", "input": "Use `const` instead of `let` here since it's never reassigned.", "tags": ["review", "protected", "correct"]}
+{"id": "protected-028", "input": "Please dont commit .env files, add them to .gitignore", "minimal": "Please don't commit .env files, add them to .gitignore", "tags": ["review", "protected", "apostrophe"]}
+{"id": "protected-029", "input": "Ping me on Slack or WhatsApp, whichever is easier.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-030", "input": "i think the regex ^[a-z]+$ is too strict for names like O'Brien", "minimal": "I think the regex ^[a-z]+$ is too strict for names like O'Brien", "tags": ["review", "protected", "caps"]}
+{"id": "protected-031", "input": "Version 2.3.1 fixes the crash on macOS Sonoma.", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-032", "input": "The docs at www.example.org/docs/setup are out of date", "tags": ["email", "protected", "correct"]}
+{"id": "protected-033", "input": "Can you add Zainab to the #ops-alerts channel?", "tags": ["chat", "protected", "correct"]}
+{"id": "protected-034", "input": "we should rename `fetchData` to `loadInvoices` , its more specific", "minimal": "We should rename `fetchData` to `loadInvoices`, it's more specific", "tags": ["review", "protected", "caps", "spacing", "homophone"]}
+{"id": "protected-035", "input": "TODO: handle the case where userId is undefined", "tags": ["review", "protected", "correct"]}
+{"id": "protected-036", "input": "the McKinsey report says Q3 revenue grew 12%", "minimal": "The McKinsey report says Q3 revenue grew 12%", "tags": ["chat", "protected", "caps"]}
+{"id": "protected-037", "input": "Please explain this error: TypeError: cannot read properties of undefined (reading 'map')", "tags": ["prompt", "protected", "correct"]}
+{"id": "protected-038", "input": "Ok, I'll ping @mehedi.h about the S3 bucket permissions.", "tags": ["chat", "protected", "correct"]}
+{"id": "banglish-001", "input": "kal office e jabo na, amar shorir kharap", "tags": ["chat", "banglish"]}
+{"id": "banglish-002", "input": "ami tomake kal call korbo ok?", "tags": ["chat", "banglish"]}
+{"id": "banglish-003", "input": "tumi ki file ta pathiye dite parba?", "tags": ["chat", "banglish"]}
+{"id": "banglish-004", "input": "acha thik ache, ami dekhchi", "tags": ["chat", "banglish"]}
+{"id": "banglish-005", "input": "bhai meeting ta koto tay?", "tags": ["chat", "banglish"]}
+{"id": "banglish-006", "input": "amar laptop ta hang kore ache, restart dicchi", "tags": ["chat", "banglish"]}
+{"id": "banglish-007", "input": "ajke onek kaj, pore kotha boli", "tags": ["chat", "banglish"]}
+{"id": "banglish-008", "input": "tomar PR ta dekhlam, kichu comment diyechi", "tags": ["review", "banglish"]}
+{"id": "banglish-009", "input": "eta ki deploy hoye geche naki ekhono pending?", "tags": ["chat", "banglish"]}
+{"id": "banglish-010", "input": "apu, invoice ta ki pathano hoyeche?", "tags": ["email", "banglish"]}
+{"id": "banglish-011", "input": "ami ashchi 5 minute e", "tags": ["chat", "banglish"]}
+{"id": "banglish-012", "input": "khub bhalo hoyeche, thanks bhai", "tags": ["chat", "banglish"]}
+{"id": "banglish-013", "input": "kalke deadline, tai aj raat e sesh korte hobe", "tags": ["chat", "banglish"]}
+{"id": "banglish-014", "input": "server ta abar down, ke dekhbe?", "tags": ["chat", "banglish"]}
+{"id": "banglish-015", "input": "ami bujhte parchi na eta keno fail korche", "tags": ["chat", "banglish"]}
+{"id": "banglish-016", "input": "tumi ki free acho ekhon? ekta jinish dekhate chai", "tags": ["chat", "banglish"]}
+{"id": "banglish-017", "input": "dhonnobad, apnar help er jonno", "tags": ["email", "banglish"]}
+{"id": "banglish-018", "input": "amra shobai 7 tay dinner e jabo", "tags": ["chat", "banglish"]}
+{"id": "banglish-019", "input": "boss bollo report ta aj e lagbe", "tags": ["chat", "banglish"]}
+{"id": "banglish-020", "input": "eta amar kache kaj korche, tomar machine e check koro", "tags": ["review", "banglish"]}
+{"id": "banglish-021", "input": "Thanks bhai, onek help hoise", "tags": ["chat", "banglish"]}
+{"id": "banglish-022", "input": "ok ami dekhtesi", "tags": ["chat", "banglish"]}
+{"id": "banglish-023", "input": "Kalke office e ashle amake ekta call dio", "tags": ["chat", "banglish"]}
+{"id": "banglish-024", "input": "amader release next week e, QA ta shesh hoyni ekhono", "tags": ["chat", "banglish"]}
+{"id": "banglish-025", "input": "tui ki pagol? eta to obvious bug", "tags": ["chat", "banglish"]}
+{"id": "banglish-026", "input": "apnake mail korechi, please check korben", "tags": ["email", "banglish"]}
+{"id": "banglish-027", "input": "ei weekend e Cox's Bazar jacchi", "tags": ["chat", "banglish"]}
+{"id": "banglish-028", "input": "Code ta merge kore dao, ami review korechi", "tags": ["review", "banglish"]}
+{"id": "banglish-029", "input": "Ammu bolche dinner ready, ashte deri hobe?", "tags": ["chat", "banglish"]}
+{"id": "banglish-030", "input": "na re, oi bug ta ekhono fix hoy nai", "tags": ["chat", "banglish"]}
+{"id": "banglish-031", "input": "Ok sure. ami kal sokale pathabo", "tags": ["chat", "banglish"]}
+{"id": "banglish-032", "input": "ami kal ashbo. i will bring the documents", "minimal": "ami kal ashbo. I will bring the documents", "tags": ["chat", "banglish", "caps"]}
+{"id": "banglish-033", "input": "valo achi. how are you doing , long time no see", "minimal": "valo achi. How are you doing, long time no see", "tags": ["chat", "banglish", "caps", "spacing"]}
+{"id": "banglish-034", "input": "Meeting ta 3 tay. dont be late please", "minimal": "Meeting ta 3 tay. Don't be late please", "tags": ["chat", "banglish", "apostrophe", "caps"]}
+{"id": "banglish-035", "input": "ami try korchi but its not working", "minimal": "ami try korchi but it's not working", "tags": ["chat", "banglish", "apostrophe"]}
+{"id": "banglish-036", "input": "Sorry vai, ajke parbo na. i have a doctors appointment", "minimal": "Sorry vai, ajke parbo na. I have a doctor's appointment", "tags": ["chat", "banglish", "caps", "apostrophe"]}
+{"id": "typo-001", "input": "teh meeting got moved to friday", "minimal": "The meeting got moved to Friday", "tags": ["chat", "typo", "caps"]}
+{"id": "typo-002", "input": "I recieved the package yesterday.", "minimal": "I received the package yesterday.", "tags": ["email", "typo"]}
+{"id": "typo-003", "input": "Can you send me the adress for the venue?", "minimal": "Can you send me the address for the venue?", "tags": ["chat", "typo"]}
+{"id": "typo-004", "input": "Thanks for the quick responce!", "minimal": "Thanks for the quick response!", "tags": ["chat", "typo"]}
+{"id": "typo-005", "input": "We need to definately fix this before the release.", "minimal": "We need to definitely fix this before the release.", "tags": ["review", "typo"]}
+{"id": "typo-006", "input": "The new desing looks great.", "minimal": "The new design looks great.", "tags": ["chat", "typo"]}
+{"id": "typo-007", "input": "Please review the attached documnet and let me know.", "minimal": "Please review the attached document and let me know.", "tags": ["email", "typo"]}
+{"id": "typo-008", "input": "Its a seperate issue, lets track it elsewhere.", "minimal": "It's a separate issue, let's track it elsewhere.", "tags": ["review", "typo", "apostrophe", "homophone"]}
+{"id": "typo-009", "input": "This functon is never called.", "minimal": "This function is never called.", "tags": ["review", "typo"]}
+{"id": "typo-010", "input": "Can you explian how the cache invalidation works?", "minimal": "Can you explain how the cache invalidation works?", "tags": ["prompt", "typo"]}
+{"id": "typo-011", "input": "Write a short poem about the ocaen at night.", "minimal": "Write a short poem about the ocean at night.", "tags": ["prompt", "typo"]}
+{"id": "typo-012", "input": "I tried restarting but it didnt help, still getting the same eror", "minimal": "I tried restarting but it didn't help, still getting the same error", "tags": ["chat", "typo", "apostrophe"]}
+{"id": "typo-013", "input": "Good mornign everyone!", "minimal": "Good morning everyone!", "tags": ["chat", "typo"]}
+{"id": "typo-014", "input": "Let me knwo if you need anything else.", "minimal": "Let me know if you need anything else.", "tags": ["email", "typo"]}
+{"id": "typo-015", "input": "The tests are failng on the main branch.", "minimal": "The tests are failing on the main branch.", "tags": ["review", "typo"]}
+{"id": "typo-016", "input": "Sorry for the confusoin.", "minimal": "Sorry for the confusion.", "tags": ["email", "typo"]}
+{"id": "typo-017", "input": "We should probably acommodate both formats.", "minimal": "We should probably accommodate both formats.", "tags": ["review", "typo"]}
+{"id": "typo-018", "input": "Just wanted to chekc in on the status of the order.", "minimal": "Just wanted to check in on the status of the order.", "tags": ["email", "typo"]}
+{"id": "typo-019", "input": "The varaible is shadowed inside the loop.", "minimal": "The variable is shadowed inside the loop.", "tags": ["review", "typo"]}
+{"id": "typo-020", "input": "Generate a markdown tabel comparing these three frameworks.", "minimal": "Generate a markdown table comparing these three frameworks.", "tags": ["prompt", "typo"]}
+{"id": "typo-021", "input": "I'm not sure wich option is better.", "minimal": "I'm not sure which option is better.", "tags": ["chat", "typo"]}
+{"id": "typo-022", "input": "Their offering a discount untill friday.", "minimal": "They're offering a discount until Friday.", "tags": ["email", "typo", "homophone", "caps"]}
+{"id": "typo-023", "input": "Thx, appreciate it alot", "minimal": "Thx, appreciate it a lot", "tags": ["chat", "typo"]}
+{"id": "typo-024", "input": "Could you resend the calender invite?", "minimal": "Could you resend the calendar invite?", "tags": ["email", "typo"]}
+{"id": "typo-025", "input": "the respone time went up after the deploy", "minimal": "The response time went up after the deploy", "tags": ["chat", "typo", "caps"]}
+{"id": "typo-026", "input": "This shoud be a constant.", "minimal": "This should be a constant.", "tags": ["review", "typo"]}
+{"id": "typo-027", "input": "Can you summarise this in plain englsh?", "minimal": "Can you summarise this in plain English?", "tags": ["prompt", "typo"]}
+{"id": "typo-028", "input": "Happy to help, just let me know whenver.", "minimal": "Happy to help, just let me know whenever.", "tags": ["email", "typo"]}
+{"id": "typo-029", "input": "I beleive this is the correct approach.", "minimal": "I believe this is the correct approach.", "tags": ["email", "typo"]}
+{"id": "typo-030", "input": "Pls dont merge yet, im still testing", "minimal": "Pls don't merge yet, I'm still testing", "tags": ["chat", "typo", "apostrophe"]}
+{"id": "typo-031", "input": "The refactor looks good, but you forgot to remvoe the debug print.", "minimal": "The refactor looks good, but you forgot to remove the debug print.", "tags": ["review", "typo"]}
+{"id": "typo-032", "input": "Sounds great, thnaks for organizing!", "minimal": "Sounds great, thanks for organizing!", "tags": ["chat", "typo"]}
+{"id": "typo-033", "input": "Waht are some good books on system design?", "minimal": "What are some good books on system design?", "tags": ["prompt", "typo"]}
+{"id": "apostrophe-001", "input": "dont worry about it im on it", "minimal": "Don't worry about it I'm on it", "alt": ["Don't worry about it, I'm on it", "Don't worry about it. I'm on it"], "tags": ["chat", "apostrophe", "caps"]}
+{"id": "apostrophe-002", "input": "I cant open the file, it says access denied", "minimal": "I can't open the file, it says access denied", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-003", "input": "Thats a good point.", "minimal": "That's a good point.", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-004", "input": "We werent told about the change.", "minimal": "We weren't told about the change.", "tags": ["email", "apostrophe"]}
+{"id": "apostrophe-005", "input": "He doesnt have access to the repo yet.", "minimal": "He doesn't have access to the repo yet.", "tags": ["review", "apostrophe"]}
+{"id": "apostrophe-006", "input": "Ill send it over tonight.", "minimal": "I'll send it over tonight.", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-007", "input": "Youre right, I missed that.", "minimal": "You're right, I missed that.", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-008", "input": "It wont compile on older compilers.", "minimal": "It won't compile on older compilers.", "tags": ["review", "apostrophe"]}
+{"id": "apostrophe-009", "input": "We havent decided yet.", "minimal": "We haven't decided yet.", "tags": ["email", "apostrophe"]}
+{"id": "apostrophe-010", "input": "Whats the ETA on the fix?", "minimal": "What's the ETA on the fix?", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-011", "input": "isnt this already handled by the middleware?", "minimal": "Isn't this already handled by the middleware?", "tags": ["review", "apostrophe", "caps"]}
+{"id": "apostrophe-012", "input": "Theyre waiting for our reply.", "minimal": "They're waiting for our reply.", "tags": ["email", "apostrophe"]}
+{"id": "apostrophe-013", "input": "i didnt get the email, can you resend", "minimal": "I didn't get the email, can you resend", "alt": ["I didn't get the email, can you resend?"], "tags": ["email", "apostrophe", "caps"]}
+{"id": "apostrophe-014", "input": "Lets go with option B.", "minimal": "Let's go with option B.", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-015", "input": "The users session expires after an hour.", "minimal": "The user's session expires after an hour.", "tags": ["review", "apostrophe"]}
+{"id": "apostrophe-016", "input": "Shouldnt we ask legal first?", "minimal": "Shouldn't we ask legal first?", "tags": ["email", "apostrophe"]}
+{"id": "apostrophe-017", "input": "Thats why I asked.", "minimal": "That's why I asked.", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-018", "input": "Theres a typo on line 12.", "minimal": "There's a typo on line 12.", "tags": ["review", "apostrophe"]}
+{"id": "apostrophe-019", "input": "Im not sure that's right", "minimal": "I'm not sure that's right", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-020", "input": "Wasnt this fixed last sprint?", "minimal": "Wasn't this fixed last sprint?", "tags": ["review", "apostrophe"]}
+{"id": "apostrophe-021", "input": "Ive updated the README.", "minimal": "I've updated the README.", "tags": ["review", "apostrophe"]}
+{"id": "apostrophe-022", "input": "Who's ready for the demo? Couldnt be more excited", "minimal": "Who's ready for the demo? Couldn't be more excited", "tags": ["chat", "apostrophe"]}
+{"id": "apostrophe-023", "input": "We'll need everyones input on this.", "minimal": "We'll need everyone's input on this.", "tags": ["chat", "apostrophe"]}
+{"id": "caps-001", "input": "i think we should wait until monday", "minimal": "I think we should wait until Monday", "tags": ["chat", "caps"]}
+{"id": "caps-002", "input": "can you check this when you get a sec?", "minimal": "Can you check this when you get a sec?", "tags": ["chat", "caps"]}
+{"id": "caps-003", "input": "thanks! i'll take a look", "minimal": "Thanks! I'll take a look", "tags": ["chat", "caps"]}
+{"id": "caps-004", "input": "Sounds good. see you tomorrow", "minimal": "Sounds good. See you tomorrow", "tags": ["chat", "caps"]}
+{"id": "caps-005", "input": "i'm working from home today", "minimal": "I'm working from home today", "tags": ["chat", "caps"]}
+{"id": "caps-006", "input": "we're meeting in london next week", "minimal": "We're meeting in London next week", "tags": ["chat", "caps"]}
+{"id": "caps-007", "input": "Me and sarah will handle it", "minimal": "Me and Sarah will handle it", "fluent": "Sarah and I will handle it", "tags": ["chat", "caps", "grammar"]}
+{"id": "caps-008", "input": "the deadline is in march", "minimal": "The deadline is in March", "tags": ["email", "caps"]}
+{"id": "caps-009", "input": "Great work everyone. i really appreciate it", "minimal": "Great work everyone. I really appreciate it", "tags": ["chat", "caps"]}
+{"id": "caps-010", "input": "do you use python or javascript for the backend?", "minimal": "Do you use Python or JavaScript for the backend?", "tags": ["chat", "caps"]}
+{"id": "caps-011", "input": "i'll be offline from 2 to 4", "minimal": "I'll be offline from 2 to 4", "tags": ["chat", "caps"]}
+{"id": "caps-012", "input": "is the api down or is it just me?", "minimal": "Is the API down or is it just me?", "alt": ["Is the api down or is it just me?"], "tags": ["chat", "caps"]}
+{"id": "caps-013", "input": "ok. i'll update the ticket", "minimal": "Ok. I'll update the ticket", "alt": ["OK. I'll update the ticket"], "tags": ["chat", "caps"]}
+{"id": "caps-014", "input": "Hello Team,\ni wanted to share a quick update on the launch.", "minimal": "Hello Team,\nI wanted to share a quick update on the launch.", "tags": ["email", "caps"]}
+{"id": "spacing-001", "input": "Thanks , I'll check it out.", "minimal": "Thanks, I'll check it out.", "tags": ["chat", "spacing"]}
+{"id": "spacing-002", "input": "Can you send it today ?", "minimal": "Can you send it today?", "tags": ["chat", "spacing"]}
+{"id": "spacing-003", "input": "That works for me .See you then", "minimal": "That works for me. See you then", "tags": ["chat", "spacing"]}
+{"id": "spacing-004", "input": "Great job on the launch !", "minimal": "Great job on the launch!", "tags": ["chat", "spacing"]}
+{"id": "spacing-005", "input": "I'll be there at 5,maybe a bit later", "minimal": "I'll be there at 5, maybe a bit later", "tags": ["chat", "spacing"]}
+{"id": "spacing-006", "input": "Please  review the  attached file.", "minimal": "Please review the attached file.", "tags": ["email", "spacing"]}
+{"id": "spacing-007", "input": "The fix is simple : add a null check.", "minimal": "The fix is simple: add a null check.", "tags": ["review", "spacing"]}
+{"id": "spacing-008", "input": "We need three things:design, copy and QA", "minimal": "We need three things: design, copy and QA", "tags": ["email", "spacing"]}
+{"id": "spacing-009", "input": "Hi John ,thanks for the update", "minimal": "Hi John, thanks for the update", "tags": ["email", "spacing"]}
+{"id": "spacing-010", "input": "Is this ready ? I want to merge it today .", "minimal": "Is this ready? I want to merge it today.", "tags": ["review", "spacing"]}
+{"id": "spacing-011", "input": "Sorry ,my bad", "minimal": "Sorry, my bad", "tags": ["chat", "spacing"]}
+{"id": "spacing-012", "input": "Yes ! That's exactly it", "minimal": "Yes! That's exactly it", "tags": ["chat", "spacing"]}
+{"id": "spacing-013", "input": "The meeting is at 10 am ( UTC )", "minimal": "The meeting is at 10 am (UTC)", "tags": ["email", "spacing"]}
+{"id": "spacing-014", "input": "Can you review this ?Thanks", "minimal": "Can you review this? Thanks", "tags": ["review", "spacing"]}
+{"id": "spacing-015", "input": "Done.Moving on to the next ticket.", "minimal": "Done. Moving on to the next ticket.", "tags": ["chat", "spacing"]}
+{"id": "agreement-001", "input": "the build seem to be broken again", "minimal": "The build seems to be broken again", "tags": ["chat", "agreement", "caps"]}
+{"id": "agreement-002", "input": "He dont know about the change yet.", "minimal": "He doesn't know about the change yet.", "tags": ["chat", "agreement"]}
+{"id": "agreement-003", "input": "They was going to call us back.", "minimal": "They were going to call us back.", "tags": ["chat", "agreement"]}
+{"id": "agreement-004", "input": "There is many reasons to wait.", "minimal": "There are many reasons to wait.", "tags": ["email", "agreement"]}
+{"id": "agreement-005", "input": "The tests passes locally but fails on CI.", "minimal": "The tests pass locally but fail on CI.", "tags": ["review", "agreement"]}
+{"id": "agreement-006", "input": "She have already approved the PR.", "minimal": "She has already approved the PR.", "tags": ["review", "agreement"]}
+{"id": "agreement-007", "input": "Each of the services need its own config.", "minimal": "Each of the services needs its own config.", "tags": ["review", "agreement"]}
+{"id": "agreement-008", "input": "The list of users are empty.", "minimal": "The list of users is empty.", "tags": ["review", "agreement"]}
+{"id": "agreement-009", "input": "We was planning to deploy on Friday.", "minimal": "We were planning to deploy on Friday.", "tags": ["chat", "agreement"]}
+{"id": "agreement-010", "input": "It don't matter much.", "minimal": "It doesn't matter much.", "tags": ["chat", "agreement"]}
+{"id": "agreement-011", "input": "My manager want the report by noon.", "minimal": "My manager wants the report by noon.", "tags": ["email", "agreement"]}
+{"id": "agreement-012", "input": "Does the endpoints support pagination?", "minimal": "Do the endpoints support pagination?", "tags": ["prompt", "agreement"]}
+{"id": "agreement-013", "input": "This changes makes the code harder to read.", "minimal": "This change makes the code harder to read.", "alt": ["These changes make the code harder to read."], "tags": ["review", "agreement"]}
+{"id": "agreement-014", "input": "Neither of the options work for us.", "minimal": "Neither of the options works for us.", "tags": ["email", "agreement"]}
+{"id": "agreement-015", "input": "He go to the gym every morning.", "minimal": "He goes to the gym every morning.", "tags": ["chat", "agreement"]}
+{"id": "agreement-016", "input": "The servers is down again.", "minimal": "The servers are down again.", "tags": ["chat", "agreement"]}
+{"id": "agreement-017", "input": "I has a question about the invoice.", "minimal": "I have a question about the invoice.", "tags": ["email", "agreement"]}
+{"id": "agreement-018", "input": "The cost of the licenses are too high.", "minimal": "The cost of the licenses is too high.", "tags": ["email", "agreement"]}
+{"id": "agreement-019", "input": "Everyone in the meeting were confused.", "minimal": "Everyone in the meeting was confused.", "tags": ["email", "agreement"]}
+{"id": "agreement-020", "input": "Do he know the password?", "minimal": "Does he know the password?", "tags": ["chat", "agreement"]}
+{"id": "agreement-021", "input": "The PR look good to me.", "minimal": "The PR looks good to me.", "tags": ["review", "agreement"]}
+{"id": "agreement-022", "input": "There's two ways to fix this.", "minimal": "There are two ways to fix this.", "tags": ["review", "agreement"]}
+{"id": "agreement-023", "input": "the price have gone up since last month", "minimal": "The price has gone up since last month", "tags": ["email", "agreement", "caps"]}
+{"id": "agreement-024", "input": "One of the tests are failing.", "minimal": "One of the tests is failing.", "tags": ["review", "agreement"]}
+{"id": "agreement-025", "input": "The client have asked for a refund.", "minimal": "The client has asked for a refund.", "tags": ["email", "agreement"]}
+{"id": "homophone-001", "input": "its fine, there going to be late", "minimal": "It's fine, they're going to be late", "tags": ["chat", "homophone", "caps"]}
+{"id": "homophone-002", "input": "I think your right about this", "minimal": "I think you're right about this", "tags": ["chat", "homophone"]}
+{"id": "homophone-003", "input": "Their is a problem with the build.", "minimal": "There is a problem with the build.", "tags": ["review", "homophone"]}
+{"id": "homophone-004", "input": "Let me know if your coming tonight.", "minimal": "Let me know if you're coming tonight.", "tags": ["chat", "homophone"]}
+{"id": "homophone-005", "input": "The dog wagged it's tail.", "minimal": "The dog wagged its tail.", "tags": ["chat", "homophone"]}
+{"id": "homophone-006", "input": "This is better then the old version.", "minimal": "This is better than the old version.", "tags": ["review", "homophone"]}
+{"id": "homophone-007", "input": "I'm to tired to debug this tonight.", "minimal": "I'm too tired to debug this tonight.", "tags": ["chat", "homophone"]}
+{"id": "homophone-008", "input": "Don't loose the receipt.", "minimal": "Don't lose the receipt.", "tags": ["chat", "homophone"]}
+{"id": "homophone-009", "input": "Can you except the invite?", "minimal": "Can you accept the invite?", "tags": ["email", "homophone"]}
+{"id": "homophone-010", "input": "The affect on performance is small.", "minimal": "The effect on performance is small.", "tags": ["review", "homophone"]}
+{"id": "homophone-011", "input": "Your welcome!", "minimal": "You're welcome!", "tags": ["chat", "homophone"]}
+{"id": "homophone-012", "input": "We should of tested this first.", "minimal": "We should have tested this first.", "tags": ["review", "homophone"]}
+{"id": "homophone-013", "input": "Who's laptop is this?", "minimal": "Whose laptop is this?", "tags": ["chat", "homophone"]}
+{"id": "homophone-014", "input": "I'll send it to you to.", "minimal": "I'll send it to you too.", "tags": ["chat", "homophone"]}
+{"id": "homophone-015", "input": "Its been a long week.", "minimal": "It's been a long week.", "tags": ["chat", "homophone"]}
+{"id": "homophone-016", "input": "Is this you're laptop?", "minimal": "Is this your laptop?", "tags": ["chat", "homophone"]}
+{"id": "homophone-017", "input": "The cache looses its data on restart.", "minimal": "The cache loses its data on restart.", "tags": ["review", "homophone"]}
+{"id": "homophone-018", "input": "I need to brake this into smaller tasks.", "minimal": "I need to break this into smaller tasks.", "tags": ["email", "homophone"]}
+{"id": "homophone-019", "input": "Lets meet their at noon.", "minimal": "Let's meet there at noon.", "tags": ["chat", "homophone", "apostrophe"]}
+{"id": "homophone-020", "input": "The new policy will effect everyone.", "minimal": "The new policy will affect everyone.", "tags": ["email", "homophone"]}
+{"id": "homophone-021", "input": "We're going to the office, are you coming two?", "minimal": "We're going to the office, are you coming too?", "tags": ["chat", "homophone"]}
+{"id": "homophone-022", "input": "Thanks for you help!", "minimal": "Thanks for your help!", "tags": ["email", "homophone"]}
+{"id": "homophone-023", "input": "I'll do it latter.", "minimal": "I'll do it later.", "tags": ["chat", "homophone"]}
+{"id": "homophone-024", "input": "We past the deadline yesterday.", "minimal": "We passed the deadline yesterday.", "tags": ["email", "homophone"]}
+{"id": "homophone-025", "input": "Where going to need more time.", "minimal": "We're going to need more time.", "tags": ["chat", "homophone"]}
+{"id": "homophone-026", "input": "The principle reason is cost.", "minimal": "The principal reason is cost.", "tags": ["email", "homophone"]}
+{"id": "homophone-027", "input": "Make sure the dates are in there right format.", "minimal": "Make sure the dates are in their right format.", "alt": ["Make sure the dates are in the right format."], "tags": ["review", "homophone"]}
+{"id": "homophone-028", "input": "The function returns it's own copy.", "minimal": "The function returns its own copy.", "tags": ["review", "homophone"]}
+{"id": "homophone-029", "input": "Its not a bug, its a feature.", "minimal": "It's not a bug, it's a feature.", "tags": ["review", "homophone"]}
+{"id": "homophone-030", "input": "Your the best, thanks!", "minimal": "You're the best, thanks!", "tags": ["chat", "homophone"]}
+{"id": "homophone-031", "input": "Thank you for you're patience while we look into this.", "minimal": "Thank you for your patience while we look into this.", "tags": ["email", "homophone"]}
+{"id": "homophone-032", "input": "We've decided to go with vendor B. Their pricing is better and they're support team was more responsive.", "minimal": "We've decided to go with vendor B. Their pricing is better and their support team was more responsive.", "tags": ["email", "homophone"]}
+{"id": "runon-001", "input": "i checked the logs its fine now", "minimal": "I checked the logs it's fine now", "fluent": "I checked the logs. It's fine now", "alt": ["I checked the logs, it's fine now", "I checked the logs; it's fine now"], "tags": ["chat", "runon", "caps", "homophone"]}
+{"id": "runon-002", "input": "the server crashed last night we lost about an hour of data", "minimal": "The server crashed last night we lost about an hour of data", "fluent": "The server crashed last night. We lost about an hour of data", "alt": ["The server crashed last night, and we lost about an hour of data", "The server crashed last night; we lost about an hour of data", "The server crashed last night, we lost about an hour of data"], "tags": ["chat", "runon", "caps"]}
+{"id": "runon-003", "input": "thanks for the update i will look at it tomorrow", "minimal": "Thanks for the update I will look at it tomorrow", "fluent": "Thanks for the update. I will look at it tomorrow", "alt": ["Thanks for the update, I will look at it tomorrow"], "tags": ["chat", "runon", "caps"]}
+{"id": "runon-004", "input": "I tried that it didn't work", "fluent": "I tried that. It didn't work", "alt": ["I tried that, but it didn't work", "I tried that, it didn't work"], "tags": ["chat", "runon"]}
+{"id": "runon-005", "input": "The meeting ran late I couldn't call you back.", "fluent": "The meeting ran late, so I couldn't call you back.", "alt": ["The meeting ran late. I couldn't call you back.", "The meeting ran late, I couldn't call you back."], "tags": ["chat", "runon"]}
+{"id": "runon-006", "input": "we should refactor this it's getting hard to follow", "minimal": "We should refactor this it's getting hard to follow", "fluent": "We should refactor this. It's getting hard to follow", "alt": ["We should refactor this; it's getting hard to follow", "We should refactor this, it's getting hard to follow"], "tags": ["review", "runon", "caps"]}
+{"id": "runon-007", "input": "Please review the PR I added the tests you asked for", "fluent": "Please review the PR. I added the tests you asked for", "alt": ["Please review the PR, I added the tests you asked for"], "tags": ["review", "runon"]}
+{"id": "runon-008", "input": "I'm at the airport my flight is delayed by two hours", "fluent": "I'm at the airport. My flight is delayed by two hours", "alt": ["I'm at the airport, my flight is delayed by two hours", "I'm at the airport; my flight is delayed by two hours", "I'm at the airport, and my flight is delayed by two hours"], "tags": ["chat", "runon"]}
+{"id": "runon-009", "input": "The fix is merged you can pull main now", "fluent": "The fix is merged. You can pull main now", "alt": ["The fix is merged, so you can pull main now", "The fix is merged, you can pull main now"], "tags": ["chat", "runon"]}
+{"id": "runon-010", "input": "this function is too long it does three different things", "minimal": "This function is too long it does three different things", "fluent": "This function is too long. It does three different things", "alt": ["This function is too long; it does three different things", "This function is too long: it does three different things", "This function is too long, it does three different things"], "tags": ["review", "runon", "caps"]}
+{"id": "runon-011", "input": "Hi Sam I hope you're well I wanted to ask about the invoice", "fluent": "Hi Sam, I hope you're well. I wanted to ask about the invoice", "alt": ["Hi Sam, I hope you're well, I wanted to ask about the invoice"], "tags": ["email", "runon"]}
+{"id": "runon-012", "input": "the docs are outdated they still mention the old API", "minimal": "The docs are outdated they still mention the old API", "fluent": "The docs are outdated. They still mention the old API", "alt": ["The docs are outdated; they still mention the old API", "The docs are outdated, they still mention the old API"], "tags": ["review", "runon", "caps"]}
+{"id": "runon-013", "input": "We can ship today if QA signs off otherwise it moves to Monday", "fluent": "We can ship today if QA signs off; otherwise, it moves to Monday", "alt": ["We can ship today if QA signs off. Otherwise, it moves to Monday", "We can ship today if QA signs off, otherwise it moves to Monday", "We can ship today if QA signs off; otherwise it moves to Monday", "We can ship today if QA signs off. Otherwise it moves to Monday"], "tags": ["chat", "runon"]}
+{"id": "runon-014", "input": "Write a function that parses dates it should handle ISO 8601 and Unix timestamps", "fluent": "Write a function that parses dates. It should handle ISO 8601 and Unix timestamps", "alt": ["Write a function that parses dates; it should handle ISO 8601 and Unix timestamps", "Write a function that parses dates, it should handle ISO 8601 and Unix timestamps"], "tags": ["prompt", "runon"]}
+{"id": "runon-015", "input": "ok that makes sense i'll update the PR", "minimal": "Ok that makes sense I'll update the PR", "fluent": "Ok, that makes sense. I'll update the PR", "alt": ["OK, that makes sense. I'll update the PR", "Ok that makes sense. I'll update the PR", "Ok, that makes sense, I'll update the PR", "OK that makes sense; I'll update the PR", "Ok that makes sense; I'll update the PR", "OK, that makes sense; I'll update the PR"], "tags": ["chat", "runon", "caps"]}
+{"id": "missing_word-001", "input": "I going to the office tomorrow.", "minimal": "I am going to the office tomorrow.", "alt": ["I'm going to the office tomorrow."], "tags": ["chat", "missing_word"]}
+{"id": "missing_word-002", "input": "Can you send me file?", "minimal": "Can you send me the file?", "tags": ["chat", "missing_word"]}
+{"id": "missing_word-003", "input": "She said she send it tomorrow.", "minimal": "She said she will send it tomorrow.", "alt": ["She said she'll send it tomorrow.", "She said she would send it tomorrow."], "tags": ["chat", "missing_word"]}
+{"id": "missing_word-004", "input": "I have been waiting for hour.", "minimal": "I have been waiting for an hour.", "tags": ["chat", "missing_word"]}
+{"id": "missing_word-005", "input": "Did you get chance to look at it?", "minimal": "Did you get a chance to look at it?", "tags": ["email", "missing_word"]}
+{"id": "missing_word-006", "input": "Let me know if have any questions.", "minimal": "Let me know if you have any questions.", "tags": ["email", "missing_word"]}
+{"id": "missing_word-007", "input": "The meeting is moved Thursday.", "minimal": "The meeting is moved to Thursday.", "tags": ["email", "missing_word"]}
+{"id": "missing_word-008", "input": "Thank you for help with the migration.", "minimal": "Thank you for your help with the migration.", "alt": ["Thank you for the help with the migration."], "tags": ["email", "missing_word"]}
+{"id": "missing_word-009", "input": "Can you explain what this function does and why it slow?", "minimal": "Can you explain what this function does and why it is slow?", "alt": ["Can you explain what this function does and why it's slow?"], "tags": ["prompt", "missing_word"]}
+{"id": "missing_word-010", "input": "This is one the best talks I've seen.", "minimal": "This is one of the best talks I've seen.", "tags": ["chat", "missing_word"]}
+{"id": "missing_word-011", "input": "We should able to finish by Friday.", "minimal": "We should be able to finish by Friday.", "tags": ["email", "missing_word"]}
+{"id": "missing_word-012", "input": "He is responsible the deployment pipeline.", "minimal": "He is responsible for the deployment pipeline.", "tags": ["email", "missing_word"]}
+{"id": "missing_word-013", "input": "Give me list of the top ten Python libraries for data science.", "minimal": "Give me a list of the top ten Python libraries for data science.", "tags": ["prompt", "missing_word"]}
+{"id": "missing_word-014", "input": "The PR needs one more approval before it can merged.", "minimal": "The PR needs one more approval before it can be merged.", "tags": ["review", "missing_word"]}
+{"id": "missing_word-015", "input": "I'm not sure what you mean, can you give example?", "minimal": "I'm not sure what you mean, can you give an example?", "tags": ["chat", "missing_word"]}
+{"id": "missing_word-016", "input": "What you think about the new logo?", "minimal": "What do you think about the new logo?", "tags": ["prompt", "missing_word"]}
+{"id": "missing_word-017", "input": "Explain me how the garbage collector works in Go.", "minimal": "Explain to me how the garbage collector works in Go.", "tags": ["prompt", "missing_word"]}
+{"id": "grammar-001", "input": "how to get in place the new process before launch", "minimal": "How to get in place the new process before launch", "fluent": "How do we get the new process in place before launch", "alt": ["How do we get the new process in place before launch?", "How do we put the new process in place before launch?"], "tags": ["chat", "grammar", "caps"]}
+{"id": "grammar-002", "input": "Me and him are working on it.", "fluent": "He and I are working on it.", "tags": ["chat", "grammar"]}
+{"id": "grammar-003", "input": "I have went to the store already.", "minimal": "I have gone to the store already.", "tags": ["chat", "grammar"]}
+{"id": "grammar-004", "input": "The reason is because the cache was stale.", "fluent": "The reason is that the cache was stale.", "tags": ["email", "grammar"]}
+{"id": "grammar-005", "input": "Can you please let me know that when you will be available?", "minimal": "Can you please let me know when you will be available?", "tags": ["email", "grammar"]}
+{"id": "grammar-006", "input": "Despite of the delay, we shipped on time.", "minimal": "Despite the delay, we shipped on time.", "tags": ["email", "grammar"]}
+{"id": "grammar-007", "input": "I am agree with your proposal.", "minimal": "I agree with your proposal.", "tags": ["email", "grammar"]}
+{"id": "grammar-008", "input": "What is the reason of this error?", "minimal": "What is the reason for this error?", "tags": ["prompt", "grammar"]}
+{"id": "grammar-009", "input": "We discussed about the roadmap yesterday.", "minimal": "We discussed the roadmap yesterday.", "tags": ["email", "grammar"]}
+{"id": "grammar-010", "input": "If I would have known, I would have told you.", "minimal": "If I had known, I would have told you.", "tags": ["chat", "grammar"]}
+{"id": "grammar-011", "input": "He suggested me to use a different library.", "fluent": "He suggested that I use a different library.", "alt": ["He suggested I use a different library."], "tags": ["chat", "grammar"]}
+{"id": "grammar-012", "input": "The more you practice, more better you get.", "minimal": "The more you practice, the better you get.", "tags": ["chat", "grammar"]}
+{"id": "grammar-013", "input": "Looking forward to hear from you.", "minimal": "Looking forward to hearing from you.", "tags": ["email", "grammar"]}
+{"id": "grammar-014", "input": "I didn't understood the last part.", "minimal": "I didn't understand the last part.", "tags": ["chat", "grammar"]}
+{"id": "grammar-015", "input": "How it works when the token expires?", "fluent": "How does it work when the token expires?", "tags": ["prompt", "grammar"]}
+{"id": "grammar-016", "input": "Why the build is failing on main?", "fluent": "Why is the build failing on main?", "tags": ["review", "grammar"]}
+{"id": "grammar-017", "input": "Can you tell me what is the difference between these two approaches?", "fluent": "Can you tell me what the difference is between these two approaches?", "tags": ["prompt", "grammar"]}
+{"id": "grammar-018", "input": "This approach is more simple and more fast.", "fluent": "This approach is simpler and faster.", "tags": ["review", "grammar"]}
+{"id": "grammar-019", "input": "I want that you review this before Friday.", "fluent": "I want you to review this before Friday.", "tags": ["review", "grammar"]}
+{"id": "grammar-020", "input": "Since two weeks I am working on this bug.", "fluent": "I have been working on this bug for two weeks.", "alt": ["For two weeks I have been working on this bug."], "tags": ["chat", "grammar"]}
+{"id": "grammar-021", "input": "The users which signed up yesterday didn't get the email.", "minimal": "The users who signed up yesterday didn't get the email.", "alt": ["The users that signed up yesterday didn't get the email."], "tags": ["email", "grammar"]}
+{"id": "grammar-022", "input": "Its important that everyone are on time.", "minimal": "It's important that everyone is on time.", "tags": ["email", "grammar", "homophone"]}
+{"id": "grammar-023", "input": "Kindly find the attached the report.", "minimal": "Kindly find attached the report.", "fluent": "Kindly find the report attached.", "alt": ["Kindly find the attached report."], "tags": ["email", "grammar"]}
+{"id": "grammar-024", "input": "If you have any question, feel free to ask.", "minimal": "If you have any questions, feel free to ask.", "tags": ["email", "grammar"]}
+{"id": "grammar-025", "input": "The app crash when user click the button twice", "minimal": "The app crashes when the user clicks the button twice", "alt": ["The app crashes when a user clicks the button twice", "The app crashes when users click the button twice", "The app crashes when user clicks the button twice"], "tags": ["review", "grammar", "agreement"]}
+{"id": "grammar-026", "input": "I will send you the details after I will check with the team.", "minimal": "I will send you the details after I check with the team.", "tags": ["email", "grammar"]}
+{"id": "grammar-027", "input": "Could you send me the files which you told me yesterday?", "fluent": "Could you send me the files you told me about yesterday?", "alt": ["Could you send me the files that you told me about yesterday?"], "tags": ["chat", "grammar"]}
+{"id": "grammar-028", "input": "We need to discuss on this tomorrow.", "minimal": "We need to discuss this tomorrow.", "tags": ["email", "grammar"]}
+{"id": "grammar-029", "input": "Who did you gave the keys to?", "minimal": "Who did you give the keys to?", "tags": ["chat", "grammar"]}
+{"id": "grammar-030", "input": "Write me a explanation of how DNS works for beginners.", "minimal": "Write me an explanation of how DNS works for beginners.", "tags": ["prompt", "grammar"]}
+{"id": "multi-001", "input": "Hi team,\njust a heads up that the deploy is scheduled for tonight at 9. please dont merge anything after 6 unless its urgent.\nThanks", "minimal": "Hi team,\nJust a heads up that the deploy is scheduled for tonight at 9. Please don't merge anything after 6 unless it's urgent.\nThanks", "tags": ["email", "multi", "caps", "apostrophe", "homophone"]}
+{"id": "multi-002", "input": "can you write a script that goes through all the csv files in a folder and merge them into one, the files have same columns", "minimal": "Can you write a script that goes through all the csv files in a folder and merges them into one, the files have the same columns", "fluent": "Can you write a script that goes through all the csv files in a folder and merges them into one? The files have the same columns", "alt": ["Can you write a script that goes through all the CSV files in a folder and merges them into one, the files have the same columns", "Can you write a script that goes through all the CSV files in a folder and merges them into one? The files have the same columns"], "tags": ["prompt", "multi", "caps", "agreement", "grammar"]}
+{"id": "multi-003", "input": "Dear Mr. Khan,\nI am writing to inform you that your order have been shipped. You should recieve it within 3-5 business days.\nRegards,\nSupport", "minimal": "Dear Mr. Khan,\nI am writing to inform you that your order has been shipped. You should receive it within 3-5 business days.\nRegards,\nSupport", "tags": ["email", "multi", "agreement", "typo"]}
+{"id": "multi-004", "input": "this PR adds retry logic to the http client. i havent added tests yet, will do tomorow", "minimal": "This PR adds retry logic to the http client. I haven't added tests yet, will do tomorrow", "alt": ["This PR adds retry logic to the HTTP client. I haven't added tests yet, will do tomorrow", "This PR adds retry logic to the http client. I haven't added tests yet. Will do tomorrow"], "tags": ["review", "multi", "caps", "apostrophe", "typo"]}
+{"id": "multi-005", "input": "Hey! just checking if you got my last message , no rush", "minimal": "Hey! Just checking if you got my last message, no rush", "tags": ["chat", "multi", "caps", "spacing"]}
+{"id": "multi-006", "input": "I reviewed the changes. overall it looks good but the error handling in upload() need some work", "minimal": "I reviewed the changes. Overall it looks good but the error handling in upload() needs some work", "alt": ["I reviewed the changes. Overall, it looks good, but the error handling in upload() needs some work"], "tags": ["review", "multi", "caps", "agreement"]}
+{"id": "multi-007", "input": "summarize the following meeting notes and list the action items with owners , keep it under 100 words", "minimal": "Summarize the following meeting notes and list the action items with owners, keep it under 100 words", "fluent": "Summarize the following meeting notes and list the action items with owners. Keep it under 100 words", "alt": ["Summarize the following meeting notes and list the action items with owners; keep it under 100 words", "Summarize the following meeting notes and list the action items with owners, keep it under 100 words"], "tags": ["prompt", "multi", "caps", "spacing"]}
+{"id": "multi-008", "input": "Good afternoon,\nCould you please confirm if the venue have projector and wifi?\nThank you", "minimal": "Good afternoon,\nCould you please confirm if the venue has a projector and wifi?\nThank you", "alt": ["Good afternoon,\nCould you please confirm if the venue has a projector and Wi-Fi?\nThank you", "Good afternoon,\nCould you please confirm if the venue has projector and wifi?\nThank you"], "tags": ["email", "multi", "agreement", "missing_word"]}
+{"id": "multi-009", "input": "the onboarding doc is great but its missing the vpn setup steps", "minimal": "The onboarding doc is great but it's missing the vpn setup steps", "alt": ["The onboarding doc is great but it's missing the VPN setup steps", "The onboarding doc is great, but it's missing the VPN setup steps"], "tags": ["chat", "multi", "caps", "homophone"]}
+{"id": "multi-010", "input": "I'm sorry I wasnt able to join the call, my internet was down. can we reschedule for tomorrow?", "minimal": "I'm sorry I wasn't able to join the call, my internet was down. Can we reschedule for tomorrow?", "tags": ["email", "multi", "apostrophe", "caps"]}
+{"id": "multi-011", "input": "fix the bug where the modal dont close when you press escape", "minimal": "Fix the bug where the modal doesn't close when you press escape", "alt": ["Fix the bug where the modal doesn't close when you press Escape"], "tags": ["prompt", "multi", "caps", "agreement"]}
+{"id": "multi-012", "input": "Nit: this comment is out of date, the function no longer return a list", "minimal": "Nit: this comment is out of date, the function no longer returns a list", "alt": ["Nit: This comment is out of date, the function no longer returns a list"], "tags": ["review", "multi", "agreement"]}
+{"id": "multi-013", "input": "Could we add a note to the README about how to run the tests locally? Its not obvious.", "minimal": "Could we add a note to the README about how to run the tests locally? It's not obvious.", "tags": ["review", "multi", "homophone"]}
+{"id": "multi-014", "input": "Write me a cover letter for a junior data analyst role, i have experience with sql, excel and tableau", "minimal": "Write me a cover letter for a junior data analyst role, I have experience with SQL, Excel and Tableau", "fluent": "Write me a cover letter for a junior data analyst role. I have experience with SQL, Excel and Tableau", "alt": ["Write me a cover letter for a junior data analyst role, I have experience with sql, excel and tableau", "Write me a cover letter for a junior data analyst role. I have experience with sql, excel and tableau"], "tags": ["prompt", "multi", "caps"]}
+{"id": "multi-015", "input": "hey sorry i missed you're call, was in a meeting. can talk after 5 if that works", "minimal": "Hey sorry I missed your call, was in a meeting. Can talk after 5 if that works", "alt": ["Hey, sorry I missed your call, was in a meeting. Can talk after 5 if that works"], "tags": ["chat", "multi", "typo", "caps", "homophone"]}
+{"id": "multi-016", "input": "Thank you for reaching out. Unfortunatly the position have already been filled, but we will keep your resume on file.", "minimal": "Thank you for reaching out. Unfortunately the position has already been filled, but we will keep your resume on file.", "alt": ["Thank you for reaching out. Unfortunately, the position has already been filled, but we will keep your resume on file."], "tags": ["email", "multi", "typo", "agreement"]}
+{"id": "multi-017", "input": "give me a step by step plan to lern spanish in 6 months, i can study 1 hour a day", "minimal": "Give me a step by step plan to learn Spanish in 6 months, I can study 1 hour a day", "fluent": "Give me a step-by-step plan to learn Spanish in 6 months. I can study 1 hour a day", "alt": ["Give me a step-by-step plan to learn Spanish in 6 months, I can study 1 hour a day"], "tags": ["prompt", "multi", "caps", "typo"]}
+{"id": "multi-018", "input": "`retry()` swallow the original exception, so the logs only shows the last one", "minimal": "`retry()` swallows the original exception, so the logs only show the last one", "tags": ["review", "multi", "protected", "agreement"]}
+{"id": "multi-019", "input": "@omar the staging deploy failed again, can you take a look when your free?", "minimal": "@omar the staging deploy failed again, can you take a look when you're free?", "tags": ["chat", "multi", "protected", "caps", "typo"]}

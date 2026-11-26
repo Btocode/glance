@@ -1,6 +1,7 @@
 """Drop issues the user must never see: protected spans, ignored rules, dictionary words."""
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 
 from glance.grammar.issues import Issue
@@ -43,9 +44,40 @@ class IssueFilter:
                 continue
             if i.source == "harper" and overlaps(local_spans, i.start, i.end):
                 continue
+            if i.source == "llm" and i.replacements and overlaps(local_spans, i.start, i.end) \
+                    and i.replacements[0].lower() == text[i.start:i.end].lower():
+                continue  # Banglish has no capitals to fix ("ok ami dekhtesi" stays)
             if i.rule in extra_ignored or self._ignored.is_ignored(i.rule, wm_class):
                 continue
             if self._dictionary.contains(text[i.start:i.end]):
                 continue
             out.append(i)
         return out
+
+
+_TOKEN = re.compile(r"\S+")
+_EDGE = "\"'([{<“‘"
+_TRAIL = ".,;:!?\"')]}>”’…"
+_CODE = re.compile(
+    r"[_/\\~=<>{}\[\]|$^]"   # snake_case, paths, ~/home, a=b, generics, regexes
+    r"|\w\.[a-z0-9_]"            # file.ext, sam.lee, a.b.c (not "Done.Moving")
+    r"|\(\)"                     # call()
+    r"|[a-z][A-Z]"               # camelCase, iOS
+    r"|\A\.\w|\A--?\w"           # .env, --flag, -i
+)
+
+
+def code_like_spans(text: str) -> list[Span]:
+    """Spans (kind `code`) of words that look like code, paths, file names or identifiers
+    (`parse_config()`, `~/.config/x.toml`, `.gitignore`, `req/min`, `useEffect`): no
+    correction touches them, from either the local checker or the AI."""
+    out = []
+    for m in _TOKEN.finditer(text):
+        a, b = m.start(), m.end()
+        while a < b and text[a] in _EDGE:
+            a += 1
+        while b > a and text[b - 1] in _TRAIL:
+            b -= 1
+        if b > a and _CODE.search(text[a:b]):
+            out.append(Span(a, b, "code"))
+    return out

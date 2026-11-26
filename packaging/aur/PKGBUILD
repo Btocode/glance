@@ -1,0 +1,65 @@
+# Maintainer: Btocode <https://github.com/Btocode>
+#
+# Glance for Arch Linux (AUR: glance-writing-assistant). The package installs Glance's
+# commands and its support files system-wide; each user then runs `glance setup` once (the
+# systemd user unit, GNOME Shell extension, harper-ls and `glance doctor --fix` are per user).
+#
+# Updating: set pkgver, then `updpkgsums && makepkg --printsrcinfo > .SRCINFO`. The sdist's
+# SHA-256 is also in the release's SHA256SUMS. _corever follows scripts/core-wheels.sha256.
+
+pkgname=glance-writing-assistant
+pkgver=0.4.0
+pkgrel=1
+_corever=0.3.0
+_corewheel=glance_core-${_corever}-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+pkgdesc="System-wide writing assistant: grammar, tone rewrites and AI actions in any app"
+arch=('x86_64')
+url="https://github.com/Btocode/glance"
+license=('MIT')
+depends=(
+    'python' 'python-gobject' 'python-cairo' 'gtk3' 'at-spi2-core' 'libwnck3' 'libnotify'
+    'libsecret' 'glib2' 'python-httpx' 'python-tomlkit' 'python-tomli' 'python-xlib' 'curl'
+    'systemd'
+)
+optdepends=(
+    'libayatana-appindicator: tray icon'
+    'gnome-shell: GNOME on Wayland (Glance installs its own shell extension per user)'
+    'tesseract: OCR fallback for Glance Shot'
+    'git: lets glance update compare commits on the main channel'
+)
+makedepends=('python-build' 'python-installer' 'python-hatchling')
+install=glance-writing-assistant.install
+conflicts=('python-glanceclient')  # also ships /usr/bin/glance
+source=(
+    "https://github.com/Btocode/glance/releases/download/v${pkgver}/glance-${pkgver}.tar.gz"
+    "https://github.com/Btocode/glance/releases/download/core-v${_corever}/${_corewheel}"
+)
+noextract=("${_corewheel}")
+sha256sums=('SKIP'
+            'e19d4eefcb9a9f82f6d44cf3392511cd7a8b52c2807044ac81aec1a353ad8c53')
+
+build() {
+    cd "glance-${pkgver}"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "glance-${pkgver}"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+    # Harper in Glance's own process (pinned wheel); without it Glance uses harper-ls
+    python -m installer --destdir="$pkgdir" "$srcdir/${_corewheel}"
+
+    # What `glance setup` runs (install.sh --setup-only) and reads
+    local share="$pkgdir/usr/share/glance"
+    install -d "$share"
+    cp -r install.sh uninstall.sh pyproject.toml scripts packaging extension "$share/"
+
+    # `glance update` points at the package manager instead of the curl installer
+    local site
+    site="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+    printf 'the AUR package %s|yay -Syu %s (or your AUR helper)\n' "$pkgname" "$pkgname" \
+        >"$pkgdir$site/glance/_packaged"
+
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

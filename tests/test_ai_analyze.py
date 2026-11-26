@@ -181,7 +181,9 @@ def test_mixed_language_reaches_the_backend(tmp_path):
     seen = []
     rig = Rig(tmp_path, language=lambda text: seen.append(text) or True)
     rig.analyzed()
-    assert seen == [TEXT]  # the detector judges the user's text, not the shielded one
+    # the detector judges the user's text, not the shielded one (on focus, for the spare
+    # process's prompt, and for the call)
+    assert seen and set(seen) == {TEXT}
     assert rig.backend.calls[-1].ctx.mixed_language is True
 
 

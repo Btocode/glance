@@ -209,7 +209,8 @@ def test_cli_commands_print_no_log_lines(cli_home, monkeypatch, capsys, argv):
 
     monkeypatch.setattr(cli, "_request", request)
     monkeypatch.setattr(runner, "run_checks", checks)
-    monkeypatch.setattr(update, "check", lambda: (_logs_from_a_thread(), ("current", "a", "a"))[1])
+    current = update.UpdateCheck("current", "0.4.0", "0.4.0")
+    monkeypatch.setattr(update, "check", lambda: (_logs_from_a_thread(), current)[1])
     cli.main(argv)
     out = capsys.readouterr()
     for stream in (out.out, out.err):

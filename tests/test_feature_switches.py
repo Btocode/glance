@@ -11,7 +11,7 @@ from glance.config import Config, SelectionCfg, load_config, update_config
 
 
 def test_registry_lists_every_feature_once_with_defaults():
-    assert fs.NAMES == ("typing", "selection", "shot", "autocomplete")
+    assert fs.NAMES == ("typing", "selection", "shot", "autocomplete", "fluent")
     cfg = Config()
     assert fs.is_on(cfg, "selection") is True        # decision 1: on by default
     assert fs.is_on(cfg, "shot") is True              # [shot] enabled, default true
@@ -19,13 +19,16 @@ def test_registry_lists_every_feature_once_with_defaults():
     assert fs.is_on(cfg, "autocomplete") is False     # auto: only with the api backend
     api = replace(cfg, backend=replace(cfg.backend, choice="api"))
     assert fs.is_on(api, "autocomplete") is True
+    assert fs.is_on(cfg, "fluent") is False           # [general] correction = "minimal"
+    fluent = replace(cfg, general=replace(cfg.general, correction="fluent"))
+    assert fs.is_on(fluent, "fluent") is True
     with pytest.raises(KeyError):
         fs.feature("nope")
 
 
 def test_menu_rows_leave_the_check_mode_to_its_radio_items():
     rows = fs.menu_rows(Config())
-    assert [r.name for r in rows] == ["selection", "shot", "autocomplete"]
+    assert [r.name for r in rows] == ["selection", "shot", "autocomplete", "fluent"]
     assert rows[0].label == "Selection actions" and rows[1].label == "Glance Shot"
 
 

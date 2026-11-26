@@ -1,0 +1,148 @@
+{
+ "local_minimal": {
+  "ALL": {
+   "n": 362,
+   "exact": 0.655,
+   "precision": 0.962,
+   "recall": 0.514,
+   "f1": 0.67,
+   "false_correction": 0.017
+  },
+  "agreement": {
+   "n": 34,
+   "exact": 0.176,
+   "precision": 0.857,
+   "recall": 0.267,
+   "f1": 0.407,
+   "false_correction": 0.059
+  },
+  "apostrophe": {
+   "n": 36,
+   "exact": 0.583,
+   "precision": 1.0,
+   "recall": 0.627,
+   "f1": 0.771,
+   "false_correction": 0.0
+  },
+  "banglish": {
+   "n": 36,
+   "exact": 0.917,
+   "precision": 1.0,
+   "recall": 0.571,
+   "f1": 0.727,
+   "false_correction": 0.0
+  },
+  "caps": {
+   "n": 60,
+   "exact": 0.4,
+   "precision": 0.968,
+   "recall": 0.556,
+   "f1": 0.706,
+   "false_correction": 0.033
+  },
+  "chat": {
+   "n": 178,
+   "exact": 0.669,
+   "precision": 0.93,
+   "recall": 0.504,
+   "f1": 0.653,
+   "false_correction": 0.028
+  },
+  "correct": {
+   "n": 87,
+   "exact": 0.989,
+   "precision": 0.0,
+   "recall": 1.0,
+   "f1": 0.0,
+   "false_correction": 0.011
+  },
+  "email": {
+   "n": 77,
+   "exact": 0.545,
+   "precision": 1.0,
+   "recall": 0.473,
+   "f1": 0.642,
+   "false_correction": 0.0
+  },
+  "grammar": {
+   "n": 32,
+   "exact": 0.594,
+   "precision": 0.833,
+   "recall": 0.37,
+   "f1": 0.513,
+   "false_correction": 0.062
+  },
+  "homophone": {
+   "n": 42,
+   "exact": 0.19,
+   "precision": 1.0,
+   "recall": 0.279,
+   "f1": 0.436,
+   "false_correction": 0.0
+  },
+  "missing_word": {
+   "n": 18,
+   "exact": 0.111,
+   "precision": 0.667,
+   "recall": 0.111,
+   "f1": 0.19,
+   "false_correction": 0.056
+  },
+  "multi": {
+   "n": 19,
+   "exact": 0.211,
+   "precision": 0.957,
+   "recall": 0.524,
+   "f1": 0.677,
+   "false_correction": 0.053
+  },
+  "prompt": {
+   "n": 30,
+   "exact": 0.733,
+   "precision": 0.933,
+   "recall": 0.583,
+   "f1": 0.718,
+   "false_correction": 0.033
+  },
+  "protected": {
+   "n": 40,
+   "exact": 0.75,
+   "precision": 0.938,
+   "recall": 0.577,
+   "f1": 0.714,
+   "false_correction": 0.025
+  },
+  "review": {
+   "n": 77,
+   "exact": 0.701,
+   "precision": 1.0,
+   "recall": 0.554,
+   "f1": 0.713,
+   "false_correction": 0.0
+  },
+  "runon": {
+   "n": 15,
+   "exact": 0.867,
+   "precision": 1.0,
+   "recall": 0.7,
+   "f1": 0.824,
+   "false_correction": 0.0
+  },
+  "spacing": {
+   "n": 23,
+   "exact": 0.609,
+   "precision": 1.0,
+   "recall": 0.744,
+   "f1": 0.853,
+   "false_correction": 0.0
+  },
+  "typo": {
+   "n": 41,
+   "exact": 0.707,
+   "precision": 1.0,
+   "recall": 0.721,
+   "f1": 0.838,
+   "false_correction": 0.0
+  }
+ }
+}

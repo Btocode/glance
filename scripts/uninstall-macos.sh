@@ -109,7 +109,7 @@ remove_data() {
     if [ "$KEEP_DATA" = 0 ]; then rm -rf "$STATE_DIR"; fi  # update.log and the sockets
     [ -d "$DATA_DIR" ] || return 0
     if [ "$KEEP_DATA" = 1 ]; then
-        rm -rf "$DATA_DIR/bin" "$DATA_DIR/python" "$DATA_DIR/uv" "$DATA_DIR/uv-cache"
+        rm -rf "${DATA_DIR:?}/bin" "$DATA_DIR/python" "$DATA_DIR/uv" "$DATA_DIR/uv-cache"
         rm -f "$MANIFEST"
         say "Kept your data in $DATA_DIR"
         return 0

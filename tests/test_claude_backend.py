@@ -162,8 +162,9 @@ def test_prewarm_used_once_then_replaced(log):
     assert b._idle == {}
 
 
-def test_analyze_never_uses_a_warm_process(log):
-    """A stream-json session reasons before it answers: slower than a cold `-p` call."""
+def test_analyze_never_uses_the_warm_session(log):
+    """Analyze never goes to the stream-json input session (its system prompt rides in the
+    message); its own spare is a `-p` call with the real system prompt (test_speed_path)."""
     b = make(log, warm=True)
     b.prewarm("analyze")
     b.wait_warm()

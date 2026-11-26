@@ -10,8 +10,10 @@ were made for stays in the focused field.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
 from typing import Any, TypeVar
 
 from glance.audience.resolver import AudienceResolver, Resolved
@@ -112,6 +114,9 @@ class _Job:
         self.backend = "AI"  # the loader's "Checking with <backend>…"
         self.spinning = False
         self.cancelled = False
+        # The AI's corrections as far as its corrected text has streamed in (main loop).
+        self.partial: tuple[Issue, ...] = ()
+        self.partial_at = 0.0  # when the job's thread last sent one (its own clock)
 
 
 @dataclass(frozen=True)
@@ -189,13 +194,14 @@ def _display(text: str, shielded: Shielded) -> str:
     return _PLACEHOLDER.sub(sub, text)
 
 
-def _entry(shielded: Shielded, analysis: Analysis, offset: int = 0) -> _Entry:
+def _entry(shielded: Shielded, analysis: Analysis, offset: int = 0,
+           correction: str = "minimal") -> _Entry:
     """Anchor the issues on the shielded text the model saw, then map them back (`offset`:
     where that text starts in the field, when only a window of it was sent)."""
     issues: dict[str, Issue] = {}
     found = analysis_to_issues(shielded.text, analysis)
     fixed = None if analysis.corrected is None else \
-        corrected_issues(shielded.text, analysis.corrected)
+        corrected_issues(shielded.text, analysis.corrected, correction)
     if fixed is None:
         analysis = replace(analysis, corrected=None)  # a rewrite: it corrects nothing
     else:
@@ -211,6 +217,29 @@ def _entry(shielded: Shielded, analysis: Analysis, offset: int = 0) -> _Entry:
         issues.setdefault(issue.id, issue)
     reason = None if analysis.reason is None else _display(analysis.reason, shielded)
     return _Entry(replace(analysis, reason=reason), tuple(issues.values()))
+
+
+PARTIAL_ANCHOR = 3  # characters the streamed text must share with the draft to be placed
+
+
+def _provisional(shielded: Shielded, partial: str, offset: int = 0) -> tuple[Issue, ...]:
+    """The corrections in the part of the AI's corrected text received so far.
+
+    The received part is lined up with the draft at its last stretch of PARTIAL_ANCHOR or
+    more characters in common; the draft from there on stands in for what is still to come,
+    so nothing past the received text counts as changed (and a half-written word waits for
+    the next piece)."""
+    text = shielded.text
+    if not partial.strip():
+        return ()
+    blocks = [b for b in SequenceMatcher(None, text, partial, autojunk=False)
+              .get_matching_blocks() if b.size >= PARTIAL_ANCHOR]
+    if not blocks:
+        return ()
+    last = blocks[-1]
+    candidate = partial[:last.b + last.size] + text[last.a + last.size:]
+    entry = _entry(shielded, Analysis("", False, None, (), corrected=candidate), offset)
+    return entry.issues if entry.corrects else ()
 
 
 class AiCoordinator:
@@ -247,6 +276,7 @@ class AiCoordinator:
         rich: Callable[[FieldSnapshot], bool] = lambda s: False,
         writeback: Callable[[FieldSnapshot], str] = lambda s: "auto",
         max_words: Callable[[], int] = lambda: DEFAULT_MAX_WORDS,
+        correction: Callable[[], str] = lambda: "minimal",
     ) -> None:
         self._c = controller
         self._supervisor = supervisor
@@ -259,6 +289,7 @@ class AiCoordinator:
         self._rich = rich
         self._writeback = writeback  # the field's app `writeback` setting
         self._max_words = max_words  # `[ai] max_words`: the most words one call is sent
+        self._correction = correction  # `[general] correction`: "minimal" or "fluent"
         self._ai = "off"  # off (not known yet) | ok | none | limit
         self._probing = False
         self._overrides: dict[str, str] = {}  # context key -> profile name, this session
@@ -281,6 +312,7 @@ class AiCoordinator:
         self._spec_timer: Handle | None = None
         # (target, made) of the text the focus just left: kept for its return
         self._kept_made: tuple[_Target, dict[str, RewriteOutcome]] | None = None
+        self._prepared: tuple[str, Any] | None = None  # (field id, ctx) last prepared for
 
     # ------------------------------------------------------------------ wiring
 
@@ -367,6 +399,8 @@ class AiCoordinator:
 
     def on_snapshot(self, s: FieldSnapshot) -> None:
         self._resolved = r = self._resolve(s)
+        if r.profile.check:
+            self._prepare(s, r)
         entry = self._cache.get(self._key(s, r)) if r.profile.check else None
         self._shown = None if entry is None else (s, entry)
         if self._seen != (s.field_id, s.text):
@@ -382,6 +416,7 @@ class AiCoordinator:
         self._cancel()
 
     def on_focus_lost(self, _reason: str) -> None:
+        self._prepared = None  # a spare may have been stopped meanwhile: ask again on return
         self._leave(keep_rewrite=True)
 
     def on_capture_lost(self) -> None:
@@ -460,6 +495,8 @@ class AiCoordinator:
         """Nothing to fix but the tone is off for the audience: one line says so. A text
         longer than `[ai] max_words` says the AI only read part of it."""
         entry, r = self._entry_for(s), self._resolved
+        if view.segments and view.label is None and self._mode() == "fluent":
+            view = replace(view, label="Fluent")  # the corrected text may reword a little
         if entry is not None and entry.words is not None and not view.empty:
             view = replace(view, meta=limit_notice(*entry.words))
         job = self._pending_check()
@@ -495,7 +532,10 @@ class AiCoordinator:
 
     def _issues(self, s: FieldSnapshot) -> list[Issue]:
         entry = self._entry_for(s)
-        return [] if entry is None else list(entry.issues)
+        if entry is None:
+            job = self._pending_check()
+            return [] if job is None else list(job.partial)  # streaming in
+        return list(entry.issues)
 
     def _corrects(self, s: FieldSnapshot) -> bool:
         entry = self._entry_for(s)
@@ -515,6 +555,21 @@ class AiCoordinator:
         return out
 
     # ------------------------------------------------------------------ analyze
+
+    def _prepare(self, s: FieldSnapshot, r: Resolved) -> None:
+        """A field got the focus (or its audience changed): let the backend get ready for the
+        check (a process started, a connection opened, health known). Only the context goes
+        (profile, tone, strictness, app): the text is read here only to know whether it
+        mixes languages, and is sent nowhere."""
+        prepare = getattr(self._supervisor, "prepare", None)
+        if prepare is None:
+            return
+        w0, w1 = self._window(s)
+        ctx = self._resolver.ctx(s, r, mixed_language=bool(self._language(s.text[w0:w1])))
+        if self._prepared == (s.field_id, ctx):
+            return
+        self._prepared = (s.field_id, ctx)
+        self._run_bg(lambda: prepare(ctx), lambda _r: None)
 
     def _on_analyze_due(self, s: FieldSnapshot, gen: int) -> None:
         r = self._resolve(s)
@@ -536,6 +591,7 @@ class AiCoordinator:
         text = s.text[w0:w1]  # the whole text, or the `max_words` around the caret
         words = None if (w0, w1) == (0, len(s.text)) else \
             (count_words(text), count_words(s.text))
+        mode = self._mode()
         if explicit:
             job.backend = self._backend_title()
             job.spinning = True  # the loader shows at once, not after the status check
@@ -551,9 +607,12 @@ class AiCoordinator:
                 if allowed() and not job.cancelled:
                     self._clock.post(lambda: self._spin(job))
                     shielded = shield(text)  # the backend never sees anything else
-                    ctx = self._resolver.ctx(s, r, mixed_language=bool(self._language(text)))
+                    ctx = replace(self._resolver.ctx(
+                        s, r, mixed_language=bool(self._language(text))), correction=mode)
+                    progress = (lambda p: self._on_partial(job, shielded, p, w0)) \
+                        if explicit else None
                     found = _entry(shielded, self._supervisor.analyze(
-                        shielded.text, ctx, explicit=explicit), w0)
+                        shielded.text, ctx, explicit=explicit, on_partial=progress), w0, mode)
                     if words is not None:
                         found = replace(found, words=words)
                 elif explicit and not job.cancelled:
@@ -571,6 +630,22 @@ class AiCoordinator:
             return found, self._probe(), failure
 
         self._run_bg(work, lambda result: self._done(job, s, *result))
+
+    def _on_partial(self, job: _Job, shielded: Shielded, partial: str, offset: int) -> None:
+        """(The job's thread.) The corrected text so far: its corrections go to the strip,
+        RENDER_MS apart at most. The keycap stays off until the whole answer is in."""
+        now = time.monotonic()
+        if job.cancelled or now - job.partial_at < RENDER_MS / 1000:
+            return
+        job.partial_at = now
+        issues = _provisional(shielded, partial, offset)
+        if issues:
+            self._clock.post(lambda: self._show_partial(job, issues))
+
+    def _show_partial(self, job: _Job, issues: tuple[Issue, ...]) -> None:
+        if self._job is job and job.gen == self._c.generation and not job.cancelled:
+            job.partial = issues
+            self._c.refresh()
 
     def _backend_title(self) -> str:
         try:
@@ -641,7 +716,14 @@ class AiCoordinator:
         p = r.profile
         w0, w1 = self._window(s)
         text = s.text if (w0, w1) == (0, len(s.text)) else f"{w0}:{w1}\0{s.text}"
-        return cache_key(text, p.name, p.target_tone, p.strictness, s.wm_class)
+        return cache_key(text, p.name, p.target_tone, p.strictness, s.wm_class, self._mode())
+
+    def _mode(self) -> str:
+        try:
+            mode = self._correction()
+        except Exception:  # noqa: BLE001 - a config read must not stop a check
+            mode = "minimal"
+        return mode if mode in ("minimal", "fluent") else "minimal"
 
     def _entry_for(self, s: FieldSnapshot | None) -> _Entry | None:
         shown = self._shown

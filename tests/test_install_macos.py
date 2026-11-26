@@ -76,6 +76,7 @@ class MacSandbox:
             "GLANCE_UNAME": "Darwin",
             "GLANCE_SKIP_SWVERS": "1",
             "GLANCE_SKIP_VENV": "1",
+            "GLANCE_NO_UPDATE_CHECK": "1",
             "GLANCE_SKIP_FETCH": "1",
             "GLANCE_SKIP_DOCTOR": "1",
             "SHIM_LOG": str(self.log),
@@ -215,3 +216,30 @@ def test_fetch_harper_pins_each_platform():
         assert len(line.split('"')[1]) == 64
     # the Linux pin keeps the exact line install.sh and doctor read
     assert any(ln.startswith('BINARY_SHA256="c62ae242') for ln in text.splitlines())
+
+
+def test_setup_only_for_homebrew_writes_the_agent_for_the_formulas_glanced(sb):
+    """`glance setup` after `brew install`: the agent runs the formula's glanced; nothing is
+    linked or built; the uninstaller from the formula's share tree takes it back."""
+    before = tree(sb.home)
+    libexec = sb.tmp / "Cellar/glance/0.4.0/libexec"
+    shutil.copytree(sb.checkout / ".venv", libexec)
+    share = sb.tmp / "Cellar/glance/0.4.0/share/glance"
+    shutil.copytree(sb.checkout, share, ignore=shutil.ignore_patterns(".venv"))
+    p = sb.bash([str(share / "scripts/install-macos.sh"), "--setup-only", "--app-bin",
+                 str(libexec / "bin")])
+    assert p.returncode == 0, p.stdout + p.stderr
+    doc = plistlib.loads((sb.home / AGENT).read_bytes())
+    assert doc["ProgramArguments"] == [str(libexec / "bin/glanced")]
+    assert not (sb.home / ".local/bin/glance").exists()
+    assert "venv_created\t0" in (sb.home / MANIFEST).read_text()
+    p = sb.bash([str(share / "scripts/uninstall-macos.sh")])
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert tree(sb.home) == before
+    assert (libexec / "bin/glanced").exists() and (share / "install.sh").exists()
+
+
+def test_macos_ref_is_validated(sb):
+    p = sb.bash([str(sb.checkout / "scripts/install-macos.sh"), "--ref", "bogus"],
+                env={"GLANCE_SRC": str(sb.tmp / "src")})
+    assert p.returncode != 0 and "--ref takes latest, main or a release tag" in p.stderr

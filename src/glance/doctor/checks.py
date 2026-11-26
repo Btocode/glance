@@ -720,15 +720,20 @@ class Updates(_Base):
     id, title = "updates", "Updates"
 
     def run(self, env):
+        from glance.version import version
+
         try:
-            status = env.update_status()
+            got = env.update_status()
         except Exception:  # noqa: BLE001 - never fail doctor over a version lookup
-            status = "unknown"
+            got = "unknown"
+        status = getattr(got, "status", got)
+        line = got.line() if hasattr(got, "line") else None
         if status == "current":
-            return self.ok("up to date")
+            return self.ok(line or f"up to date (Glance {version()})")
         if status == "available":
-            return self.result("warn", "update available", "run `glance update`")
-        return self.ok("could not check (offline or not a git install)")
+            return self.result("warn", line or f"update available (Glance {version()})",
+                               "run `glance update`")
+        return self.ok(f"Glance {version()}; could not check (offline?)")
 
 
 CHECKS: list[Check] = [

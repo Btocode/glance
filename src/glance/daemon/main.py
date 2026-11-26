@@ -151,13 +151,13 @@ def real_backends(cfg: Any, keys: Any = None) -> dict[str, Any]:
 
 def build_issue_filter(dictionary_file: Path, ignored_file: Path) -> tuple[Any, Any]:
     """The IssueFilter with Banglish-aware suppression, and the detector behind it."""
-    from glance.grammar.filters import IssueFilter
+    from glance.grammar.filters import IssueFilter, code_like_spans
     from glance.grammar.lang import LanguageDetector
     from glance.grammar.store import IgnoredRules, PersonalDictionary
 
     dictionary = PersonalDictionary(dictionary_file)
     detector = LanguageDetector(dictionary)
-    return (IssueFilter(dictionary, IgnoredRules(ignored_file), [],
+    return (IssueFilter(dictionary, IgnoredRules(ignored_file), [code_like_spans],
                         issue_span_filters=[detector.spans]), detector)
 
 
@@ -209,7 +209,8 @@ def build_ai(controller: Any, clock: Any, cfg: Callable[[], Any],
         LruCache(), clock, run_bg, language=detector.is_mixed, overlay=overlay,
         rich=lambda s: is_rich_editor(s.wm_class, cfg()),
         writeback=lambda s: cfg().app(s.wm_class).writeback,
-        max_words=lambda: cfg().ai.max_words)
+        max_words=lambda: cfg().ai.max_words,
+        correction=lambda: cfg().general.correction)
     holder.append(ai)
     ai.attach()
     return ai, supervisor
@@ -598,7 +599,8 @@ def main(argv: list[str] | None = None) -> int:
                    on_auto_suggest=lambda on: set_suggestions(
                        update_config, config_path(), on, watcher.reload),
                    auto_suggest=watcher.current.ui.suggestions == "auto",
-                   on_update=lambda: launch_update(notifier.notify, update_log_path()),
+                   on_update=lambda: launch_update(notifier.notify, update_log_path(),
+                                                    args=update_state.update_args()),
                    on_usage_open=lambda: refresh_usage(),
                    on_usage_details=lambda: show_usage_details(),
                    on_check_mode=lambda mode: set_check_mode(
@@ -606,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
                    check_mode=watcher.current.general.check,
                    check_hint=check_label(watcher.current.general.hotkeys.get("check", "")),
                    on_shortcuts=lambda: show_shortcuts(),
+                   on_settings=lambda: show_settings(),
                    on_feature=lambda name, on: set_feature(
                        update_config, config_path(), name, on, watcher.reload),
                    features=menu_rows(watcher.current))
@@ -712,6 +715,7 @@ def main(argv: list[str] | None = None) -> int:
                          on_setup=lambda: setup.open(), bar=features.actions_bar)
     # Glance Shot: the region picker and bar of this desktop, and its controller
     from glance.daemon.shot_wiring import ShotSwitch, build_shot, shot_request
+    from glance.ui.settings_model import settings_request
 
     if wayland:
         from glance.ui.shot_shell import ShellShot
@@ -732,7 +736,19 @@ def main(argv: list[str] | None = None) -> int:
         backend_control=BackendControl(ai_supervisor, ai, keys, current_config, overrides,
                                        run_ai, config_path()),
         edit_host=gtk_edit_host(harper, issue_filter, ai_supervisor, run_ai),
-        extra={"shot": shot_request(shot)})
+        extra={"shot": shot_request(shot), "settings_open": settings_request(
+            lambda section: show_settings(section))})
+
+    settings_window: list[Any] = []
+
+    def show_settings(section: str | None = None) -> None:  # main loop: "Settings…"
+        from glance.ui.settings_gtk import SettingsWindow
+        from glance.ui.settings_model import SettingsModel
+
+        if not settings_window:
+            model = SettingsModel(config_path(), on_written=watcher.reload, overrides=overrides)
+            settings_window.append(SettingsWindow(model, on_usage_details=show_usage_details))
+        settings_window[0].show(section)
 
     def remember_setting(key: str, value: Any) -> None:  # main loop
         try:
@@ -927,7 +943,8 @@ def main(argv: list[str] | None = None) -> int:
     def update_check() -> bool:  # main loop; the lookup runs on its own thread
         if watcher.current.general.check_updates:
             run_update_check(update_state.refresh,
-                             lambda _s: tray.set_update_available(update_state.status == "available"))
+                             lambda _s: tray.set_update_available(update_state.status == "available",
+                                                                  update_state.result.label))
         return GLib.SOURCE_CONTINUE
 
     def first_update_check() -> bool:
@@ -936,7 +953,8 @@ def main(argv: list[str] | None = None) -> int:
         return GLib.SOURCE_REMOVE
 
     GLib.timeout_add_seconds(CHECK_FIRST_S, first_update_check)
-    controller.extra_status.append(lambda: {"update": update_state.status})
+    controller.extra_status.append(lambda: {"update": update_state.status,
+                                            "version": update_state.result.installed})
     rebind()
     session_events.start()
     watcher.start()

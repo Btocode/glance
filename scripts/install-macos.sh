@@ -16,6 +16,11 @@ usage() {
 Usage: install.sh [options]          (on macOS)
 
   --from-local            install from the checkout this script sits in
+  --ref REF               latest (the default: the newest release tag, or main while there
+                          is none), main, or a release tag such as v0.4.0 (also GLANCE_REF)
+  --setup-only            the per-user part only (LaunchAgent, harper-ls, doctor) for a
+                          Glance installed by Homebrew; commands from --app-bin DIR.
+                          `glance setup` runs this.
   --no-start              install the LaunchAgent but do not start Glance now
   --with-rust             build the in-process grammar engine (glance_core) from source with
                           cargo instead of using a pinned prebuilt wheel
@@ -53,9 +58,16 @@ step() {
 
 parse_args() {
     FROM_LOCAL=0 NO_START=0 WITH_RUST=0
+    SETUP_ONLY=0 REF="${GLANCE_REF:-latest}" APP_BIN="${GLANCE_APP_BIN:-}"
     while [ $# -gt 0 ]; do
         case "$1" in
             --from-local) FROM_LOCAL=1 ;;
+            --ref) [ $# -ge 2 ] || die "--ref needs a value (latest, main or a tag)"
+                REF="$2"; shift ;;
+            --ref=*) REF="${1#--ref=}" ;;
+            --setup-only) SETUP_ONLY=1 ;;
+            --app-bin) [ $# -ge 2 ] || die "--app-bin needs a directory"
+                APP_BIN="$2"; shift ;;
             --no-start) NO_START=1 ;;
             --with-rust) WITH_RUST=1 ;;
             # Linux-only options are accepted and ignored, so one command works everywhere.
@@ -104,12 +116,22 @@ setup_paths() {
     if [ -n "$here" ] && is_checkout "$here" && [ -z "${GLANCE_SRC:-}" ]; then
         FROM_LOCAL=1
         SRC="$here"
+    elif [ "$SETUP_ONLY" = 1 ]; then
+        die "--setup-only runs from an installed Glance's own scripts (glance setup)"
     elif [ "$FROM_LOCAL" = 1 ]; then
         die "--from-local needs a Glance checkout: run ./install.sh inside one"
     else
         SRC="${GLANCE_SRC:-$DATA_ROOT/glance-src}"
     fi
     VENV="$SRC/.venv"
+    if [ "$SETUP_ONLY" = 1 ]; then
+        # Homebrew's install: the LaunchAgent runs APP_BIN/glanced (in the formula's libexec).
+        [ -n "$APP_BIN" ] || die "--setup-only needs --app-bin DIR (where glance and glanced are)"
+        [ -x "$APP_BIN/glance" ] && [ -x "$APP_BIN/glanced" ] \
+            || die "$APP_BIN has no glance and glanced commands"
+        APP_BIN="$(cd "$APP_BIN" && pwd -P)"
+        VENV="$(dirname "$APP_BIN")"
+    fi
 }
 
 # ---------------------------------------------------------------------- manifest
@@ -130,7 +152,9 @@ load_previous() {
     UV_INSTALLED="$(manifest_get uv_installed | tail -n 1)"
     CREATED_DIRS="$(manifest_get dir)"
     PREV_LINKS="$(manifest_get link)"
+    # shellcheck disable=SC2034  # kept for parity with install.sh
     HAD_MANIFEST=0
+    # shellcheck disable=SC2034
     [ -f "$MANIFEST" ] && HAD_MANIFEST=1
     : "${CLONED:=0}" "${VENV_CREATED:=0}" "${UV_INSTALLED:=0}"
     if [ "$(manifest_get src_dir | tail -n 1)" != "$SRC" ]; then
@@ -213,7 +237,11 @@ check_prerequisites() {
 # ---------------------------------------------------------------------- step 2: source
 
 fetch_tarball() {
-    local url="${GLANCE_TARBALL_URL:-https://github.com/Btocode/glance/archive/refs/heads/main.tar.gz}"
+    local url="${GLANCE_TARBALL_URL:-}"
+    if [ -z "$url" ] && [ "$REF_KIND" = tag ]; then
+        url="https://github.com/Btocode/glance/archive/refs/tags/$REF_NAME.tar.gz"
+    fi
+    url="${url:-https://github.com/Btocode/glance/archive/refs/heads/main.tar.gz}"
     note "downloading $url"
     ensure_dir "$(dirname "$SRC")"
     local new
@@ -229,6 +257,67 @@ fetch_tarball() {
         rm -rf "$SRC"
     fi
     mv "$new" "$SRC"
+}
+
+# Sets REF_NAME and REF_KIND (tag or branch) from REF: latest, main or a tag. Without git
+# the GitHub API names the newest release (nothing readable: main).
+resolve_ref() {
+    local url="$1" tag=""
+    case "$REF" in
+        latest)
+            if have_git; then
+                tag="$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$url" 'refs/tags/v*' \
+                    </dev/null 2>/dev/null | sed -n 's|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p' \
+                    | sort -t. -k1,1 -k2,2n -k3,3n | tail -n 1)" || tag=""
+            elif [ -z "${GLANCE_TARBALL_URL:-}" ]; then
+                tag="$(curl -fsSL --connect-timeout 15 --max-time 30 \
+                    "https://api.github.com/repos/Btocode/glance/releases?per_page=30" \
+                    </dev/null 2>/dev/null | sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' \
+                    | sort -t. -k1,1 -k2,2n -k3,3n | tail -n 1)" || tag=""
+            fi
+            if [ -n "$tag" ]; then
+                REF_NAME="$tag" REF_KIND=tag
+                note "latest release: $tag"
+            else
+                REF_NAME=main REF_KIND=branch
+                note "no release published yet: installing the main branch"
+            fi
+            ;;
+        main) REF_NAME=main REF_KIND=branch ;;
+        v[0-9]*) REF_NAME="$REF" REF_KIND=tag ;;
+        *) die "--ref takes latest, main or a release tag such as v0.4.0 (not '$REF')" ;;
+    esac
+}
+
+# An existing clone to REF: a tag is checked out (detached); main is fast-forwarded, or
+# switched back to from a tag.
+git_update() {
+    export GIT_TERMINAL_PROMPT=0
+    if [ "$REF_KIND" = tag ]; then
+        note "updating $SRC to $REF_NAME"
+        if [ "$(git -C "$SRC" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+            git -C "$SRC" fetch --quiet --depth 1 origin \
+                "+refs/tags/$REF_NAME:refs/tags/$REF_NAME" </dev/null \
+                || die "could not fetch $REF_NAME into $SRC (is it a release tag?)"
+        else
+            git -C "$SRC" fetch --quiet origin "+refs/tags/$REF_NAME:refs/tags/$REF_NAME" \
+                </dev/null || die "could not fetch $REF_NAME into $SRC (is it a release tag?)"
+        fi
+        git -C "$SRC" -c advice.detachedHead=false checkout --quiet "refs/tags/$REF_NAME" \
+            </dev/null || die "could not check out $REF_NAME in $SRC. Resolve it there" \
+                "(git status), then run again."
+        return
+    fi
+    note "updating $SRC (main)"
+    git -C "$SRC" fetch --quiet origin "+refs/heads/main:refs/remotes/origin/main" </dev/null \
+        || die "could not fetch main into $SRC"
+    if [ "$(git -C "$SRC" symbolic-ref -q --short HEAD 2>/dev/null)" = main ]; then
+        git -C "$SRC" merge --ff-only --quiet refs/remotes/origin/main </dev/null \
+            || die "could not fast-forward $SRC. Resolve it there (git status), then run again."
+    else
+        git -C "$SRC" checkout --quiet -B main refs/remotes/origin/main </dev/null \
+            || die "could not switch $SRC to main. Resolve it there (git status), then run again."
+    fi
 }
 
 get_source() {
@@ -248,15 +337,14 @@ get_source() {
     elif ! is_checkout "$SRC"; then
         die "$SRC exists and is not a Glance checkout. Move it away, or set GLANCE_SRC."
     fi
+    resolve_ref "$url"
     if [ -d "$SRC/.git" ] && have_git; then
-        note "updating $SRC"
-        GIT_TERMINAL_PROMPT=0 git -C "$SRC" pull --ff-only --quiet </dev/null \
-            || die "could not fast-forward $SRC. Resolve it there (git status), then run again."
+        git_update
     elif [ "$fresh" = 1 ] && have_git; then
-        note "cloning $url into $SRC"
+        note "cloning $url ($REF_NAME) into $SRC"
         ensure_dir "$(dirname "$SRC")"
-        GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 "$url" "$SRC" </dev/null \
-            || die "could not clone $url"
+        GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --quiet --depth 1 \
+            --branch "$REF_NAME" "$url" "$SRC" </dev/null || die "could not clone $url ($REF_NAME)"
     else
         fetch_tarball
     fi
@@ -309,7 +397,7 @@ sys.exit(0 if (3, 10) <= sys.version_info[:2] < (3, 14) else 1)' 2>/dev/null; th
             VENV_CREATED=1
         fi
         write_manifest
-        uv_env "$UV" pip install --quiet --python "$VENV/bin/python" -e "$SRC[macos]" </dev/null \
+        uv_env "$UV" pip install --quiet --python "$VENV/bin/python" -e "${SRC}[macos]" </dev/null \
             || die "could not install Glance into $VENV"
     fi
     [ -x "$VENV/bin/glance" ] || die "$VENV/bin/glance is missing: the install did not complete."
@@ -537,9 +625,28 @@ print_report() {
     say "    uninstall        $SRC/uninstall.sh"
 }
 
+# `glance setup`: Glance came from Homebrew; only what belongs to this user is done here
+# (recorded in the same manifest; scripts/uninstall-macos.sh reverses it).
+setup_only() {
+    check_prerequisites
+    load_previous
+    ensure_dir "$DATA_DIR"
+    ensure_dir "$STATE_DIR"
+    ensure_dir "$CONFIG_DIR"
+    write_manifest
+    fetch_harper
+    install_agent
+    run_doctor
+    print_report
+}
+
 main() {
     parse_args "$@"
     setup_paths
+    if [ "$SETUP_ONLY" = 1 ]; then
+        setup_only
+        return
+    fi
     check_prerequisites            # 1
     load_previous
     refuse_foreign_binaries

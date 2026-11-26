@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 from glance.clock import Clock, Handle
 from glance.config import Config
 from glance.daemon.scheduler import CheckScheduler
-from glance.grammar.corrections import SPELL_RULE, SPLIT_RULE, ai_correction, strip_replacement
+from glance.grammar.corrections import combine_sources
 from glance.grammar.filters import IssueFilter
 from glance.grammar.issues import Issue, issue_edit, merge_edits
 from glance.log import log_event
@@ -933,26 +933,9 @@ class Controller:
         for rules in self.extra_ignored:
             ignored |= self._call("extra_ignored", rules, s, default=frozenset())
         kept = self._filter.apply(s.text, found, s.wm_class, extra_ignored=ignored)
-        if any(self._call("extra_corrects", p, s, default=False) for p in self.extra_corrects):
-            # The AI's corrected text is back for exactly this text: the strip and the
-            # drawer show its corrections, not the quick local ones (which were the preview).
-            kept = [i for i in kept if i.source != "harper"]
-        local = [i for i in kept if i.source == "harper"]
-        # Where the AI analysis corrects a word the local checker only says is misspelled,
-        # the AI's choice wins (it reads the context: "fo" -> "of", not "for").
-        spell = [h for h in local if h.rule in (SPELL_RULE, SPLIT_RULE)]
-        overrides = [i for i in kept if i.source == "llm"
-                     and ai_correction(s.text, i) is not None
-                     and any(i.start < h.end and h.start < i.end for h in spell)
-                     and not any(i.start < h.end and h.start < i.end
-                                 for h in local if h not in spell)]
-        local = [h for h in local
-                 if not any(h.start < o.end and o.start < h.end for o in overrides)]
-        # Otherwise the local checker wins where another source flags the same text.
-        others = [i for i in kept if i.source != "harper"
-                  and not any(i.start < h.end and h.start < i.end for h in local)]
-        self._issues = sorted((_strip_first(s.text, i) for i in local + others),
-                              key=lambda i: (i.start, i.end))
+        ai_corrects = any(self._call("extra_corrects", p, s, default=False)
+                          for p in self.extra_corrects)
+        self._issues = combine_sources(s.text, kept, ai_corrects)
 
     def _anchor(self, s: FieldSnapshot) -> tuple[int, int] | None:
         ui = self._cfg().ui
@@ -1136,16 +1119,6 @@ class Controller:
             self._tray_state = state
             self._tray.set_state(state)
 
-
-
-def _strip_first(text: str, i: Issue) -> Issue:
-    """`i` with the replacement the strip uses first: the drawer's fix list, a click on a
-    fix and the strip's corrected text then all say the same ("sal -> say" is never listed
-    beside a strip that typed something else)."""
-    r = strip_replacement(text, i)
-    if r is None or (i.replacements and i.replacements[0] == r):
-        return i
-    return replace(i, replacements=(r, *(x for x in i.replacements if x != r)))
 
 
 def _shifted(i: Issue, by: int) -> Issue:
