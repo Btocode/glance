@@ -45,9 +45,37 @@ class XlibKeys:
         self._root = self._d.screen().root
         self._net_active = self._d.intern_atom("_NET_ACTIVE_WINDOW")
         self._net_wm_pid = self._d.intern_atom("_NET_WM_PID")
+        self._down: list[int] = []  # keycodes pressed and not yet released, in order
 
     def close(self) -> None:
+        self.release_all()
         self._d.close()
+
+    def release_all(self) -> None:
+        """Release every key this process still holds down (on the way out): the X server
+        keeps an XTEST key pressed after its client is gone, and every later key press on
+        the desktop would arrive with it."""
+        if not self._down:
+            return
+        for keycode in reversed(self._down):
+            try:
+                xtest.fake_input(self._d, X.KeyRelease, keycode)
+            except Exception:  # noqa: BLE001, S110 - leaving regardless
+                pass
+        self._down.clear()
+        try:
+            self._d.sync()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    def _press(self, keycode: int) -> None:
+        self._down.append(keycode)
+        xtest.fake_input(self._d, X.KeyPress, keycode)
+
+    def _release(self, keycode: int) -> None:
+        xtest.fake_input(self._d, X.KeyRelease, keycode)
+        if keycode in self._down:
+            self._down.remove(keycode)
 
     # ------------------------------------------------------------------ KeyPort
 
@@ -87,12 +115,11 @@ class XlibKeys:
                 raise KeysAborted("the target window lost the keyboard")
             try:
                 if shifted:
-                    xtest.fake_input(self._d, X.KeyPress, shift)
-                xtest.fake_input(self._d, X.KeyPress, keycode)
+                    self._press(shift)
+                self._press(keycode)
             finally:
-                xtest.fake_input(self._d, X.KeyRelease, keycode)
-                if shifted:
-                    xtest.fake_input(self._d, X.KeyRelease, shift)
+                for k in reversed(list(self._down)):  # whatever went down comes up again
+                    self._release(k)
                 self._d.sync()
             if delay_ms > 0:
                 time.sleep(delay_ms / 1000)
@@ -102,17 +129,14 @@ class XlibKeys:
             raise ValueError("empty chord")
         held = [self._keycode(_MODIFIERS[name]) for name in keys[:-1]]
         key = self._keycode(keys[-1])
-        pressed: list[int] = []
         try:
             for keycode in held:
-                xtest.fake_input(self._d, X.KeyPress, keycode)
-                pressed.append(keycode)
-            xtest.fake_input(self._d, X.KeyPress, key)
-            pressed.append(key)
+                self._press(keycode)
+            self._press(key)
         finally:
             # Whatever went down comes up again: a modifier left down corrupts all input.
-            for keycode in reversed(pressed):
-                xtest.fake_input(self._d, X.KeyRelease, keycode)
+            for keycode in reversed(list(self._down)):
+                self._release(keycode)
             self._d.sync()
 
     def wait_modifiers_released(self, timeout_ms: int = 1000) -> bool:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,6 +21,7 @@ TEST_SENTENCE = "Teh quick brown fox jump over the lazy dog, i think its fine."
 TEST_TONE = "professional"
 TEST_CTX = Ctx(profile="default", target_tone="neutral", strictness="normal", app_label="Glance")
 HEALTH_TTL_S = 60.0
+HEALTH_WAIT_S = 5.0  # all backends are asked at once; one that is slower is "timed out"
 LANE_WAIT_S = 30.0
 REASONS = ("none", "limit", "battery", "failed")
 
@@ -186,7 +188,21 @@ class BackendSupervisor:
     def healths(self, refresh: bool = False) -> dict[str, Health]:
         if refresh:  # a CLI installed since start-up: ask the login shell for PATH again
             cli_path.refresh()
-        out = {name: self._check_health(name, refresh) for name in self._backends}
+        names = list(self._backends)
+        got: dict[str, Health] = {}
+
+        def ask(name: str) -> None:
+            got[name] = self._check_health(name, refresh)
+
+        # at the same time: `glance backend list` waits for the slowest, not for the sum
+        threads = [threading.Thread(target=ask, args=(n,), name=f"health-{n}", daemon=True)
+                   for n in names]
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + HEALTH_WAIT_S
+        for t in threads:
+            t.join(max(0.0, deadline - time.monotonic()))
+        out = {n: got.get(n) or Health(True, None, "timed out") for n in names}
         self._notify()
         return out
 

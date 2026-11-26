@@ -147,19 +147,23 @@ class HarperClient:
                 return
             if p.poll() is None:
                 try:
-                    self._request("shutdown", None, timeout=0.5, proc=p)
+                    self._request("shutdown", None, timeout=0.3, proc=p)
                     self._notify("exit", None, proc=p)
                 except (OSError, TimeoutError):
                     pass
+                # within about a second, so quitting glanced never waits on harper-ls
                 try:
-                    p.wait(timeout=1.0)
+                    p.wait(timeout=0.3)
                 except subprocess.TimeoutExpired:
                     p.terminate()
                     try:
-                        p.wait(timeout=1.0)
+                        p.wait(timeout=0.5)
                     except subprocess.TimeoutExpired:
                         p.kill()
-                        p.wait()
+                        try:
+                            p.wait(timeout=1.0)
+                        except subprocess.TimeoutExpired:
+                            pass
             for f in (p.stdin, p.stdout):
                 try:
                     f.close()

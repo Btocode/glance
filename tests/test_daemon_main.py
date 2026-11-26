@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from glance.config import Config, ConfigError
+from glance.config import ConfigError
 from glance.daemon.control import handle_control
 from glance.daemon.controller import Controller
 from glance.daemon.links import CaptureLink, PanelEscape
@@ -36,6 +36,7 @@ from tests.fakes import (
     FakeOverlay,
     FakeTray,
 )
+from tests.fakes import typing_config as Config  # these tests check while typing
 from tests.test_hotkeys import FakeHotkeys
 
 

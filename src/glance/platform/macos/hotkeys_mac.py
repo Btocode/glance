@@ -11,6 +11,7 @@ import plistlib
 import subprocess
 from collections.abc import Mapping
 
+from glance.config import _default_hotkeys
 from glance.platform.macos.keyplan import KEYCODES, keycode
 from glance.ui.hotkeys import Chord, parse_chord
 
@@ -21,18 +22,15 @@ OPTION_KEY = 0x0800
 CONTROL_KEY = 0x1000
 _CARBON = {"super": CMD_KEY, "shift": SHIFT_KEY, "alt": OPTION_KEY, "ctrl": CONTROL_KEY}
 
-LINUX_DEFAULTS: dict[str, str] = {
-    "panel": "Super+Alt+space", "fix_all": "Super+Alt+f", "revert": "Super+Alt+z",
-    "pause": "Super+Alt+p", "tone1": "Super+Alt+1", "tone2": "Super+Alt+2",
-    "tone3": "Super+Alt+3", "tone4": "Super+Alt+4", "complete": "Super+Alt+Return",
-    "selection": "Super+Alt+a",
-}
-# ⌃⌥Space is "select next input source", so the panel is on ⌃⌥G (Glance).
+LINUX_DEFAULTS: dict[str, str] = _default_hotkeys()
+# What a chord left at its Linux default is on a Mac. Every one was checked against macOS's
+# own shortcuts (docs/shortcuts.md): ⌃⌥Space is "select next input source", so nothing sits
+# there; ⌃⌥G (Glance) checks the field, ⌃⌥O opens the options (the panel).
 MAC_DEFAULTS: dict[str, str] = {
-    "panel": "Ctrl+Alt+g", "fix_all": "Ctrl+Alt+f", "revert": "Ctrl+Alt+z",
-    "pause": "Ctrl+Alt+p", "tone1": "Ctrl+Alt+1", "tone2": "Ctrl+Alt+2",
-    "tone3": "Ctrl+Alt+3", "tone4": "Ctrl+Alt+4", "complete": "Ctrl+Alt+Return",
-    "selection": "Ctrl+Alt+a",
+    "check": "Ctrl+Alt+g", "panel": "Ctrl+Alt+o", "fix_all": "Ctrl+Alt+f",
+    "revert": "Ctrl+Alt+z", "pause": "Ctrl+Alt+p", "tone1": "Ctrl+Alt+1",
+    "tone2": "Ctrl+Alt+2", "tone3": "Ctrl+Alt+3", "tone4": "Ctrl+Alt+4",
+    "complete": "Ctrl+Alt+Return", "selection": "Ctrl+Alt+a",
 }
 _SYMBOLS = (("ctrl", "⌃"), ("alt", "⌥"), ("shift", "⇧"), ("super", "⌘"))
 _KEY_SYMBOLS = {"return": "⏎", "space": "Space", "escape": "Esc", "tab": "⇥",

@@ -364,8 +364,10 @@ class AiCoordinator:
     def _chip_inputs(self, s: FieldSnapshot) -> dict[str, Any]:
         out: dict[str, Any] = {"ai": self._ai}
         job = self._job
-        if job is not None and job.spinning and job.gen == self._c.generation:
-            out["analyzing"] = True
+        if job is not None and job.gen == self._c.generation:
+            out["ai_pending"] = True
+            if job.spinning:
+                out["analyzing"] = True
         rw = self._current_rewrite()
         if rw is not None and rw.state == "loading":
             out["analyzing"] = True  # a hotkey rewrite has no panel to show it is working
@@ -893,8 +895,9 @@ class AiCoordinator:
             self._spec_timer.cancel()
             self._spec_timer = None
         target = self._target()
-        if target is None or not self._supervisor.speculate():
-            return
+        if (target is None or getattr(self._c, "checks_on_request", False)
+                or not self._supervisor.speculate()):
+            return  # ("shortcut" mode: no AI call the user did not ask for)
         idle_ms = (self._clock.now() - self._changed_at) * 1000
         self._spec_timer = self._clock.call_later(
             max(0, round(SPECULATE_IDLE_MS - idle_ms)), lambda: self._speculate(target))

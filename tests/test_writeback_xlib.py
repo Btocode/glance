@@ -51,6 +51,7 @@ def test_type_text_checks_the_target_before_every_key(monkeypatch):
     monkeypatch.setattr(kx.xtest, "fake_input", lambda d, kind, code: sent.append((kind, code)))
     keys = object.__new__(kx.XlibKeys)  # no X connection
     keys._d = _StubDisplay()
+    keys._down = []
     keys._key = lambda ch: (ord(ch), False)
     keys._keycode = lambda name: 50
     focus = iter([7, 7, 9, 9, 9, 9])  # the window changes before the third key
@@ -74,6 +75,7 @@ def test_type_text_sends_nothing_without_a_target(monkeypatch):
     monkeypatch.setattr(kx.xtest, "fake_input", lambda *a: sent.append(a))
     keys = object.__new__(kx.XlibKeys)
     keys._d = _StubDisplay()
+    keys._down = []
     keys._key = lambda ch: (ord(ch), False)
     keys._keycode = lambda name: 50
     keys._focus_window = lambda: 0  # the shell has the keyboard
@@ -82,3 +84,35 @@ def test_type_text_sends_nothing_without_a_target(monkeypatch):
     except KeysAborted:
         pass
     assert sent == []
+
+
+def test_close_releases_any_key_still_down(monkeypatch):
+    """A key pressed through XTEST stays down after its client is gone: on the way out
+    (glance-capture stopped mid-chord), everything still held comes up."""
+    import glance.writeback.keys_xlib as kx
+
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(kx.xtest, "fake_input", lambda d, kind, code: sent.append((kind, code)))
+    keys = object.__new__(kx.XlibKeys)
+    display = _StubDisplay()
+    display.close = lambda: sent.append(("closed", 0))  # type: ignore[attr-defined]
+    keys._d = display
+    keys._down = []
+    keys._keycode = lambda name: {"Control_L": 37, "v": 55}[name]
+
+    def interrupted(d, kind, code):  # the chord's key press is where it stops
+        sent.append((kind, code))
+        if kind == kx.X.KeyPress and code == 55:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(kx.xtest, "fake_input", interrupted)
+    try:
+        keys.chord("ctrl", "v")
+    except KeyboardInterrupt:
+        pass
+    assert keys._down == []  # the chord's finally released both
+    keys._down = [37]  # as if stopped between press and release
+    monkeypatch.setattr(kx.xtest, "fake_input", lambda d, kind, code: sent.append((kind, code)))
+    sent.clear()
+    keys.close()
+    assert sent == [(kx.X.KeyRelease, 37), ("closed", 0)]

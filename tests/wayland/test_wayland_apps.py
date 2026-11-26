@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.wayland.harness import Glance, Shell, private_root, wait_for
+from tests.wayland.harness import TYPING, Glance, Shell, private_root, wait_for
 from tests.wayland.test_wayland_e2e import FIXED, TEXT, pytestmark, shot  # noqa: F401
 
 
@@ -24,7 +24,7 @@ def desk():
     shell = Shell(root).start()
     glance = None
     try:
-        glance = Glance(shell, root)
+        glance = Glance(shell, root, TYPING, name="glanced-apps")
         assert wait_for(lambda: glance.status().get("shell_extension") == "running", 20)
         yield shell, glance, root
     finally:

@@ -20,13 +20,16 @@ from glance.daemon.assemble import attach_features
 from glance.daemon.control import CtlRouter, handle_control
 from glance.daemon.links import CaptureLink, FieldPanelOverlay, PanelEscape
 from glance.daemon.panel_actions import PanelRouter
+from glance.daemon.teardown import Teardown
 from glance.daemon.wiring import (
     SESSION_EXIT,
     AiSetup,
     RunBg,
+    check_label,
     configure_api,
     hotkeys_status,
     session_problem,
+    set_check_mode,
     set_suggestions,
     thread_runner,
     tone_hotkeys,
@@ -206,6 +209,55 @@ def build_ai(controller: Any, clock: Any, cfg: Callable[[], Any],
     holder.append(ai)
     ai.attach()
     return ai, supervisor
+
+
+# ---------------------------------------------------------------------- leaving
+
+
+def hide_everything(overlay: Any, ghost: Any, shell: Any) -> None:
+    """Take the strip, panel and ghost down (and with them the Esc and use-key grabs)."""
+    hides = [overlay.hide_strip, overlay.hide_panel] + ([ghost.hide] if ghost else [])
+    for fn in hides:
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001 - leaving must not fail
+            log_event("teardown_hide_failed", kind=type(e).__name__)
+    if shell is not None and shell.available:
+        # the shell overlay draws through the main loop, which has ended: clear it directly
+        from glance.shellbus import ShellUnavailable
+
+        try:
+            shell.call("Render", {}, timeout_ms=300)
+        except ShellUnavailable:
+            pass
+
+
+def stop_all(stops: Any) -> None:
+    """Stop several children at the same time: each waits up to a second for its own."""
+    threads = [threading.Thread(target=_guarded, args=(fn,), name="glance-stop", daemon=True)
+               for fn in stops]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def _guarded(fn: Callable[[], Any]) -> None:
+    try:
+        fn()
+    except Exception as e:  # noqa: BLE001 - leaving must not fail
+        log_event("child_stop_failed", kind=type(e).__name__)
+
+
+def stop_backends(backends: Any) -> None:
+    """opencode's private server, claude's idle processes: all at once, none waited on
+    for long (their stop escalates to SIGKILL by itself)."""
+    stops = []
+    for backend in backends:
+        stop = getattr(backend, "stop", None) or getattr(backend, "close", None)
+        if stop is not None:
+            stops.append(stop)
+    stop_all(stops)
 
 
 # ---------------------------------------------------------------------- harper
@@ -435,6 +487,7 @@ def main(argv: list[str] | None = None) -> int:
                    lambda _h: (ai.refresh_status(), setup.update_tray()))
         setup.update_tray()
         tray.set_auto_suggest(cfg.ui.suggestions == "auto")
+        tray.set_check_mode(cfg.general.check)
         controller.refresh()
 
     watcher = ConfigWatcher(config_path(), clock, on_config,
@@ -467,7 +520,8 @@ def main(argv: list[str] | None = None) -> int:
             shell, clock.post, clock.call_later, lambda: theme.tokens,
             on_chip_click=lambda: chip_clicked(),
             on_panel_action=lambda action, args: panels.action(action, args),
-            use_key=lambda: watcher.current.ui.use_key)
+            use_key=lambda: watcher.current.ui.use_key,
+            hover_menu=lambda: hover_menu())
         theme.on_change(lambda: gtk_overlay.on_extension(True))
         ghost: Any = gtk_overlay.ghost
         selection_port: Any = ShellSelection(shell)
@@ -503,7 +557,8 @@ def main(argv: list[str] | None = None) -> int:
 
         hotkeys = XlibHotkeys(clock.post)
         gtk_overlay = GtkOverlay(on_chip_click=lambda: chip_clicked(),
-                                 on_panel_action=lambda action, args: panels.action(action, args))
+                                 on_panel_action=lambda action, args: panels.action(action, args),
+                                 hover_menu=lambda: hover_menu())
         ghost = GtkGhost(watcher.current.ui.ghost_font_factor)
         selection_port = XlibSelection()
     # `overlay` holds the Escape grab while any panel is up; the Controller draws through
@@ -522,7 +577,11 @@ def main(argv: list[str] | None = None) -> int:
                    auto_suggest=watcher.current.ui.suggestions == "auto",
                    on_update=lambda: launch_update(notifier.notify, update_log_path()),
                    on_usage_open=lambda: refresh_usage(),
-                   on_usage_details=lambda: show_usage_details())
+                   on_usage_details=lambda: show_usage_details(),
+                   on_check_mode=lambda mode: set_check_mode(
+                       update_config, config_path(), mode, watcher.reload),
+                   check_mode=watcher.current.general.check,
+                   check_hint=check_label(watcher.current.general.hotkeys.get("check", "")))
     if not tray.available:
         print(f"glanced: no tray icon; to get one run: {INSTALL_HINT}", file=sys.stderr)
 
@@ -606,7 +665,8 @@ def main(argv: list[str] | None = None) -> int:
         ghost=ghost, hotkeys=hotkeys, clock=clock,
         run_ai=run_ai, language=detector.is_mixed, selection_port=selection_port,
         overlay=overlay, capture=link, notifier=notifier)
-    panels = PanelRouter(controller, ai, overrides.set, features.selection, features.guard)
+    panels = PanelRouter(controller, ai, overrides.set, features.selection, features.guard,
+                         on_setup=lambda: setup.open())
     ctl = CtlRouter(
         controller, panels.action,
         backend_control=BackendControl(ai_supervisor, ai, keys, current_config, overrides,
@@ -622,12 +682,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             controller.open_panel()
 
+    def hover_menu() -> Any:
+        """The status icon's hover menu now, with the check shortcut as configured."""
+        return controller.hover_menu(check_label(watcher.current.general.hotkeys.get("check", "")))
+
     def chip_clicked() -> None:
         """The status icon: opens the strip (or, for a muted state, the line saying why),
         closes it again."""
         controller.toggle_strip()
 
     actions: dict[str, Callable[[], None]] = {
+        "check": controller.check_now,
         "panel": toggle_panel,
         "fix_all": controller.fix_all_safe,
         "revert": controller.revert_last,
@@ -717,6 +782,8 @@ def main(argv: list[str] | None = None) -> int:
         "grammar_engine": harper_engine,
         **hotkeys_status(hotkeys.grabbed(), bound_chords),
         "hotkeys_unavailable": ",".join(sorted(hotkey_problems)) or None,
+        "hotkeys_problems": ",".join(f"{n}:{w}" for n, w in sorted(hotkey_problems.items()))
+        or None,
         "tray": tray.available,
         **({"shell_extension": "running" if shell.available else "missing"}
            if shell is not None else {}),
@@ -808,26 +875,24 @@ def main(argv: list[str] | None = None) -> int:
         Gtk.main()
     finally:
         log_event("glanced_stopping")
-        watcher.stop()
-        capture_sup.stop()
-        harper_sup.stop()
-        ctl_server.stop()
-        capture_server.stop()
-        hotkeys.close()
-        if shell is not None:
-            shell_link.stop()
-            shell.close()
-        ai_supervisor.cancel_all()
-        for backend in (*backends.values(), *speculative.values()):
-            stop = getattr(backend, "stop", None) or getattr(backend, "close", None)
-            if stop is not None:
-                try:
-                    stop()  # opencode's private server, claude's idle process
-                except Exception as e:  # noqa: BLE001 - leaving must not fail
-                    log_event("backend_stop_failed", kind=type(e).__name__)
-        pool.shutdown(wait=False, cancel_futures=True)
-        ai_pool.shutdown(wait=False, cancel_futures=True)
-        notifier.close()
+        # Nothing on screen and no key grabbed first, so a slow step below can never leave
+        # the desktop's Esc/Tab/Enter captured; then the children, the AI work and the
+        # pools, all within teardown.DEADLINE_S (or the process ends regardless).
+        teardown = Teardown()
+        teardown.run([
+            ("overlay", lambda: hide_everything(overlay, ghost, shell)),
+            ("hotkeys", hotkeys.close),
+            ("ai", ai_supervisor.cancel_all),
+            ("pools", lambda: (pool.shutdown(wait=False, cancel_futures=True),
+                               ai_pool.shutdown(wait=False, cancel_futures=True))),
+            ("watcher", watcher.stop),
+            ("sockets", lambda: (ctl_server.stop(), capture_server.stop())),
+            ("children", lambda: stop_all((capture_sup.stop, harper_sup.stop))),
+            ("shell", lambda: shell is not None and (shell_link.stop(), shell.close())),
+            ("backends", lambda: stop_backends((*backends.values(), *speculative.values()))),
+            ("notifier", notifier.close),
+        ])
+        teardown.finish()
     return 0
 
 

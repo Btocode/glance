@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from glance.backends.base import Health
-from glance.config import BackendCfg, Config
+from glance.config import BackendCfg
 from glance.daemon.assemble import attach_features
 from glance.daemon.control import CtlRouter, handle_control
 from glance.daemon.controller import Controller
@@ -32,6 +32,7 @@ from tests.fakes import (
     FakeTray,
     win,
 )
+from tests.fakes import typing_config as Config  # these tests check while typing
 from tests.test_daemon_ai_wiring import NoOverrides
 
 TEXT = "I will send the report to the whole team this afternoon"

@@ -5,7 +5,7 @@ from glance.audience.resolver import DEFAULT_RULES, AudienceResolver
 from glance.backends.base import Analysis, AnalysisIssue, BackendError, Health
 from glance.backends.budget import Budget
 from glance.backends.supervisor import BackendSupervisor
-from glance.config import BackendCfg, Config
+from glance.config import BackendCfg
 from glance.daemon.ai import AiCoordinator
 from glance.daemon.cache import LruCache
 from glance.daemon.controller import Controller
@@ -23,6 +23,7 @@ from tests.fakes import (
     FakeOverlay,
     FakeTray,
 )
+from tests.fakes import typing_config as Config  # these tests check while typing
 
 CHANNEL = "general (Channel) - Acme - Slack"
 DM = "Sam Lee (DM) - Acme - Slack"

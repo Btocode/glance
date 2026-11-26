@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.wayland.harness import Glance, GtkApp, Shell, private_root, wait_for
+from tests.wayland.harness import TYPING, Glance, GtkApp, Shell, private_root, wait_for
 
 pytestmark = [
     pytest.mark.wayland,
@@ -41,7 +41,7 @@ def desk():
     app = glance = None
     try:
         app = GtkApp(shell, TEXT, "--undo")
-        glance = Glance(shell, root)
+        glance = Glance(shell, root, TYPING, name="glanced-e2e")
         assert wait_for(lambda: glance.status().get("shell_extension") == "running", 20)
         yield shell, app, glance, root
     finally:
@@ -80,9 +80,10 @@ def test_icon_appears_for_the_focused_field(desk):
 def test_strip_appears_on_icon_click_and_focus_stays(desk):
     shell, app, glance, _root = desk
     assert shell.call("TestClick", {"target": "status"})["ok"]
-    ov = wait_for(lambda: (o := shell.overlay()).get("strip") and o, 10)
+    # (a strip shown a moment ago may have no text and no position yet)
+    ov = wait_for(lambda: (o := shell.overlay()).get("strip") and o["strip"]["text"] == FIXED
+                  and None not in o["strip"]["rect"] and o, 10)
     assert ov, shell.overlay()
-    assert ov["strip"]["text"] == FIXED
     _sx, sy, _sw, _sh = ov["strip"]["rect"]
     assert sy > ov["status"]["rect"][1]  # under the caret line
     assert target_still_focused(shell, app)
@@ -210,9 +211,9 @@ def test_autocomplete_ghost_and_tab(desk):
 
 
 def test_nothing_typed_reaches_the_logs(desk):
-    _shell, _app, _glance, root = desk
+    _shell, _app, glance, root = desk
     time.sleep(0.5)
-    for log in (root / "glanced.log", root / "shell.log"):
+    for log in (glance.log, root / "shell.log"):
         text = log.read_text(errors="replace")
         for words in ("needs a plan", "need a plan", "this week and it is fine", "will do",
                       "talk about it", "tomorrow morning", "make it short"):

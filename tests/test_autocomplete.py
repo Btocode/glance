@@ -6,7 +6,7 @@ from glance.backends.base import BackendError, BaseBackend, Ctx
 from glance.backends.budget import Budget
 from glance.backends.prompts import complete_system
 from glance.backends.supervisor import AiUnavailable, BackendSupervisor
-from glance.config import BackendCfg, Config, GeneralCfg, UiCfg, load_config
+from glance.config import BackendCfg, GeneralCfg, UiCfg, load_config
 from glance.daemon.controller import Controller
 from glance.features.autocomplete import Autocomplete, clean_completion
 from glance.grammar.filters import IssueFilter
@@ -26,6 +26,7 @@ from tests.fakes import (
     FakeTray,
     HeldBg,
 )
+from tests.fakes import typing_config as Config  # these tests check while typing
 
 TEXT = "I will send it"
 LONG = "I will send it to you"  # long enough for a live completion

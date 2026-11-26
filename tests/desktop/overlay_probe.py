@@ -26,6 +26,7 @@ from Xlib.ext import xtest
 
 from glance.grammar.issues import Issue
 from glance.protocol import Rect
+from glance.ui.hover_menu import hover_menu
 from glance.ui.overlay_gtk import GAP, GtkOverlay, button_text
 from glance.ui.panel_model import PanelView, ToneChip, build_panel
 from glance.ui.placement import Anchor
@@ -140,7 +141,9 @@ def main() -> int:
 
     events: list = []
     overlay = GtkOverlay(lambda: events.append(["chip_click"]),
-                         lambda action, a: events.append([action, a]))
+                         lambda action, a: events.append([action, a]),
+                         hover_menu=lambda: hover_menu(StatusView(StatusState.IDLE),
+                                                       "Super+Alt+G"))
     d = display.Display()
     root = d.screen().root
     # The app being written in: it holds the input focus and sits under everything, so a
@@ -223,6 +226,20 @@ def main() -> int:
     wx, wy, ww, wh = out["icon_window"]
     click(wx + ww - 2, wy + wh - 2)  # inside its window, outside the circle: goes through
     out["icon_corner_click_holder"] = holder_clicks()
+    # the hover menu: the pointer resting on the icon opens it, a click on an item runs it
+    xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
+    d.sync()
+    pump(0.6)
+    out["menu_items"] = overlay.menu_items()
+    out["menu_override_redirect"] = override_redirect(overlay._menu) \
+        if overlay._menu.get_visible() else None
+    out["focus_with_menu"] = focused()
+    events.clear()
+    press(overlay._menu, "Check spelling & grammar")
+    out["menu_click_events"] = list(events)
+    out["menu_after_click"] = overlay.menu_items()
+    out["focus_after_menu_click"] = focused()
+    holder_clicks()
     events.clear()
     overlay.show_status(StatusView(StatusState.WORKING, spin=True), ANCHOR)
     pump(0.3)

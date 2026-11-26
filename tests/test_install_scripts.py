@@ -815,7 +815,9 @@ def test_unit_file_has_required_directives():
     u = (REPO / "packaging/glance.service").read_text()
     for s in ("PartOf=graphical-session.target", "After=graphical-session.target",
               "ExecStart=@VENV@/bin/glanced", "Restart=on-failure", "RestartSec=200ms",
-              "RestartPreventExitStatus=78", "WantedBy=graphical-session.target"):
+              "RestartPreventExitStatus=78", "WantedBy=graphical-session.target",
+              # a quit that hangs must never hold the logout for systemd's default 90 s
+              "TimeoutStopSec=5", "KillMode=mixed"):
         assert s in u.splitlines()
 
 
@@ -839,3 +841,17 @@ def test_scripts_parse_and_lint(script):
     if shutil.which("shellcheck"):
         p = subprocess.run(["shellcheck", str(path)], check=False, capture_output=True, text=True)
         assert p.returncode == 0, p.stdout
+
+
+def test_installer_says_what_it_waits_for():
+    """A first install sits on downloads and on doctor's AI checks for seconds: every such
+    wait is announced, and Python output is never held in a pipe buffer."""
+    text = (REPO / "install.sh").read_text()
+    main = text[text.index("main() {"):]
+    assert "export PYTHONUNBUFFERED=1" in main[:400]
+    doctor = text[text.index("run_doctor() {"):]
+    assert doctor.index("note \"checking the setup") < doctor.index('doctor --fix "${skip[@]}"')
+    venv = text[text.index("make_venv() {"):]
+    assert venv.index("installing Glance's Python packages") < venv.index("uv pip install")
+    assert "downloading harper-ls" in (REPO / "scripts/fetch-harper.sh").read_text()
+    assert "downloading glance_core" in (REPO / "scripts/fetch-core.sh").read_text()

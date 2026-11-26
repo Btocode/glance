@@ -4,6 +4,7 @@
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
@@ -16,6 +17,9 @@ const ICON_BOX = [30, 28];
 const BADGE_C = [23, 7], BADGE_R = 6.5;
 const SPIN_MS = 125;
 const HOVER_MS = 350;
+// The status icon's hover menu (glance/ui/hover_menu.py: OPEN_MS, CLOSE_MS).
+const MENU_OPEN_MS = 250;
+const MENU_CLOSE_MS = 400;
 const ASK_RETURN_MS = 1500;
 const SPARKLE = [[12, 3], [13.8, 7.7], [18.5, 9.5], [13.8, 11.3], [12, 16], [10.2, 11.3],
     [5.5, 9.5], [10.2, 7.7]];
@@ -48,11 +52,53 @@ function hbox(params = {}) {
 // pointer on press, and on Wayland a shell grab makes the focused application lose the
 // keyboard (its field blurs). A plain reactive actor gets the release without any grab.
 let presses = 0, releases = 0;
+let cursorAsked = null;  // GNOME 46/47: the last cursor asked for ('hand' | 'default')
+
+// The hand cursor over everything clickable; text and empty space keep the default one.
+// GNOME 48+ (mutter 16+): each actor carries its own cursor (Clutter.CursorType) and the
+// stage shows it under the pointer; Meta.Cursor and display.set_cursor are gone there.
+// GNOME 46/47: the display's cursor is set while the pointer is over the actor.
+const ACTOR_CURSORS = Boolean(Clutter.CursorType) &&
+    typeof Clutter.Actor.prototype.set_cursor_type === 'function';
+
+function setCursor(hand) {
+    cursorAsked = hand ? 'hand' : 'default';
+    try {
+        const cursor = hand ? Meta.Cursor.POINTING_HAND ?? Meta.Cursor.POINTER
+            : Meta.Cursor.DEFAULT;
+        global.display.set_cursor(cursor);
+    } catch (_e) {
+        // a shell without either: the default cursor stays
+    }
+}
+
+// What the pointer shows now as far as the overlay is concerned (for the tests).
+function cursorNow() {
+    if (!ACTOR_CURSORS)
+        return cursorAsked;
+    const [x, y] = global.get_pointer();
+    for (let a = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y); a;
+        a = a.get_parent()) {
+        const type = a.get_cursor_type();
+        if (type !== Clutter.CursorType.INHERIT)
+            return type === Clutter.CursorType.POINTER ? 'hand' : 'default';
+    }
+    return 'default';
+}
 
 function clickable(actor, onClick) {
     actor.reactive = true;
     actor.track_hover = true;
     actor.can_focus = false;
+    if (ACTOR_CURSORS) {
+        actor.set_cursor_type(Clutter.CursorType.POINTER);
+    } else {
+        actor.connect('notify::hover', () => setCursor(actor.hover));
+        actor.connect('destroy', () => {
+            if (actor.hover)
+                setCursor(false);
+        });
+    }
     // the generic `event` signal: the per-type signals are gone from newer Clutter
     actor.connect('event', (_a, event) => {
         const type = event.type();
@@ -85,7 +131,7 @@ export class Overlay {
         this._scene = null;
         this._t = {};
         this._named = new Map();
-        this._keys = {status: '', strip: '', panel: '', ghost: ''};
+        this._keys = {status: '', strip: '', panel: '', ghost: '', menu: ''};
         this._phase = 0;
         this._spin = 0;
         this._hover = 0;
@@ -99,11 +145,19 @@ export class Overlay {
         this._iconArea = new St.DrawingArea({width: ICON_BOX[0], height: ICON_BOX[1]});
         this._iconArea.connect('repaint', a => this._drawIcon(a));
         this._icon.set_child(this._iconArea);
-        clickable(this._icon, () => this._cb.clicked('status', {}));
+        clickable(this._icon, () => {
+            this._cancelMenuTimers();
+            this._cb.clicked('status', {});
+        });
+        this._menuOpen = 0;
+        this._menuClose = 0;
+        this._icon.connect('notify::hover', () => this._menuHover());
+        this._menu = new St.Bin({reactive: true, track_hover: true});
+        this._menu.connect('notify::hover', () => this._menuHover());
         this._strip = new St.Bin({reactive: true});
         this._panel = new St.Bin({reactive: true});
         this._ghost = new St.Label({reactive: false});
-        for (const actor of [this._ghost, this._strip, this._panel, this._icon]) {
+        for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu]) {
             actor.hide();
             Main.layoutManager.addTopChrome(actor);
         }
@@ -116,10 +170,17 @@ export class Overlay {
             GLib.source_remove(this._spin);
         if (this._hover)
             GLib.source_remove(this._hover);
-        for (const actor of [this._ghost, this._strip, this._panel, this._icon]) {
+        this._cancelMenuTimers();
+        for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu]) {
             Main.layoutManager.removeChrome(actor);
             actor.destroy();
         }
+    }
+
+    // glanced is gone: close "Rewrite as…" (its modal grab) and hide everything.
+    reset() {
+        this._closeAsk(false);
+        this.render({});
     }
 
     // ------------------------------------------------------------------ the scene
@@ -130,6 +191,7 @@ export class Overlay {
         this._resizing = false;
         const tokensKey = JSON.stringify(this._t);
         this._renderStatus(scene.status, tokensKey);
+        this._renderMenu(scene.status?.menu ?? null, tokensKey);
         this._renderStrip(scene.strip, tokensKey);
         this._renderPanel(scene.panel, tokensKey);
         this._renderGhost(scene.ghost, tokensKey);
@@ -153,8 +215,9 @@ export class Overlay {
         const s = this._scene;
         if (!s)
             return;
+        const menu = s.status?.menu ? {x: s.status.x + ICON_BOX[0], y: s.status.y} : null;
         const pieces = [[this._icon, s.status], [this._strip, s.strip],
-            [this._panel, s.panel], [this._ghost, s.ghost]];
+            [this._panel, s.panel], [this._ghost, s.ghost], [this._menu, menu]];
         for (const [actor, piece] of pieces) {
             if (!piece || this._resizing && piece.follow !== false) {
                 actor.hide();
@@ -269,6 +332,82 @@ export class Overlay {
         for (const p of SPARKLE.slice(1))
             cr.lineTo(...p);
         cr.closePath();
+    }
+
+    // ------------------------------------------------------------------ the hover menu
+    // The pointer resting on the icon asks glanced for the menu ('hover'); glanced sends it
+    // in the scene (none while the user types). Leaving the icon and the menu ends it.
+
+    _cancelMenuTimers() {
+        for (const name of ['_menuOpen', '_menuClose']) {
+            if (this[name]) {
+                GLib.source_remove(this[name]);
+                this[name] = 0;
+            }
+        }
+    }
+
+    _menuHover() {
+        if (this._icon.hover || this._menu.hover) {
+            if (this._menuClose) {
+                GLib.source_remove(this._menuClose);
+                this._menuClose = 0;
+            }
+            if (this._icon.hover && !this._scene?.status?.menu && !this._menuOpen) {
+                this._menuOpen = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MENU_OPEN_MS, () => {
+                    this._menuOpen = 0;
+                    if (this._icon.hover)
+                        this._cb.clicked('hover', {});
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
+            return;
+        }
+        if (this._menuOpen) {
+            GLib.source_remove(this._menuOpen);
+            this._menuOpen = 0;
+        }
+        if (!this._menuClose) {
+            this._menuClose = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MENU_CLOSE_MS, () => {
+                this._menuClose = 0;
+                if (!this._icon.hover && !this._menu.hover && this._scene?.status?.menu)
+                    this._cb.clicked('hover_end', {});
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    }
+
+    _renderMenu(menu, tokensKey) {
+        const key = menu ? JSON.stringify([menu, tokensKey]) : '';
+        if (key === this._keys.menu)
+            return;
+        this._keys.menu = key;
+        for (const n of [...this._named.keys()]) {
+            if (n.startsWith('menu:'))
+                this._named.delete(n);
+        }
+        const old = this._menu.get_child();
+        if (old) {
+            this._menu.set_child(null);
+            old.destroy();
+        }
+        if (!menu)
+            return;
+        const t = this._t;
+        const box = vbox({style: `background-color: ${t.strip}; border: 1px solid ${t.strip_border}; ` +
+            'border-radius: 10px; padding: 6px; spacing: 2px;'});
+        if (menu.note)
+            box.add_child(this._label(menu.note, 'muted', 12, 'max-width: 260px;'));
+        for (const item of menu.items) {
+            const name = `menu:${item.action}${item.args?.key ? `:${item.args.key}` : ''}`;
+            const button = this._button(item.label, 'quiet', this._act(item.action, item.args || {}),
+                name);
+            button.x_expand = true;
+            box.add_child(button);
+        }
+        if (menu.hint)
+            box.add_child(this._label(menu.hint, 'muted', 12, 'padding: 2px 8px;', false));
+        this._menu.set_child(box);
     }
 
     // ------------------------------------------------------------------ the status icon
@@ -427,7 +566,8 @@ export class Overlay {
         this._keys.panel = key;
         this._cancelHover();
         for (const n of [...this._named.keys()]) {
-            if (!['status', 'use', 'more', 'strip-text', 'ask-entry'].includes(n))
+            if (!['status', 'use', 'more', 'strip-text', 'ask-entry'].includes(n) &&
+                !n.startsWith('menu:'))
                 this._named.delete(n);
         }
         this._panel.get_child()?.destroy();
@@ -834,6 +974,10 @@ export class Overlay {
                 text: text && text.mapped ? text.clutter_text.get_text() : null} : null,
             panel: geo(this._panel) ? {rect: geo(this._panel), mode: s?.panel?.view?.mode} : null,
             ghost: geo(this._ghost) ? {rect: geo(this._ghost)} : null,
+            menu: geo(this._menu) && s?.status?.menu ? {rect: geo(this._menu),
+                items: s.status.menu.items.map(i => i.label), note: s.status.menu.note ?? null,
+                hint: s.status.menu.hint ?? null} : null,
+            cursor: cursorNow(),
             ask: Boolean(this._ask),
             named: [...this._named.keys()].filter(n => this._named.get(n).mapped),
             key_focus: String(global.stage.get_key_focus()),

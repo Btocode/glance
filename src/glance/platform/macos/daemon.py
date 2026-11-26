@@ -77,8 +77,12 @@ def main(argv: list[str] | None = None) -> int:
         build_issue_filter,
         daemon_answers,
         fake_backend_wanted,
+        hide_everything,
         real_backends,
+        stop_all,
+        stop_backends,
     )
+    from glance.daemon.teardown import Teardown
     from glance.paths import (
         capture_sock,
         config_path,
@@ -110,8 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     from glance.daemon.wiring import (
         AiSetup,
         RunBg,
+        check_label,
         configure_api,
         hotkeys_status,
+        set_check_mode,
         set_suggestions,
         thread_runner,
         tone_hotkeys,
@@ -160,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                    lambda _h: (ai.refresh_status(), setup.update_tray()))
         setup.update_tray()
         tray.set_auto_suggest(cfg.ui.suggestions == "auto")
+        tray.set_check_mode(cfg.general.check)
         controller.refresh()
 
     watcher = ConfigWatcher(config_path(), clock, on_config,
@@ -167,9 +174,14 @@ def main(argv: list[str] | None = None) -> int:
     mac_cfg = CachedMacConfig(lambda: watcher.current)
 
     hotkeys = CarbonHotkeys(clock.post)
+    def hover_menu() -> Any:
+        chord = mac_hotkeys(watcher.current.general.hotkeys).get("check", "")
+        return controller.hover_menu(check_label(chord, mac=True))
+
     mac_overlay = MacOverlay(on_chip_click=lambda: controller.toggle_strip(),
                              on_panel_action=lambda action, args: panels.action(action, args),
-                             clock=clock, use_key=lambda: watcher.current.ui.use_key)
+                             clock=clock, use_key=lambda: watcher.current.ui.use_key,
+                             hover_menu=hover_menu)
     overlay = PanelEscape(mac_overlay, hotkeys, lambda: panels.escape(),
                           on_use=lambda: controller.use_strip(),
                           use_key=lambda: watcher.current.ui.use_key)
@@ -184,7 +196,12 @@ def main(argv: list[str] | None = None) -> int:
                    auto_suggest=watcher.current.ui.suggestions == "auto",
                    on_update=lambda: launch_update(notifier.notify, update_log_path()),
                    on_usage_open=lambda: refresh_usage(),
-                   on_usage_details=lambda: show_usage_details())
+                   on_usage_details=lambda: show_usage_details(),
+                   on_check_mode=lambda mode: set_check_mode(
+                       update_config, config_path(), mode, watcher.reload),
+                   check_mode=watcher.current.general.check,
+                   check_hint=check_label(
+                       mac_hotkeys(watcher.current.general.hotkeys).get("check", ""), mac=True))
 
     link = CaptureLink(clock.post)
     grammar_client = make_grammar_client(harper_bin(), dictionary_path())
@@ -260,7 +277,8 @@ def main(argv: list[str] | None = None) -> int:
         ghost=MacGhost(watcher.current.ui.ghost_font_factor), hotkeys=hotkeys, clock=clock,
         run_ai=run_ai, language=detector.is_mixed, selection_port=MacSelection(),
         overlay=overlay, capture=link, notifier=notifier)
-    panels = PanelRouter(controller, ai, overrides.set, features.selection, features.guard)
+    panels = PanelRouter(controller, ai, overrides.set, features.selection, features.guard,
+                         on_setup=lambda: setup.open())
     ctl = CtlRouter(
         controller, panels.action,
         backend_control=BackendControl(ai_supervisor, ai, keys, current_config, overrides,
@@ -276,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
             controller.open_panel()
 
     actions: dict[str, Callable[[], None]] = {
+        "check": controller.check_now,
         "panel": toggle_panel,
         "fix_all": controller.fix_all_safe,
         "revert": controller.revert_last,
@@ -362,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
         "grammar_engine": harper_engine,
         **hotkeys_status(hotkeys.grabbed(), bound_chords),
         "hotkeys_unavailable": ",".join(sorted(hotkey_problems)) or None,
+        "hotkeys_problems": ",".join(f"{n}:{w}" for n, w in sorted(hotkey_problems.items()))
+        or None,
         "tray": tray.available,
         **reporter.status(),
     })
@@ -447,21 +468,19 @@ def main(argv: list[str] | None = None) -> int:
         app.run()
     finally:
         log_event("glanced_stopping")
-        watcher.stop()
-        capture_sup.stop()
-        harper_sup.stop()
-        ctl_server.stop()
-        capture_server.stop()
-        hotkeys.close()
-        ai_supervisor.cancel_all()
-        for backend in (*backends.values(), *speculative.values()):
-            stop = getattr(backend, "stop", None) or getattr(backend, "close", None)
-            if stop is not None:
-                try:
-                    stop()
-                except Exception as e:  # noqa: BLE001
-                    log_event("backend_stop_failed", kind=type(e).__name__)
-        pool.shutdown(wait=False, cancel_futures=True)
-        ai_pool.shutdown(wait=False, cancel_futures=True)
-        notifier.close()
+        # the same fast, bounded exit as on Linux (glance.daemon.teardown)
+        teardown = Teardown()
+        teardown.run([
+            ("overlay", lambda: hide_everything(overlay, None, None)),
+            ("hotkeys", hotkeys.close),
+            ("ai", ai_supervisor.cancel_all),
+            ("pools", lambda: (pool.shutdown(wait=False, cancel_futures=True),
+                               ai_pool.shutdown(wait=False, cancel_futures=True))),
+            ("watcher", watcher.stop),
+            ("sockets", lambda: (ctl_server.stop(), capture_server.stop())),
+            ("children", lambda: stop_all((capture_sup.stop, harper_sup.stop))),
+            ("backends", lambda: stop_backends((*backends.values(), *speculative.values()))),
+            ("notifier", notifier.close),
+        ])
+        teardown.finish()
     return 0

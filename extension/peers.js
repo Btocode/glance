@@ -67,8 +67,11 @@ function busCall(conn, method, args, signature) {
 }
 
 export class Peers {
-    constructor(conn) {
+    // `vanished(role)` is called when a role's process leaves the bus (or its name passes to
+    // another process): whatever the extension holds for it must be let go then.
+    constructor(conn, vanished = null) {
         this._conn = conn;
+        this._vanished = vanished;
         this._uid = new Gio.Credentials().get_unix_user();
         this._owner = {};      // role -> unique name that owns its well-known name now
         this._verified = {};   // role -> unique name checked and accepted
@@ -76,14 +79,26 @@ export class Peers {
         this._watches = Object.entries(ROLES).map(([role, name]) =>
             Gio.bus_watch_name_on_connection(conn, name, Gio.BusNameWatcherFlags.NONE,
                 (_c, _n, owner) => {
+                    const before = this._owner[role];
                     this._owner[role] = owner;
                     this._verified[role] = null;
+                    if (before && before !== owner)
+                        this._gone(role);
                     this.verify(role, owner);  // ahead of its first call
                 },
                 () => {
                     this._owner[role] = null;
                     this._verified[role] = null;
+                    this._gone(role);
                 }));
+    }
+
+    _gone(role) {
+        try {
+            this._vanished?.(role);
+        } catch (e) {
+            logError(e, `Glance: ${role} vanished`);
+        }
     }
 
     destroy() {

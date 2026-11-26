@@ -132,6 +132,41 @@ def set_suggestions(update_config: Callable[[Path, str, Any], None], path: Path,
     reload()
 
 
+def set_check_mode(update_config: Callable[[Path, str, Any], None], path: Path,
+                   mode: str, reload: Callable[[], None]) -> None:
+    """The tray's "Check: on shortcut / while typing": write `[general] check` (keeping the
+    file's layout) and load it now. A config that cannot be written is logged; the mode
+    stays as it was."""
+    from glance.config import CHECK_MODES, ConfigError
+
+    if mode not in CHECK_MODES:
+        raise ValueError(f"unknown check mode: {mode}")
+    try:
+        update_config(path, "general.check", mode)
+    except (ConfigError, OSError) as e:
+        log_event("config_write_failed", kind=type(e).__name__)
+        return
+    reload()
+
+
+def check_label(chord: str, mac: bool = False) -> str:
+    """How the check shortcut is named in menus and hints: `Super+Alt+G` (Linux), `⌃⌥G`."""
+    if mac:
+        from glance.platform.macos.hotkeys_mac import symbols
+
+        return symbols(chord)
+    from glance.ui.hotkeys import parse_chord
+
+    try:
+        mods, key = parse_chord(chord)
+    except ValueError:
+        return chord
+    order = [m for m in ("ctrl", "shift", "super", "alt") if m in mods]
+    names = {"ctrl": "Ctrl", "shift": "Shift", "super": "Super", "alt": "Alt"}
+    return "+".join([*(names[m] for m in order), key.upper() if len(key) == 1 else
+                     key.capitalize()])
+
+
 def guard_panel(guard: Any) -> Callable[[Any, Any], Any]:
     """The `extra_panel` transform that puts the send-guard's warning on the panel."""
     return lambda _s, panel: replace(panel, guard=guard.label())

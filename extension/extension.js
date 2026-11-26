@@ -13,6 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {KeyGuard} from './keyguard.js';
 import {Overlay} from './overlay.js';
 import {Peers} from './peers.js';
 
@@ -28,7 +29,7 @@ const METHODS = ['Ping', 'Render', 'Grab', 'Ungrab', 'FocusedWindow', 'Monitors'
 // GLANCE_SHELL_TEST=1 only (the private test shell). TestCall runs any method of METHODS for
 // the test process, which is not Glance and is refused by every one of them otherwise.
 const TEST_METHODS = ['TestHideOverview', 'TestMoveWindow', 'TestOverlay', 'TestClick',
-    'TestScreenshot', 'TestAskText', 'TestPointer', 'TestCall'];
+    'TestScreenshot', 'TestAskText', 'TestPointer', 'TestGrabs', 'TestCall'];
 // Methods that answer later (they wait for the clipboard, a timer or a screenshot).
 const ASYNC = new Set(['TypeText', 'ClipboardSave', 'ReadPrimary', 'ClipboardRestore',
     'TestClick', 'TestScreenshot', 'TestCall']);
@@ -45,7 +46,7 @@ function ifaceXml(test) {
 }
 
 // Hotkey names glanced configures ([general.hotkeys]); they are keys of our schema.
-const SCHEMA_KEYS = new Set(['panel', 'fix-all', 'revert', 'pause', 'tone1', 'tone2', 'tone3',
+const SCHEMA_KEYS = new Set(['check', 'panel', 'fix-all', 'revert', 'pause', 'tone1', 'tone2', 'tone3',
     'tone4', 'complete', 'selection']);
 
 const MODIFIER_KEYVALS = {
@@ -81,7 +82,17 @@ export default class GlanceExtension extends Extension {
             askDone: result => this._daemon('AskDone', result),
             windowFrame: id => this._frameOf(id),
         });
-        this._peers = new Peers(Gio.DBus.session);
+        // Transient grabs never outlive an answering glanced (see keyguard.js).
+        this._guard = new KeyGuard({
+            held: () => [...this._grabs].filter(([, g]) => g.kind === 'accel')
+                .map(([name, g]) => [name, g.accel]),
+            drop: name => this._ungrab(name),
+            take: (name, accel) => this._mGrab({name, accel}),
+        });
+        this._peers = new Peers(Gio.DBus.session, role => {
+            if (role === 'daemon')
+                this._daemonGone();
+        });
         this._obj = Gio.DBusExportedObject.wrapJSObject(ifaceXml(this._test), this._dispatcher());
         this._obj.export(Gio.DBus.session, SHELL_PATH);
         this._nameId = Gio.bus_own_name_on_connection(
@@ -96,6 +107,7 @@ export default class GlanceExtension extends Extension {
     }
 
     disable() {
+        this._guard.gone();
         for (const name of [...this._grabs.keys()])
             this._ungrab(name);
         this._unfollow();
@@ -167,21 +179,44 @@ export default class GlanceExtension extends Extension {
         done(answer);
     }
 
-    _daemon(method, payload) {
+    _daemon(method, payload, done = null) {
         // To the verified glanced only: a process that took its name gets nothing.
-        this._peers?.peer('daemon').then(dest => {
-            if (!dest)
+        // `done(answered)`, when given, learns whether glanced took the call.
+        const peers = this._peers;
+        if (!peers) {
+            done?.(false);
+            return;
+        }
+        peers.peer('daemon').then(dest => {
+            if (!dest) {
+                done?.(false);
                 return;
+            }
             Gio.DBus.session.call(dest, DAEMON_PATH, DAEMON_IFACE, method,
                 new GLib.Variant('(s)', [JSON.stringify(payload)]), null,
                 Gio.DBusCallFlags.NO_AUTO_START, 2000, null, (conn, res) => {
+                    let ok = true;
                     try {
                         conn.call_finish(res);
                     } catch (_e) {
-                        // glanced went away meanwhile: nothing to tell
+                        ok = false;  // glanced went away or hangs: nothing to tell
                     }
+                    done?.(ok);
                 });
         });
+    }
+
+    // glanced left the bus (quit, crashed, killed): nothing may stay captured or on screen
+    // for it. A new glanced grabs and draws again when it starts.
+    _daemonGone() {
+        this._guard?.gone();
+        for (const name of [...this._grabs.keys()])
+            this._ungrab(name);
+        try {
+            this._overlay?.reset();
+        } catch (e) {
+            logError(e, 'Glance: overlay reset');
+        }
     }
 
     _signal(state) {
@@ -333,6 +368,7 @@ export default class GlanceExtension extends Extension {
         if (typeof name !== 'string' || typeof accel !== 'string')
             return {ok: false, reason: 'invalid'};
         this._ungrab(name);
+        this._guard?.asked(name);
         const key = name.replace(/_/g, '-');
         if (SCHEMA_KEYS.has(key)) {
             this._settings.set_strv(key, [accel]);
@@ -348,12 +384,13 @@ export default class GlanceExtension extends Extension {
             return {ok: false, reason: 'conflict'};
         Main.wm.allowKeybinding(Meta.external_binding_name_for_action(action),
             Shell.ActionMode.NORMAL);
-        this._grabs.set(name, {kind: 'accel', action});
+        this._grabs.set(name, {kind: 'accel', action, accel});
         this._actions.set(action, name);
         return {ok: true};
     }
 
     _mUngrab({name}) {
+        this._guard?.asked(name);
         this._ungrab(name);
         return {ok: true};
     }
@@ -376,7 +413,7 @@ export default class GlanceExtension extends Extension {
     _accelerator(action) {
         const name = this._actions.get(action);
         if (name)
-            this._daemon('Key', {name});
+            this._guard.pressed(done => this._daemon('Key', {name}, done));
     }
 
     // write-back keys
@@ -539,6 +576,11 @@ export default class GlanceExtension extends Extension {
 
     _mTestOverlay() {
         return this._overlay.describe();
+    }
+
+    // The keys held for glanced now: its keybindings ('wm') and transient grabs ('accel').
+    _mTestGrabs() {
+        return {grabs: [...this._grabs].map(([name, g]) => ({name, kind: g.kind}))};
     }
 
     _mTestClick({target}, done) {

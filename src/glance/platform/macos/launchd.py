@@ -29,6 +29,9 @@ def render_plist(glanced: Path, home: Path, path_env: str) -> bytes:
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": 10,
+        # glanced leaves within 3 s on its own (glance.daemon.teardown); launchd's SIGKILL
+        # after 5 s covers a main thread that never gets back to the run loop
+        "ExitTimeOut": 5,
         "LimitLoadToSessionType": "Aqua",
         "ProcessType": "Interactive",
         "StandardOutPath": str(logs / "glanced.log"),

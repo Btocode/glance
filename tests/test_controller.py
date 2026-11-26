@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from glance.config import Config, UiCfg
+from glance.config import UiCfg
 from glance.daemon.controller import APPLY_TIMEOUT_MS, FIX_INDIVIDUALLY, Controller
 from glance.grammar.filters import IssueFilter
 from glance.grammar.issues import Issue, merge_edits
@@ -19,6 +19,7 @@ from tests.fakes import (
     FakeOverlay,
     FakeTray,
 )
+from tests.fakes import typing_config as Config  # these tests check while typing
 
 TEH = "Teh quick brown fox jumps"
 MIXED = "Teh quick brwon fox teh end of it"  # safe 0-3, spelling 10-15, safe 20-23

@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from glance.doctor.checks import Check, CheckResult, DoctorEnv
@@ -21,13 +21,30 @@ def _run_one(check: Check, env: DoctorEnv) -> CheckResult:
         return CheckResult(check.id, check.id, "fail", f"check crashed: {e.__class__.__name__}")
 
 
-def run_checks(env: DoctorEnv, checks: Sequence[Check]) -> list[CheckResult]:
-    return [_run_one(c, env) for c in checks]
+def run_checks(env: DoctorEnv, checks: Sequence[Check],
+               on_result: Callable[[CheckResult], None] | None = None,
+               on_start: Callable[[str], None] | None = None) -> list[CheckResult]:
+    """Every check in order. `on_result` hears each result as soon as it is known (the CLI
+    prints it then, not the whole report at the end); `on_start` hears a check's `progress`
+    line before one that can take seconds starts."""
+    out = []
+    for check in checks:
+        progress = getattr(check, "progress", None)
+        if progress and on_start is not None:
+            on_start(progress)
+        result = _run_one(check, env)
+        out.append(result)
+        if on_result is not None:
+            on_result(result)
+    return out
 
 
 def apply_fixes(env: DoctorEnv, checks: Sequence[Check], apps: Sequence[str],
-                skip: Sequence[str] = ()) -> list[CheckResult]:
-    """Run `fix` for every non-ok check not in `skip`, then re-run everything."""
+                skip: Sequence[str] = (),
+                on_result: Callable[[CheckResult], None] | None = None,
+                on_start: Callable[[str], None] | None = None) -> list[CheckResult]:
+    """Run `fix` for every non-ok check not in `skip`, then re-run everything (the re-run
+    is what `on_result` / `on_start` hear)."""
     fix_env = dataclasses.replace(env, apps=tuple(apps))
     for check, result in zip(checks, run_checks(fix_env, checks), strict=True):
         wanted = result.status != "ok" or (apps and getattr(check, "opt_in", False))
@@ -36,7 +53,9 @@ def apply_fixes(env: DoctorEnv, checks: Sequence[Check], apps: Sequence[str],
                 check.fix(fix_env)
             except Exception as e:  # noqa: BLE001 - reported by the re-run below
                 log_event("doctor_fix_error", check=check.id, error=e.__class__.__name__)
-    return run_checks(env, checks)
+    if on_start is not None:
+        on_start("Checking again...")
+    return run_checks(env, checks, on_result, on_start)
 
 
 def undo_all(env: DoctorEnv, checks: Sequence[Check]) -> None:

@@ -338,8 +338,8 @@ def test_a_system_shortcut_is_reported_not_grabbed():
     port = Port()
     problems = bind_hotkeys(port, hotkeys_mac.MAC_DEFAULTS,
                             {n: (lambda: None) for n in hotkeys_mac.MAC_DEFAULTS}, system)
-    assert problems == {"panel": "system"}
-    assert "panel" not in port.held and "pause" in port.held
+    assert problems == {"check": "system"}
+    assert "check" not in port.held and "pause" in port.held
 
 
 # ---------------------------------------------------------------------- launchd
@@ -354,6 +354,7 @@ def test_launch_agent_plist(tmp_path):
     assert doc["RunAtLoad"] is True
     assert doc["KeepAlive"] == {"SuccessfulExit": False}
     assert doc["LimitLoadToSessionType"] == "Aqua"
+    assert doc["ExitTimeOut"] == 5  # a hung quit never holds the logout
     assert doc["StandardOutPath"] == "/Users/someone/Library/Logs/Glance/glanced.log"
     assert doc["EnvironmentVariables"]["PATH"].startswith("/Users/someone/.local/bin:")
     assert launchd.agent_path(home) == home / "Library/LaunchAgents/io.github.btocode.glance.plist"

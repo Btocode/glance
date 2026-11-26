@@ -39,7 +39,7 @@ class CheckResult:
     hint: str | None = None
 
 
-def _no_healths() -> dict[str, bool]:
+def _no_healths() -> dict[str, bool | None]:
     return default_healths()
 
 
@@ -57,7 +57,7 @@ class DoctorEnv:
     procs: Callable[[], list[tuple[int, list[str]]]]
     ctl: Callable[[str, dict], dict | None]
     which: Callable[[str], str | None]
-    healths: Callable[[], dict[str, bool]] = _no_healths  # backend name -> signed in
+    healths: Callable[[], dict[str, bool | None]] = _no_healths  # name -> signed in (None: timed out)
     locate: Callable[[str], str | None] = _locate  # a CLI's absolute path, as glanced finds it
     install_override: Callable[[str], bool] | None = None  # tests inject; default: real override
     update_status: Callable[[], str] = lambda: "unknown"  # default_env: the real lookup
@@ -100,8 +100,16 @@ class DoctorEnv:
         return Path(self.environ.get("ZDOTDIR") or self.home) / ".zshrc"
 
 
-def default_healths() -> dict[str, bool]:
-    """Real per-backend health; any exception (an import included) means not connected."""
+HEALTH_TIMEOUT_S = 5.0  # per backend; they are asked all at once
+
+
+def default_healths(timeout_s: float = HEALTH_TIMEOUT_S) -> dict[str, bool | None]:
+    """Real per-backend health, every backend asked at the same time: True when signed in,
+    False when not (any exception, an import included, means not connected), None when it
+    did not answer within `timeout_s` (a cold node start, a stuck CLI)."""
+    import threading
+    import time
+
     from glance.backends.proc import ProcRunner
 
     runner = ProcRunner()
@@ -123,14 +131,24 @@ def default_healths() -> dict[str, bool]:
         from glance.backends.keystore import SecretKeyStore
         return ApiBackend(SecretKeyStore())
 
+    names = ("claude", "codex", "gemini", "opencode", "api")
     out: dict[str, bool] = {}
-    for name in ("claude", "codex", "gemini", "opencode", "api"):
+
+    def ask(name: str) -> None:
         try:
             h = make(name).health()
             out[name] = bool(h.installed and h.signed_in is True)
         except Exception:  # noqa: BLE001 - a broken backend is simply not connected
             out[name] = False
-    return out
+
+    threads = [threading.Thread(target=ask, args=(n,), name=f"doctor-{n}", daemon=True)
+               for n in names]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + timeout_s
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()))
+    return {n: out.get(n) for n in names}
 
 
 class Check(Protocol):
@@ -414,22 +432,65 @@ class Hotkeys(_Base):
     def run(self, env):
         from glance.config import ConfigError, load_config
 
-        st = env.ctl("status", {})
-        if st is None:
-            return self.result("warn", "not checked: glanced is not running")
         try:
             wanted = load_config(env.config_file).general.hotkeys
         except ConfigError:
             return self.result("warn", "not checked: config is invalid")
+        # The desktop's own shortcuts (read-only gsettings): a chord there is never grabbed.
+        taken = [f"{name} ({chord})" for name, chord in wanted.items()
+                 if _chord_key(chord) in _desktop_shortcuts(env)]
+        if taken:
+            return self.result("warn", "the desktop uses: " + ", ".join(taken),
+                               "pick other chords under [general.hotkeys] in config.toml "
+                               "(docs/shortcuts.md lists free ones)")
+        st = env.ctl("status", {})
+        if st is None:
+            return self.result("warn", "not checked: glanced is not running")
         if "hotkeys_grabbed" not in st:
             return self.result("warn", "glanced does not report grabbed hotkeys",
                                "restart glanced after updating")
         grabbed = {n for n in str(st["hotkeys_grabbed"]).split(",") if n}
-        lost = [f"{name} ({chord})" for name, chord in wanted.items() if name not in grabbed]
+        why = dict(p.split(":", 1) for p in str(st.get("hotkeys_problems") or "").split(",")
+                   if ":" in p)
+        lost = [f"{name} ({chord}{': ' + _WHY[why[name]] if why.get(name) in _WHY else ''})"
+                for name, chord in wanted.items() if name not in grabbed]
         if lost:
             return self.result("warn", "not grabbed: " + ", ".join(lost),
                                "another app owns it; change it in config.toml")
-        return self.ok("all hotkeys grabbed")
+        check = wanted.get("check")
+        return self.ok("all hotkeys grabbed" + (f"; check is {check}" if check else ""))
+
+
+_WHY = {"conflict": "another program holds it", "system": "a desktop shortcut",
+        "invalid": "not a valid chord"}
+
+
+def _chord_key(chord):
+    from glance.ui.hotkeys import parse_chord
+
+    try:
+        mods, key = parse_chord(chord)
+    except ValueError:
+        return None
+    return mods, key.casefold()
+
+
+def _desktop_shortcuts(env):
+    """GNOME's own shortcuts, read with `gsettings list-recursively` (read-only); empty
+    elsewhere."""
+    from glance.ui.hotkeys import GNOME_SCHEMAS, parse_accels
+
+    out = set()
+    if _skip(env, "GLANCE_SKIP_GSETTINGS"):
+        return out
+    for schema in GNOME_SCHEMAS:
+        try:
+            rc, text = env.run(["gsettings", "list-recursively", schema], timeout=2)
+        except Exception:  # noqa: BLE001 - no gsettings: nothing to compare with
+            return out
+        if rc == 0:
+            out |= parse_accels(text)
+    return out
 
 
 class DesktopFlags(_Base):
@@ -529,27 +590,35 @@ class OtherElectron(_Base):
 
 class Backend(_Base):
     id, title = "backend", "AI backend"
+    progress = "Checking AI command-line tools (is each one signed in?)..."
 
     def run(self, env):
         from glance.config import ConfigError, load_config
 
         try:
-            ready = {n for n, ok in env.healths().items() if ok}
+            healths = env.healths()
         except Exception:  # noqa: BLE001 - any health failure means not connected
-            ready = set()
+            healths = {}
+        ready = {n for n, ok in healths.items() if ok}
+        slow = sorted(n for n, ok in healths.items() if ok is None)
+        late = f" ({', '.join(slow)}: timed out)" if slow else ""
         try:
             choice = load_config(env.config_file).backend.choice
         except ConfigError:
             choice = None
         if ready and choice in ready:
-            return self.ok(f"{choice} connected")
+            return self.ok(f"{choice} connected{late}")
+        if choice in slow:
+            return self.result("warn", f"{choice} timed out",
+                               f"`{choice}` did not answer within {HEALTH_TIMEOUT_S:.0f} s; "
+                               "run `glance doctor` again in a moment.")
         how = "; ".join(f"{n}: {c}" for n, c in SIGN_IN.items())
         if ready:
-            return self.result("warn", "No AI backend chosen" if choice is None else
-                               f"{choice} is not connected",
+            return self.result("warn", ("No AI backend chosen" if choice is None else
+                                        f"{choice} is not connected") + late,
                                f"connected: {', '.join(sorted(ready))}; pick one with "
                                f"`glance backend use <name>`. Local grammar checks work.")
-        return self.result("warn", "No AI connected; local grammar checks still work",
+        return self.result("warn", "No AI connected; local grammar checks still work" + late,
                            f"{how}; then `glance backend use <name>`")
 
 

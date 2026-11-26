@@ -353,6 +353,8 @@ class Autocomplete:
         if (s is None or self.visible or self._job is not None or self._awaited is not None
                 or not eligible(s, MIN_PREFIX_CHARS)):
             return
+        if getattr(self._c, "checks_on_request", False):
+            return  # `[general] check = "shortcut"`: nothing is asked of an AI while typing
         if self._supervisor.live_autocomplete():  # cheap: the setting and the active backend
             self._start(s, live=True)
 

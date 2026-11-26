@@ -207,13 +207,24 @@ def chip(rig) -> dict:
 
 
 def test_status_reports_every_hotkey_grabbed(rig):
-    want = {"complete", "fix_all", "panel", "pause", "revert", "selection",
+    want = {"check", "complete", "fix_all", "panel", "pause", "revert", "selection",
             "tone1", "tone2", "tone3", "tone4"}
     assert wait_for(lambda: set(rig.daemon.status().get("hotkeys_grabbed", "").split(","))
                     == want, 5.0), rig.daemon.status()
     done = rig.daemon.glance("status", "--json")
     st = json.loads(done.stdout)
     assert set(st["hotkeys_grabbed"].split(",")) == want and st["hotkeys_unavailable"] is None
+
+
+def test_nothing_is_checked_until_the_check_hotkey(rig):
+    # `[general] check = "shortcut"` (the default): typing alone checks nothing.
+    time.sleep(1.5)
+    assert rig.daemon.state()["issues"] == [] and not rig.daemon.state()["strip"]
+    rig.typist.chord("Super_L", "Alt_L", "g")
+    assert wait_for(lambda: rig.daemon.state()["strip"] and rig.daemon.state()["issues"],
+                    10.0), json.dumps([rig.daemon.state(), rig.daemon.status()])  # "Teh"
+    rig.daemon.request("test_panel_action", {"action": "close", "args": {}})
+    assert wait_for(lambda: not rig.daemon.state()["strip"], 5.0)
 
 
 def test_grammar_chip_appears(rig):

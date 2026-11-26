@@ -42,7 +42,8 @@ def handle_test_message(controller: Any, msg_type: str, payload: dict[str, Any],
         view = chip_view(controller._chip_inputs(s), min_chars)
         return {"ok": True, "snapshot": None if s is None else s.to_dict(),
                 "chip": {"state": view.state.value, "label": view.label, "badge": view.badge},
-                "issues": [i.id for i in controller.issues]}
+                "issues": [i.id for i in controller.issues],
+                "strip": s is not None and getattr(controller, "strip", lambda: None)() is not None}
     try:
         start, end = payload["start"], payload["end"]
         replacement, method = payload["replacement"], payload["method"]

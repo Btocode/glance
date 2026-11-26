@@ -23,6 +23,7 @@ from glance.protocol import Rect
 from glance.shellbus import ShellBus, ShellUnavailable
 from glance.ui import scene as sc
 from glance.ui.chip_model import ChipView
+from glance.ui.hover_menu import menu_piece
 from glance.ui.panel_model import PanelView
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
@@ -51,8 +52,11 @@ class ShellOverlay:
                  tokens: Callable[[], dict[str, str]],
                  on_chip_click: Callable[[], None],
                  on_panel_action: Callable[[str, dict[str, Any]], None],
-                 use_key: Callable[[], str] = lambda: "Alt+Return") -> None:
+                 use_key: Callable[[], str] = lambda: "Alt+Return",
+                 hover_menu: Callable[[], Any] = lambda: None) -> None:
         self._bus = bus
+        self._hover_menu = hover_menu  # the icon's hover menu now (None: not now)
+        self._menu: Any = None  # the HoverMenu on show
         self._post = post
         self._later = call_later
         self._tokens = tokens
@@ -91,6 +95,7 @@ class ShellOverlay:
         self._queue()
 
     def hide_status(self) -> None:
+        self._menu = None
         if self._status is not None:
             self._status = None
             self._queue()
@@ -190,12 +195,26 @@ class ShellOverlay:
     def on_clicked(self, payload: dict[str, Any]) -> None:
         target = payload.get("target")
         if target == "status":
+            self._menu = None
             self._on_chip_click()
+            self._queue()
+            return
+        if target == "hover":  # the pointer rested on the icon: its menu, if it has one now
+            self._menu = self._hover_menu() if self._status is not None else None
+            self._queue()
+            return
+        if target == "hover_end":  # the pointer left the icon and the menu
+            if self._menu is not None:
+                self._menu = None
+                self._queue()
             return
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         action = args.get("action")
         inner = args.get("args") if isinstance(args.get("args"), dict) else {}
         if target == "action" and isinstance(action, str):
+            if self._menu is not None:
+                self._menu = None
+                self._queue()
             self._act(action, dict(inner))
 
     def on_sized(self, payload: dict[str, Any]) -> None:
@@ -259,6 +278,8 @@ class ShellOverlay:
             if at is not None:
                 x, y = clamp_to_monitor(at[0] - ICON_X, at[1] - ICON_Y, ICON_BOX, mons)
                 status = sc.status_piece(self._status, x, y)
+                if self._menu is not None:
+                    status["menu"] = menu_piece(self._menu)
                 placed["status"] = (x + ICON_X, y + ICON_Y, ICON, ICON)
         field_drawer = self._panel is not None and self._panel_anchor is not None
         if (self._strip is not None or field_drawer) and anchor is not None:

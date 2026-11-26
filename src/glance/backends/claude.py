@@ -190,6 +190,10 @@ class ClaudeBackend(BaseBackend):
             idle, self._idle = list(self._idle.values()), {}
         for p in idle:
             p.kill()
+        with self._spawn_lock:
+            spawner, self._spawner = self._spawner, None
+        if spawner is not None:  # its idle thread would otherwise hold glanced's exit
+            spawner.shutdown(wait=False, cancel_futures=True)
 
     # -- primitives --------------------------------------------------------------
     def _run_json(self, system: str, user: str, schema: dict, timeout_s: float) -> dict:

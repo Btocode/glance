@@ -3,6 +3,10 @@
      the same as on X11. -->
 <schemalist>
   <schema id="org.gnome.shell.extensions.glance" path="/org/gnome/shell/extensions/glance/">
+    <key name="check" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;g']</default>
+      <summary>Glance: check</summary>
+    </key>
     <key name="panel" type="as">
       <default>['&lt;Super&gt;&lt;Alt&gt;space']</default>
       <summary>Glance: panel</summary>

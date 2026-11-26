@@ -58,6 +58,14 @@ def dispatch_panel_action(controller: Any, action: str, args: dict[str, Any],
             controller.ignore_rule(str(args["issue_id"]), str(args["scope"]))
         elif action == "close":
             controller.close_panel()
+        elif action == "check":  # the status icon's hover menu
+            controller.check_now()
+        elif action == "check_tone":
+            controller.check_tone()
+        elif action == "rewrite":
+            controller.open_panel()
+        elif action == "resume":
+            controller.resume()
         else:
             log_event("panel_action_unknown")
     except (KeyError, TypeError, ValueError):
@@ -70,14 +78,20 @@ class PanelRouter:
 
     def __init__(self, controller: Any, ai: Any = None,
                  remember_profile: Callable[[str, str], None] | None = None,
-                 selection: Any = None, guard: Any = None) -> None:
+                 selection: Any = None, guard: Any = None,
+                 on_setup: Callable[[], None] | None = None) -> None:
         self._c, self._ai, self._remember = controller, ai, remember_profile
         self.selection, self.guard = selection, guard
+        self._on_setup = on_setup
 
     def action(self, action: str, args: dict[str, Any]) -> None:
         sa = self.selection
         if sa is not None and sa.is_open and action in SELECTION_ACTIONS:
             self._selection_action(sa, action, args)
+            return
+        if action == "setup":  # the hover menu's "Connect an AI…"
+            if self._on_setup is not None:
+                self._on_setup()
             return
         if action == "guard_silence":
             if self.guard is None or args.get("scope") not in ("app", "global"):

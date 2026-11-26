@@ -22,6 +22,12 @@ _STATES = {
 }
 
 
+def check_mode_labels(hint: str = "") -> tuple[tuple[str, str], ...]:
+    """The tray's two radio items for `[general] check`, in menu order."""
+    shortcut = f"Check: on shortcut ({hint})" if hint else "Check: on shortcut"
+    return (("shortcut", shortcut), ("typing", "Check: while typing"))
+
+
 class BackendMenu:
     """"AI backend ▸": a radio list of the ready backends, then "Set up…" ("Connect an
     AI…" while none is ready: the only way the setup window opens). Main thread only."""
@@ -70,7 +76,8 @@ class BackendMenu:
 class GtkTray:
     """TrayPort. `available` is False when the indicator library is missing.
 
-    Menu: status line, "AI backend ▸", "Show suggestions automatically" (a check item: on is
+    Menu: status line, "AI backend ▸", "Check: on shortcut / while typing" (two radio items:
+    `[general] check`), "Show suggestions automatically" (a check item: on is
     `[ui] suggestions = "auto"`), Pause/Resume, Quit. `set_backends` takes rows built by the
     caller (never a blocking health check here)."""
 
@@ -82,8 +89,12 @@ class GtkTray:
                  auto_suggest: bool = False,
                  on_update: Callable[[], None] = lambda: None,
                  on_usage_open: Callable[[], None] = lambda: None,
-                 on_usage_details: Callable[[], None] = lambda: None) -> None:
+                 on_usage_details: Callable[[], None] = lambda: None,
+                 on_check_mode: Callable[[str], None] = lambda mode: None,
+                 check_mode: str = "shortcut", check_hint: str = "") -> None:
         self._indicator = None
+        self._on_check_mode = on_check_mode
+        self._check_items: dict[str, Any] = {}
         self._on_auto_suggest = on_auto_suggest
         self._syncing = False
         self._paused = False
@@ -116,6 +127,15 @@ class GtkTray:
         quit_item = Gtk.MenuItem(label="Quit Glance")
         quit_item.connect("activate", lambda _item: on_quit())
         self._backends = BackendMenu(Gtk, on_choose, on_setup)
+        check_items = []
+        group = None
+        for mode, label in check_mode_labels(check_hint):
+            radio = Gtk.RadioMenuItem.new_with_label_from_widget(group, label)
+            group = group or radio
+            radio.set_active(mode == check_mode)
+            radio.connect("toggled", self._check_toggled, mode)
+            self._check_items[mode] = radio
+            check_items.append(radio)
         self._auto = Gtk.CheckMenuItem(label="Show suggestions automatically")
         self._auto.set_active(auto_suggest)
         self._auto.connect("toggled", self._auto_toggled)
@@ -130,7 +150,8 @@ class GtkTray:
         self._on_usage_details, self._gtk = on_usage_details, Gtk
         self.set_usage(())
         for item in (self._headline, self._update, Gtk.SeparatorMenuItem(), self._backends.item,
-                     self._usage_item, self._auto, self._toggle, quit_item):
+                     self._usage_item, Gtk.SeparatorMenuItem(), *check_items,
+                     self._auto, Gtk.SeparatorMenuItem(), self._toggle, quit_item):
             menu.append(item)
         menu.show_all()
         self._update.hide()
@@ -194,6 +215,21 @@ class GtkTray:
             self._auto.set_active(on)
         finally:
             self._syncing = False
+
+    def set_check_mode(self, mode: str) -> None:
+        """Reflect `[general] check` (the config may have been edited by hand)."""
+        item = self._check_items.get(mode)
+        if self._indicator is None or item is None or item.get_active():
+            return
+        self._syncing = True
+        try:
+            item.set_active(True)
+        finally:
+            self._syncing = False
+
+    def _check_toggled(self, item: Any, mode: str) -> None:
+        if item.get_active() and not self._syncing:
+            self._on_check_mode(mode)
 
     def _auto_toggled(self, item: Any) -> None:
         if not self._syncing:

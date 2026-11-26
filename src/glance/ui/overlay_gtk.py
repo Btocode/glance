@@ -29,6 +29,9 @@ from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
 from glance.protocol import Rect
 from glance.ui.chip_model import ChipView
+from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
+from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
+from glance.ui.hover_menu import HoverMenu
 from glance.ui.panel_model import IssueRow, PanelView, ToneChip
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
@@ -106,6 +109,27 @@ def _rounded(x: int, y: int, w: int, h: int, r: int) -> cairo.Region:
     return region
 
 
+def _pointer(widget: Gtk.Widget) -> Gtk.Widget:
+    """The hand cursor while the pointer is on `widget` (a button, the icon); text and
+    empty space keep the default one."""
+    def enter(w: Gtk.Widget, _e: Any) -> bool:
+        win = w.get_window()
+        if win is not None:
+            win.set_cursor(Gdk.Cursor.new_from_name(win.get_display(), "pointer"))
+        return False
+
+    def leave(w: Gtk.Widget, _e: Any) -> bool:
+        win = w.get_window()
+        if win is not None:
+            win.set_cursor(None)
+        return False
+
+    widget.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+    widget.connect("enter-notify-event", enter)
+    widget.connect("leave-notify-event", leave)
+    return widget
+
+
 def _raise(win: Gtk.Window) -> None:
     """On top of the windows mapped since it was made (an override-redirect window keeps
     its place in the stack when it is mapped again). Raising never moves the focus."""
@@ -166,8 +190,14 @@ class GtkOverlay:
     tone{key}, tone_hover{key}, sel_copy, sel_paste and close."""
 
     def __init__(self, on_chip_click: Callable[[], None],
-                 on_panel_action: Callable[[str, dict[str, Any]], None]) -> None:
+                 on_panel_action: Callable[[str, dict[str, Any]], None],
+                 hover_menu: Callable[[], HoverMenu | None] = lambda: None) -> None:
         self._on_chip_click = on_chip_click
+        self._hover_menu = hover_menu  # the icon's hover menu now (None: not now)
+        self._menu_view: HoverMenu | None = None
+        self._menu_open_src: int | None = None
+        self._menu_close_src: int | None = None
+        self._in_icon = self._in_menu = False
         self._act = on_panel_action
         self._theme = install()
         self._theme.on_change(self._restyle)
@@ -208,6 +238,16 @@ class GtkOverlay:
         self._icon.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         self._icon.connect("draw", self._draw_icon)
         self._icon.connect("button-press-event", self._icon_pressed)
+        _pointer(self._icon)
+        self._icon.connect("enter-notify-event", lambda *_a: self._menu_enter("icon"))
+        self._icon.connect("leave-notify-event", lambda *_a: self._menu_leave("icon"))
+
+        # The hover menu: like the strip, a popup that never takes the focus.
+        self._menu = _popup(Gdk.WindowTypeHint.TOOLTIP)
+        self._menu.connect("draw", _clear)
+        self._menu.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self._menu.connect("enter-notify-event", lambda *_a: self._menu_enter("menu"))
+        self._menu.connect("leave-notify-event", self._menu_left)
         self._icon.connect("map", lambda *_a: self._icon_shape())
         self._icon.set_size_request(*ICON_BOX)
 
@@ -253,6 +293,7 @@ class GtkOverlay:
         self._animate()
 
     def hide_status(self) -> None:
+        self._hide_menu()
         if self._icon.get_visible():
             self._icon.hide()
         self._status_xy = None
@@ -826,8 +867,101 @@ class GtkOverlay:
     def _icon_pressed(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
         # A quick second click also brings a 2BUTTON_PRESS: one toggle per click.
         if event.button == 1 and event.type == Gdk.EventType.BUTTON_PRESS:
+            self._hide_menu()
             self._on_chip_click()
         return True
+
+    # ------------------------------------------------------------------ the hover menu
+
+    def _menu_enter(self, where: str) -> bool:
+        if where == "icon":
+            self._in_icon = True
+        else:
+            self._in_menu = True
+        self._cancel_source("_menu_close_src")
+        if where == "icon" and self._menu_view is None and self._menu_open_src is None:
+            self._menu_open_src = GLib.timeout_add(MENU_OPEN_MS, self._menu_open_due)
+        return False
+
+    def _menu_left(self, win: Gtk.Window, event: Gdk.EventCrossing) -> bool:
+        # Moving onto one of the menu's own buttons is a crossing too: not a leave.
+        if event.detail != Gdk.NotifyType.INFERIOR:
+            self._menu_leave("menu")
+        return False
+
+    def _menu_leave(self, where: str) -> bool:
+        if where == "icon":
+            self._in_icon = False
+            self._cancel_source("_menu_open_src")
+        else:
+            self._in_menu = False
+        if not (self._in_icon or self._in_menu) and self._menu_close_src is None:
+            self._menu_close_src = GLib.timeout_add(MENU_CLOSE_MS, self._menu_close_due)
+        return False
+
+    def _cancel_source(self, attr: str) -> None:
+        src = getattr(self, attr)
+        if src is not None:
+            GLib.source_remove(src)
+            setattr(self, attr, None)
+
+    def _menu_open_due(self) -> bool:
+        self._menu_open_src = None
+        if self._in_icon and self._status_xy is not None:
+            menu = self._hover_menu()  # None while the user types
+            if menu is not None:
+                self._show_menu(menu)
+        return GLib.SOURCE_REMOVE
+
+    def _menu_close_due(self) -> bool:
+        self._menu_close_src = None
+        if not (self._in_icon or self._in_menu):
+            self._hide_menu()
+        return GLib.SOURCE_REMOVE
+
+    def _show_menu(self, menu: HoverMenu) -> None:
+        self._menu_view = menu
+        old = self._menu.get_child()
+        if old is not None:
+            self._menu.remove(old)
+            old.destroy()
+        box = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2),
+                       "glance-strip", "glance-menu")
+        if menu.note:
+            box.pack_start(_label(menu.note, "glance-note", chars=34), False, False, 0)
+        for item in menu.items:
+            button = self._button(item.label, item.action, "glance-quiet", **item.args)
+            button.get_child().set_xalign(0)
+            button.connect("clicked", lambda _b: self._hide_menu())
+            box.pack_start(button, False, False, 0)
+        if menu.hint:
+            box.pack_start(_label(menu.hint, "glance-note", wrap=False), False, False, 0)
+        fit = _Fit()
+        fit.pack_start(box, True, True, 0)
+        fit.show_all()
+        self._menu.add(fit)
+        x, y = self._status_xy or (0, 0)
+        w, h = fit.get_preferred_size()[1].width, fit.get_preferred_size()[1].height
+        mons = self.monitors()
+        mx, my = clamp_to_monitor(x + ICON_BOX[0], y, (w, h), mons) if mons else (x, y)
+        self._menu.resize(w, h)
+        self._menu.move(mx, my)
+        self._menu.show()
+        _raise(self._menu)
+
+    def _hide_menu(self) -> None:
+        self._cancel_source("_menu_open_src")
+        self._cancel_source("_menu_close_src")
+        self._in_menu = False
+        self._menu_view = None
+        if self._menu.get_visible():
+            self._menu.hide()
+
+    def menu_items(self) -> list[str] | None:
+        """Test access: the hover menu's item labels, None while it is closed."""
+        v = self._menu_view
+        return None if v is None or not self._menu.get_visible() else \
+            [i.label for i in v.items]
 
     def _sparkle(self, warn: bool) -> Gtk.Widget:
         area = Gtk.DrawingArea()
@@ -853,7 +987,7 @@ class GtkOverlay:
     # ------------------------------------------------------------------ the strip
 
     def _button(self, label: str, action: str, *classes: str, **args: Any) -> Gtk.Button:
-        button = Gtk.Button(label=label, can_focus=False, focus_on_click=False)
+        button = _pointer(Gtk.Button(label=label, can_focus=False, focus_on_click=False))
         _classes(button, *classes)
         child = button.get_child()
         if isinstance(child, Gtk.Label):
@@ -948,7 +1082,8 @@ class GtkOverlay:
 
     def _card(self, chip: ToneChip, action: str) -> Gtk.Button:
         """A tone: its name and, once known, one line of its rewrite."""
-        button = _classes(Gtk.Button(can_focus=False, focus_on_click=False), "glance-card")
+        button = _classes(_pointer(Gtk.Button(can_focus=False, focus_on_click=False)),
+                          "glance-card")
         button.set_name(f"card:{chip.key}")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         top = Gtk.Box(spacing=6)
@@ -990,7 +1125,8 @@ class GtkOverlay:
     def _rewrite_as(self) -> Gtk.Widget:
         row = Gtk.Box(spacing=8)
         row.pack_start(_label("Rewrite as…", "glance-meta", wrap=False), False, False, 0)
-        field = _classes(Gtk.Button(can_focus=False, focus_on_click=False), "glance-input")
+        field = _classes(_pointer(Gtk.Button(can_focus=False, focus_on_click=False)),
+                         "glance-input")
         field.set_name("rewrite-as")
         field.add(_label(ASK_PLACEHOLDER, wrap=False))
         field.connect("clicked", lambda _b: self._act("tone", {"key": "custom"}))
@@ -1026,7 +1162,7 @@ class GtkOverlay:
         return line
 
     def _local_button(self, label: str, fn: Callable[[], None], *classes: str) -> Gtk.Button:
-        button = Gtk.Button(label=label, can_focus=False, focus_on_click=False)
+        button = _pointer(Gtk.Button(label=label, can_focus=False, focus_on_click=False))
         _classes(button, *classes)
         button.connect("clicked", lambda _b: fn())
         return button

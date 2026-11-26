@@ -51,9 +51,11 @@ editor, Claude Code in a terminal) and quietly shows the corrected text right un
 <tr>
 <td width="50%" valign="top">
 
-**Inline fixes**<br>
-When what you are typing has fixes, a quiet strip under the field shows the whole message
-corrected. <kbd>Alt</kbd>+<kbd>Enter</kbd> (or its **Use** button) puts the corrected text in.
+**Check on a shortcut**<br>
+Glance stays quiet while you type. Press <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a
+Mac) or click the Glance icon: a strip under the field shows the whole message corrected.
+<kbd>Alt</kbd>+<kbd>Enter</kbd> (or its **Use** button) puts the corrected text in. Prefer
+checks as you type? Switch to **Check: while typing** in the tray menu.
 
 </td>
 <td width="50%">
@@ -257,7 +259,8 @@ chords clash with app shortcuts, the defaults on macOS are ⌃⌥ chords:
 
 | Action | macOS |
 | --- | --- |
-| Open the strip and drawer | ⌃⌥G |
+| Check the field now (opens the strip) | ⌃⌥G |
+| Open the strip and drawer | ⌃⌥O |
 | Use the suggestion (while the strip shows) | ⌥⏎ |
 | Fix all | ⌃⌥F |
 | Undo the last fix | ⌃⌥Z |
@@ -267,7 +270,9 @@ chords clash with app shortcuts, the defaults on macOS are ⌃⌥ chords:
 | Select-anything | ⌃⌥A |
 
 A chord you changed in `[general.hotkeys]` is used as you wrote it. Shortcuts macOS itself
-owns are left alone and reported.
+owns are left alone and reported. The panel moved from ⌃⌥G to ⌃⌥O in this release so that
+⌃⌥G checks, as <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> does on Linux. VoiceOver takes every
+⌃⌥ chord while it runs; see [docs/shortcuts.md](docs/shortcuts.md).
 
 **Uninstall** with `~/.local/share/glance-src/uninstall.sh` (or `./uninstall.sh` in a checkout):
 it stops and removes the LaunchAgent, the links, the environment, the grammar engine, the logs
@@ -348,10 +353,29 @@ call, so both are marked experimental in `glance doctor`.
 ## Usage
 
 Glance runs as a systemd user service. Type in any text field: a small Glance icon at the end of
-the line shows that it is watching, checking, or has fixes ready (with a count). Click the icon
-to open the suggestion strip with the corrected text (see
-[Status icon and when suggestions appear](#status-icon-and-when-suggestions-appear) to make it
-appear by itself instead).
+the line shows that Glance is ready. When you want your text checked, press
+<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a Mac) or click the icon. The icon shows the
+check working, then the suggestion strip opens with the corrected text. Rest the pointer on the
+icon for a menu: check spelling and grammar, check the tone, rewrite, make it shorter or more
+professional.
+
+**Two ways to check**, set from the tray menu (**Check: on shortcut / while typing**) or in
+`config.toml`:
+
+```toml
+[general]
+check = "shortcut"   # default: nothing is checked or sent to an AI until you press the
+                     # check shortcut or click the icon
+# check = "typing"   # check as you type; the icon shows the fixes it found as you go
+```
+
+In the default **shortcut** mode, Glance runs no grammar checks, AI analysis or speculative AI
+calls while you type. The capture helper still reads the focused field (to place the icon and
+to verify a fix it types in), but nothing is checked until you ask. If you edit the text after
+a check, the strip closes and the icon goes back to "ready". Press the shortcut again to check
+the new text. Pressing it while the strip is open checks again. <kbd>Esc</kbd> or moving to
+another field closes the strip. **Typing** mode is how Glance worked before: it checks after each pause
+(see [Status icon and when suggestions appear](#status-icon-and-when-suggestions-appear)).
 
 <p align="center">
 <picture>
@@ -365,17 +389,21 @@ appear by itself instead).
 </picture>
 </p>
 
-| Key | Action |
-| --- | --- |
-| <kbd>Alt</kbd>+<kbd>Enter</kbd> | put the corrected text in, as one <kbd>Ctrl</kbd>+<kbd>Z</kbd> step (only grabbed while the strip shows a fix) |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | open the panel: tone rewrites, "Rewrite as…", the list of fixes |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> | fix all safe grammar |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> | revert the last change |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | pause |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd> | apply the Nth tone chip of the field's audience |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> | ask for a completion (ghost text) |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | rewrite the selected text in any app |
-| <kbd>Esc</kbd> | close the panel |
+None of these is a GNOME, Ubuntu, KDE, Xfce or macOS system shortcut;
+[docs/shortcuts.md](docs/shortcuts.md) lists what was checked.
+
+| Linux | macOS | Action |
+| --- | --- | --- |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | ⌃⌥G | check the field now and open the strip (again: check again) |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌥⏎ | put the corrected text in (only grabbed while the strip shows a fix) |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | ⌃⌥O | open the panel: tone rewrites, "Rewrite as…", the list of fixes |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> | ⌃⌥F | fix all safe grammar |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> | ⌃⌥Z | revert the last change |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | ⌃⌥P | pause |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd> | ⌃⌥1 … ⌃⌥4 | apply the Nth tone chip of the field's audience |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌃⌥⏎ | ask for a completion (ghost text) |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | ⌃⌥A | rewrite the selected text in any app |
+| <kbd>Esc</kbd> | Esc | close the strip and the panel |
 
 Plain <kbd>Enter</kbd> is never taken, so it still sends in chat apps.
 
@@ -444,9 +472,12 @@ reported counts, so it limits claude (and any backend that reports a cost), not 
 Settings live in `~/.config/glance/config.toml`; Glance picks up changes while it runs.
 
 ```toml
+[general]
 check_updates = true             # false: never look for a newer version
+check = "shortcut"               # or "typing": when the text is checked (see Usage)
 
 [general.hotkeys]               # only the keys you set change; the rest keep their defaults
+check = "Super+Alt+g"
 panel = "Super+Alt+space"
 fix_all = "Super+Alt+f"
 
@@ -467,7 +498,9 @@ capture = false                 # stop automatic field capture in this app
 ```
 
 A shortcut that another program or GNOME itself already uses is left alone and reported in a
-notification and in `glance status`.
+notification, in `glance status` and in `glance doctor` (which also reads GNOME's own shortcuts,
+so it reports a clash even while glanced is not running). The defaults and the desktop shortcuts
+they were checked against are in [docs/shortcuts.md](docs/shortcuts.md).
 
 `[ai] max_words` caps how much of one text goes to the AI (analysis, rewrites and
 select-anything). A longer text is still spell- and grammar-checked locally as a whole (up to
@@ -481,12 +514,17 @@ While you write in a text field, a small round Glance icon sits at the end of th
 
 | Icon | Meaning |
 |---|---|
-| Plain outline | Watching this field, nothing to suggest |
+| Plain outline | Watching this field, nothing to suggest (in shortcut mode: ready to check) |
 | Ring (turns during an AI call) | Checking |
 | Filled, with a number | That many fixes are ready (a dot instead of a number: a tone note) |
 | Grey | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
 
-Click the icon to see the corrected text; click again or press <kbd>Esc</kbd> to close it. <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens it with the rewrite options. To have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
+Click the icon to see the corrected text (in shortcut mode the click checks first); click
+again or press <kbd>Esc</kbd> to close it. Resting the pointer on the icon opens its menu
+(not while you are typing): **Check spelling & grammar**, **Check tone**, **Rewrite…**,
+**Shorter**, **More professional**, and the check shortcut. When Glance is paused, the field is
+private or no AI is connected, the menu shows why and what to do instead (**Resume**,
+**Connect an AI…**). <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens it with the rewrite options. In typing mode, to have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
 
 ```toml
 [ui]

@@ -626,3 +626,23 @@ def test_on_battery_reads_upower_and_is_false_on_any_error():
 
     assert power_dbus.on_battery(read=boom) is False
     assert power_dbus.on_battery(read=lambda: "yes") is False
+
+
+def test_healths_ask_every_backend_at_once_and_cut_off_a_stuck_one(tmp_path, monkeypatch):
+    """`glance backend list` waits for the slowest backend, not the sum; one that hangs
+    shows as timed out instead of holding the command."""
+    import time
+
+    import glance.backends.supervisor as sv
+
+    monkeypatch.setattr(sv, "HEALTH_WAIT_S", 0.8)
+    r = Rig(tmp_path, BackendCfg(choice="claude"))
+    for name, b in r.backends.items():
+        real = b.health
+        delay = 5.0 if name == "gemini" else 0.3
+        b.health = lambda real=real, delay=delay: (time.sleep(delay), real())[1]
+    start = time.monotonic()
+    out = r.sup.healths(refresh=True)
+    assert time.monotonic() - start < 1.5
+    assert out["gemini"].detail == "timed out" and out["gemini"].signed_in is None
+    assert out["claude"].detail != "timed out"

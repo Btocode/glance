@@ -21,6 +21,9 @@ from glance.log import log_event
 from glance.wordlimit import DEFAULT_MAX_WORDS, MAX_MAX_WORDS, MIN_MAX_WORDS
 
 SUGGESTIONS_MODES = ("on_click", "auto")  # `[ui] suggestions`
+# `[general] check`: "shortcut" checks only when asked (the check hotkey, a click on the
+# status icon); "typing" checks as the user types.
+CHECK_MODES = ("shortcut", "typing")
 
 POLL_MS = 1000
 
@@ -33,7 +36,10 @@ class ConfigError(Exception):
 
 
 def _default_hotkeys() -> dict[str, str]:
+    """The Linux defaults; every one was checked against the desktops' own shortcuts
+    (docs/shortcuts.md, `glance.ui.shortcut_table`). macOS maps them in `hotkeys_mac`."""
     return {
+        "check": "Super+Alt+g",
         "panel": "Super+Alt+space",
         "fix_all": "Super+Alt+f",
         "revert": "Super+Alt+z",
@@ -57,6 +63,9 @@ class GeneralCfg:
     max_field_chars: int = 20000
     autocomplete_idle_ms: int = 600  # pause before a live completion is asked for
     check_updates: bool = True  # once a day: ask github.com for the latest version
+    # "shortcut" (default): nothing is checked while typing; the check hotkey (or a click on
+    # the status icon) checks the field and opens the strip. "typing": check as you type.
+    check: str = "shortcut"
     hotkeys: dict[str, str] = field(default_factory=_default_hotkeys)
 
 
@@ -292,8 +301,12 @@ def _parse(data: dict[str, Any]) -> Config:
         # value itself is not logged).
         log_event("config_value_ignored", key="ui.suggestions")
         ui = dataclasses.replace(ui, suggestions=UiCfg.suggestions)
+    general = _build(GeneralCfg, data.get("general", {}), "general")
+    if general.check not in CHECK_MODES:
+        log_event("config_value_ignored", key="general.check")
+        general = dataclasses.replace(general, check=GeneralCfg.check)
     return Config(
-        general=_build(GeneralCfg, data.get("general", {}), "general"),
+        general=general,
         privacy=_build(PrivacyCfg, data.get("privacy", {}), "privacy"),
         apps=apps,
         ui=ui,

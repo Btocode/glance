@@ -58,6 +58,12 @@ def _request(msg_type: str, payload: dict[str, Any],
         client.close()
 
 
+def _progress(text: str) -> None:
+    """What a command is waiting for, before a wait that can take seconds (stderr, so
+    output meant for a pipe stays clean)."""
+    print(text, file=sys.stderr, flush=True)
+
+
 def _lines(value: dict[str, Any], prefix: str = "") -> list[str]:
     out: list[str] = []
     for key, v in value.items():
@@ -113,6 +119,7 @@ def _backend_list() -> int:
     from glance.backends.cli_path import NOT_FOUND
     from glance.ui.onboarding_model import build_rows, model_text
 
+    _progress("Asking each AI command-line tool whether it is signed in...")
     reply, code = _ask("backend_list", {"refresh": True}, SLOW_REQUEST_S)
     if reply is None or code:
         return code if reply is None else _refused(reply)
@@ -166,6 +173,7 @@ def _backend_use(name: str) -> int:
 def _backend_test(name: str | None) -> int:
     from glance.backends.base import SIGN_IN
 
+    _progress(f"Sending one real test request to {name or 'the AI in use'}...")
     reply, code = _ask("backend_test", {"name": name}, SLOW_REQUEST_S)
     if reply is None:
         return code
@@ -330,11 +338,18 @@ def _doctor(args: argparse.Namespace) -> int:
     # <<< macOS
     if args.undo:
         undo_all(env, CHECKS)
+    # Each line as soon as its check is done, and a note before the slow ones: the AI CLI
+    # checks can take seconds on a cold start, and a silent terminal looks like a hang.
+    show = None if args.json else (lambda r: print(render([r]), flush=True))
+    note = None if args.json else _progress
     if args.fix:
-        results = apply_fixes(env, CHECKS, args.app or [], args.skip or [])
+        if note is not None:
+            note("Repairing what Glance can fix...")
+        results = apply_fixes(env, CHECKS, args.app or [], args.skip or [], show, note)
     else:
-        results = run_checks(env, CHECKS)
-    print(json.dumps(to_json(results)) if args.json else render(results))
+        results = run_checks(env, CHECKS, show, note)
+    if args.json:
+        print(json.dumps(to_json(results)))
     return exit_code(results)
 
 
@@ -343,6 +358,7 @@ def _update(check_only: bool) -> int:
 
     if not check_only:
         return update.run_installer()
+    _progress("Checking for a newer Glance...")
     line, code = update.report(*update.check())
     print(line)
     return code

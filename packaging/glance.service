@@ -10,6 +10,11 @@ Restart=on-failure
 RestartSec=200ms
 RestartPreventExitStatus=78
 Environment=PYTHONUNBUFFERED=1
+# Quitting takes well under a second and glanced forces its own exit after 3 s; never hold
+# a logout or shutdown longer than this. SIGTERM goes to glanced (which stops its helpers),
+# SIGKILL to whatever of the unit is still there afterwards.
+TimeoutStopSec=5
+KillMode=mixed
 
 [Install]
 WantedBy=graphical-session.target

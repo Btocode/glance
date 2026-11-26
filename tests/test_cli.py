@@ -106,3 +106,49 @@ def test_cli_wrapper_subcommand_still_works(tmp_path, monkeypatch, capsys):
     (tmp_path / ".zshrc").write_text("")
     assert main(["wrapper", "status"]) == 0
     assert capsys.readouterr().out.strip() == "absent"
+
+
+
+def _fake_doctor_env(tmp_path, healths):
+    """A doctor environment that never looks at the real home, desktop or network."""
+    from pathlib import Path
+
+    from glance.doctor.checks import DoctorEnv
+
+    return DoctorEnv(home=Path(tmp_path), environ={"XDG_SESSION_TYPE": "x11", "HOME": str(tmp_path),
+                                                   "XDG_CONFIG_HOME": str(tmp_path / "cfg"),
+                                                   "XDG_DATA_HOME": str(tmp_path / "data")},
+                     run=lambda argv, timeout=None: (1, ""), procs=list,
+                     ctl=lambda *a, **k: None, which=lambda name: None, healths=healths,
+                     locate=lambda name: None, install_override=lambda t: False,
+                     update_status=lambda: "unknown")
+
+
+def test_doctor_prints_each_line_before_the_slow_ai_check(monkeypatch, capsys, tmp_path):
+    """`glance doctor` used to print the whole report at the end: with cold AI CLIs the
+    terminal stayed blank for seconds. Lines come out as each check is done."""
+    from glance.doctor import runner
+
+    seen: dict[str, str] = {}
+
+    def healths():
+        out = capsys.readouterr()
+        seen["out"], seen["err"] = out.out, out.err
+        return {"claude": True}
+
+    monkeypatch.setattr(runner, "default_env", lambda: _fake_doctor_env(tmp_path, healths))
+    main(["doctor"])
+    rest = capsys.readouterr()
+    assert "Desktop session" in seen["out"]  # printed before the AI tools were asked
+    assert "Checking AI command-line tools" in seen["err"]
+    assert "AI backend" in rest.out and "AI backend" not in seen["out"]
+
+
+def test_doctor_json_stays_one_document(monkeypatch, capsys, tmp_path):
+    from glance.doctor import runner
+
+    monkeypatch.setattr(runner, "default_env", lambda: _fake_doctor_env(tmp_path, dict))
+    main(["doctor", "--json"])
+    out = capsys.readouterr()
+    assert isinstance(json.loads(out.out), list)
+    assert "Checking" not in out.err

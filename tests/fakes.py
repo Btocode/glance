@@ -741,3 +741,15 @@ class FakeSelection:
 
     def pointer(self) -> tuple[int, int]:
         return self.xy
+
+
+def typing_config(**kw):
+    """A Config in `[general] check = "typing"` mode: what the tests written for checking as
+    you type expect (the default is "shortcut")."""
+    from dataclasses import replace as _replace
+
+    from glance.config import Config as _Config
+    from glance.config import GeneralCfg as _GeneralCfg
+
+    general = kw.pop("general", None) or _GeneralCfg()
+    return _Config(general=_replace(general, check="typing"), **kw)

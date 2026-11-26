@@ -234,6 +234,14 @@ def test_status_icon_states_and_its_click(probe):
     assert probe["icon_corner_click_holder"] == 1  # ...but only on its circle
 
 
+def test_status_icon_hover_menu(probe):
+    assert probe["menu_items"] == ["Check spelling & grammar", "Check tone", "Rewrite…",
+                                   "Shorter", "More professional"]
+    assert probe["menu_override_redirect"] is True and probe["focus_with_menu"]
+    assert probe["menu_click_events"] == [["check", {}]]
+    assert probe["menu_after_click"] is None and probe["focus_after_menu_click"]
+
+
 def test_collapsed_strip_shows_only_the_corrected_sentence(probe):
     assert probe["strip_text"] == ("Hey team I think it's fine to ship Friday, but we need "
                                    "the tests fixed ASAP.")
@@ -444,7 +452,7 @@ def test_daemon_status_and_sockets(daemon):
     assert st["ok"] and st["harper_alive"] and st["capture_connected"]
     assert (st["capture_child"], st["harper_child"]) == ("up", "up")
     assert st["grammar_engine"] == "harper-ls"
-    want = "complete,fix_all,panel,pause,revert,selection,tone1,tone2,tone3,tone4"
+    want = "check,complete,fix_all,panel,pause,revert,selection,tone1,tone2,tone3,tone4"
     assert _wait(lambda: daemon.request("status")["hotkeys_grabbed"] == want, 5.0)
     st = daemon.request("status")
     assert st["hotkeys_unavailable"] is None
@@ -495,7 +503,8 @@ def test_daemon_restarts_a_killed_harper_and_is_degraded_meanwhile(daemon):
     (pid,) = daemon.children("harper-ls")
     os.kill(pid, 15)
     assert _wait(lambda: daemon.request("status")["harper_alive"] is False, 2.0, 0.01)
-    assert _wait(lambda: daemon.request("status")["harper_alive"] is True, 5.0)
+    # harper-ls is only the fallback engine now; its respawn + dictionary warm-up takes ~6 s
+    assert _wait(lambda: daemon.request("status")["harper_alive"] is True, 10.0)
     assert daemon.children("harper-ls") not in ([], [pid])
 
 

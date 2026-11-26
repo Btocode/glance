@@ -180,12 +180,34 @@ class GtkApp:
                 self.proc.kill()
 
 
-class Glance:
-    """glanced (which starts glance-capture) with the fake AI backend; logs to files."""
+# `[general] check` for the tests written for checking while typing (the icon shows the
+# fixes by itself, a click opens the strip). The default, "shortcut", has its own module.
+TYPING = '[general]\ncheck = "typing"\n'
 
-    def __init__(self, shell: Shell, root: Path) -> None:
+
+def write_config(text: str | None) -> Path:
+    """Glance's config.toml in the private session (None: none, the defaults)."""
+    path = Path(os.environ["XDG_CONFIG_HOME"]) / "glance" / "config.toml"
+    if text is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return path
+
+
+class Glance:
+    """glanced (which starts glance-capture) with the fake AI backend; logs to files.
+
+    `config` is written to the private session's config.toml first (None: the defaults);
+    `name` names the log, so each test module keeps its own."""
+
+    def __init__(self, shell: Shell, root: Path, config: str | None = None,
+                 name: str = "glanced") -> None:
+        assert private_root() is not None  # never the real config
+        write_config(config)
         self.shell = shell
-        self.log = root / "glanced.log"
+        self.log = root / f"{name}.log"
         env = {**shell.app_env(), "GLANCE_TEST": "1", "GLANCE_FAKE_BACKEND": "1",
                "GLANCE_STRICT_LOG": "1", "NO_AT_BRIDGE": "1"}
         env.pop("GLANCE_PAID", None)
@@ -217,6 +239,13 @@ class Glance:
 
     def status(self) -> dict[str, Any]:
         return self.request("status")
+
+    def kill(self) -> None:
+        """glanced and its children die at once (SIGKILL): nothing gets to clean up."""
+        self._client.close()
+        if self.proc.poll() is None:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+            self.proc.wait(10)
 
     def stop(self) -> None:
         self._client.close()

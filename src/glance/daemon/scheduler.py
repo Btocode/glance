@@ -79,6 +79,28 @@ class CheckScheduler:
     def on_focus_lost(self) -> None:
         self._reset()
 
+    def on_snapshot_quiet(self, s: FieldSnapshot) -> bool:
+        """`[general] check = "shortcut"`: nothing is scheduled. A new text (or field) only
+        moves the generation on, so a check still running for the old one is dropped.
+        True when it did."""
+        if s.gated:
+            self._reset()
+            return True
+        if self._last == (s.field_id, s.text):
+            return False
+        self._last = (s.field_id, s.text)
+        self._cancel_all()
+        self.generation += 1
+        return True
+
+    def check_now(self, s: FieldSnapshot) -> int:
+        """The user asked for a check of `s`: a generation of its own, no timers."""
+        self._cancel_all()
+        self._last = (s.field_id, s.text)
+        self.generation += 1
+        self._analyzed[s.field_id] = _tokens(s.text)
+        return self.generation
+
     # -- internals --------------------------------------------------------
     def _reset(self) -> None:
         self._cancel_all()

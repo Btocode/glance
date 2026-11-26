@@ -3,7 +3,7 @@ and the panel's tone actions. No GTK."""
 from types import SimpleNamespace
 
 from glance.backends.base import Health
-from glance.config import BackendCfg, Config, ConfigError, load_config
+from glance.config import BackendCfg, ConfigError, load_config
 from glance.daemon.controller import Controller
 from glance.daemon.links import PanelEscape
 from glance.daemon.main import (
@@ -27,6 +27,7 @@ from tests.fakes import (
     FakeOverlay,
     FakeTray,
 )
+from tests.fakes import typing_config as Config  # these tests check while typing
 from tests.test_hotkeys import FakeHotkeys
 
 TEXT = "send me the report now, i need it before the meeting starts."

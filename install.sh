@@ -503,6 +503,7 @@ make_venv() {
             VENV_CREATED=1
         fi
         write_manifest
+        note "installing Glance's Python packages (the first install downloads them; up to a minute)"
         if have uv; then
             uv pip install --python "$VENV/bin/python" -e "$SRC" </dev/null
         else
@@ -538,6 +539,7 @@ install_core() {
     local -a args=("$VENV/bin/python")
     [ "$WITH_RUST" = 1 ] && args+=(--with-rust)
     if [ -f "$SRC/scripts/fetch-core.sh" ]; then
+        note "the in-process grammar engine (glance_core)"
         bash "$SRC/scripts/fetch-core.sh" "${args[@]}" </dev/null \
             || note "the in-process grammar engine is not installed; grammar runs on harper-ls"
     fi
@@ -741,6 +743,8 @@ run_doctor() {
     DOCTOR_ERR="$(mktemp)"
     trap 'rm -f "$REPORT" "$DOCTOR_ERR"' EXIT
     DOCTOR_RC=0
+    # its report is shown in step 8; say what the wait is for meanwhile
+    note "checking the setup and asking each AI tool whether it is signed in (a few seconds)..."
     "$VENV/bin/glance" doctor --fix "${skip[@]}" --json </dev/null >"$REPORT" 2>"$DOCTOR_ERR" \
         || DOCTOR_RC=$?
     # Exit 1 with a full JSON report only says a check is still red (step 8 shows which).
@@ -815,6 +819,9 @@ if backend and backend.status != "ok":
 
 main() {
     STEP=0
+    # Python run from here prints as it goes, also when the output is a pipe (curl | bash
+    # | tee, CI): a step must never look stuck because its lines sit in a buffer.
+    export PYTHONUNBUFFERED=1
     parse_args "$@"
     setup_paths
     check_prerequisites            # 1

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from glance.config import Config, UiCfg, load_config, update_config
+from glance.config import UiCfg, load_config, update_config
 from glance.daemon.links import PanelEscape
 from glance.daemon.wiring import set_suggestions
 from glance.protocol import ApplyResult, Rect
@@ -22,6 +22,7 @@ from glance.ui.status_model import (
 )
 from glance.ui.strip_model import Segment, StripView
 from tests.fakes import FakeHotkeys, FakeOverlay
+from tests.fakes import typing_config as Config  # these tests check while typing
 from tests.test_controller import AUTO, TEH, Rig, snap
 
 MON = [Rect(0, 0, 1920, 1080)]

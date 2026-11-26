@@ -20,6 +20,7 @@ from glance.log import log_event
 from glance.privacy.entities import find_protected, overlaps
 from glance.protocol import ApplyRequest, ApplyResult, Edit, FieldSnapshot, text_sha256
 from glance.ui.chip_model import ChipInputs, ChipState, ChipView, chip_view
+from glance.ui.hover_menu import HoverMenu, hover_menu, may_open
 from glance.ui.panel_model import PanelView, build_panel
 from glance.ui.placement import Anchor, place
 from glance.ui.ports import CapturePort, GrammarPort, NotifierPort, OverlayPort, TrayPort
@@ -48,6 +49,10 @@ REVERT_FAILED = ("Glance could not undo the change", "Use the app's own undo ins
 # fix the strip showed is applied when the same field, same text, is back within the grace.
 USE_BLUR_S = 0.5
 USE_GRACE_S = 2.0
+# `[general] check = "shortcut"`: after the check hotkey the strip opens once the local check
+# is back and the AI analysis too, or after this long with what there is (the AI's findings
+# then join the open strip).
+OPEN_WAIT_MS = 4000
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,13 @@ class Controller:
       request_apply()    send an edit through the verified write-back path
       use_strip()        apply what the strip shows (its "Use" button, Alt+Enter)
       toggle_strip()     the status icon's click: open the strip, or close it again
+      check_now()        the check hotkey: check the field now and open the strip
+
+    `[general] check` picks when the text is checked. "typing": as the user types (the
+    scheduler's timers). "shortcut" (the default): never by itself; `check_now()` (the
+    check hotkey, a click on the icon) checks the text as it is and opens the strip with the
+    result. An edit after that makes the result stale: the strip closes and the icon goes
+    back to its quiet "ready to check" state until the next check.
 
     The status icon is shown for every focused writable field (`status_icon()`); the strip
     shows by itself only with `[ui] suggestions = "auto"`, else once the user opens it (the
@@ -165,12 +177,30 @@ class Controller:
         self._strip_visible = False  # a strip is on screen now
         self._checking = False  # the text changed; its local check has not come back yet
         self._lock_paused = False  # ...and the lock, not the user, paused us
+        self._checked: tuple[str, str] | None = None  # (field id, text) checked on request
+        self._open_when_checked = False  # check_now: open the strip once the check is back
+        self._open_by = 0.0  # ...or by this time, with what there is
+        self._open_timer: Handle | None = None
+        self._mode = cfg().general.check
+        self._open_panel_too = False  # "Check tone": the drawer opens with the strip
+        self._typed_at: float | None = None  # the last time the field's text changed
+        self._checked_at: float | None = None  # when check_now last ran
+        self._blurred_field: str | None = None  # the field a blur took away
+        # (field id, until, with drawer): the check hotkey's own grab blurred this field;
+        # check it once it is back
+        self._check_back: tuple[str, float, bool] | None = None
 
     # ------------------------------------------------------------------ read-only state
 
     @property
     def generation(self) -> int:
         return self.scheduler.generation
+
+    @property
+    def checks_on_request(self) -> bool:
+        """`[general] check = "shortcut"`: nothing is checked or asked of an AI while the
+        user types (features that would run by themselves stay quiet too)."""
+        return self._cfg().general.check == "shortcut"
 
     @property
     def issues(self) -> tuple[Issue, ...]:
@@ -208,6 +238,15 @@ class Controller:
         content = self._content(s, inputs)
         return self._visible_strip(s, content, self._status(s, inputs, content))
 
+    def hover_menu(self, check_chord: str = "") -> HoverMenu | None:
+        """What the status icon's hover menu offers now; None while the user is typing
+        (a key within the last moment) or when there is no icon."""
+        s = self.current
+        if s is None or self._locked or not may_open(self._clock.now(), self._typed_at):
+            return None
+        inputs = self._chip_inputs(s)
+        return hover_menu(self.status_icon(), check_chord, "none" if s.gated else inputs.ai)
+
     def status_icon(self) -> StatusView:
         """What the status icon shows for the current field right now."""
         s = self.current
@@ -223,12 +262,17 @@ class Controller:
         """Run the grammar check on the current text again: harper-ls just came up (it can
         start after the first snapshot arrived, or restart), so nothing checked it yet."""
         s = self.current
-        if s is not None and not s.gated and not self._paused:
+        if s is not None and not s.gated and not self._paused and (
+                not self.checks_on_request or self._is_checked(s)):
             self._on_local(s, self.generation)
         else:
             self.refresh()
 
     def refresh(self) -> None:
+        mode = self._cfg().general.check
+        if mode != self._mode:  # the tray (or a hand edit) switched it
+            self._mode = mode
+            self._mode_changed()
         self._recompute()
         self._render()
 
@@ -262,6 +306,8 @@ class Controller:
         prev = self.current
         self.current = s
         self._capture_lost = False
+        if prev is not None and prev.field_id == s.field_id and prev.text != s.text:
+            self._typed_at = self._clock.now()
         if prev is None or prev.field_id != s.field_id:
             self._panel_open = False
             self._strip_open = False
@@ -279,10 +325,18 @@ class Controller:
             self._render()
             return
         self._emit("on_snapshot", s)
-        self._typing = False
-        self.scheduler.on_snapshot(s)
-        if self._typing:
-            self._render()
+        if self.checks_on_request:
+            self._quiet_snapshot(s)
+        else:
+            self._typing = False
+            self.scheduler.on_snapshot(s)
+            if self._typing:
+                self._render()
+        check_back = self._check_back
+        if check_back is not None:
+            self._check_back = None
+            if s.field_id == check_back[0] and self._clock.now() <= check_back[1]:
+                self.check_now(with_drawer=check_back[2])
         back = self._use_back
         if back is not None:
             self._use_back = None
@@ -294,9 +348,20 @@ class Controller:
         # until the scheduler settles, 50 ms later. The overlay itself follows a moving window.
 
     def handle_focus_lost(self, reason: str) -> None:
-        self._blurred_at = self._clock.now() if reason == "blur" else None
+        now = self._clock.now()
+        self._blurred_at = now if reason == "blur" else None
+        prev = self.current
+        self._blurred_field = None if prev is None or reason != "blur" else prev.field_id
+        if (prev is not None and reason == "blur" and self._checked_at is not None
+                and now - self._checked_at <= USE_BLUR_S
+                and self._checked is not None and self._checked[0] == prev.field_id):
+            # The check hotkey's key grab blurs the app (X sends it a NotifyGrab): the
+            # check is run again (from the cache) once the field is back.
+            self._check_back = (prev.field_id, now + USE_GRACE_S,
+                                self._open_panel_too or self._panel_open)
         self.current = None
         self._strip_open = False
+        self._stop_open_wait()
         self.scheduler.on_focus_lost()
         self._leave_text()
         self._emit("on_focus_lost", reason)
@@ -354,6 +419,7 @@ class Controller:
         strip from coming back by itself on this field, in "auto" mode."""
         self._panel_open = False
         self._strip_open = False
+        self._stop_open_wait()
         self._banner = self._copy_offer = None
         if snooze and self.current is not None and self._auto():
             self._snoozed_field = self.current.field_id
@@ -364,20 +430,75 @@ class Controller:
         why it has nothing), or close it when it is up."""
         s = self.current
         if s is None:
+            log_event("icon_click_ignored", why="no_field")
             return
         if not self._strip_visible and (
                 self._anchor(s) is None
                 or self.status_icon().state is StatusState.HIDDEN):
+            log_event("icon_click_ignored", why="no_icon")
             return  # no icon on screen: there was nothing to click
         if self._strip_visible:
             self._strip_open = self._panel_open = False
+            self._stop_open_wait()
             self._banner = self._copy_offer = None
             if self._auto():
                 self._snoozed_field = s.field_id
+        elif self.checks_on_request:
+            self.check_now()
+            return
         else:
             self._strip_open = True
             self._snoozed_field = None
         self._render()
+
+    def check_now(self, with_drawer: bool = False) -> None:
+        """Check the focused field's text as it is now: the local grammar check and, when
+        an AI is ready, one analysis; the status icon shows the work, then the strip opens
+        with the result (the user asked: no click on the icon is needed). Pressed again,
+        with the strip open, it checks again. Works in either `[general] check` mode."""
+        s = self.current
+        now = self._clock.now()
+        if s is None and self._blurred_field is not None and self._blurred_at is not None \
+                and now - self._blurred_at <= USE_BLUR_S:
+            # The grab's blur came before the key: check once the field is back.
+            self._check_back = (self._blurred_field, now + USE_GRACE_S, with_drawer)
+            return
+        if (s is None or s.gated or self._paused or self._locked
+                or self._pending is not None or not self._connected()):
+            log_event("check_skipped", why=(
+                "no_field" if s is None else "gated" if s.gated else "paused" if self._paused
+                else "locked" if self._locked else "pending" if self._pending is not None
+                else "no_capture"))
+            return
+        self._check_back = None
+        self._checked_at = now
+        gen = self.scheduler.check_now(s)
+        self._checked = (s.field_id, s.text)
+        self._settled = True
+        self._typing = False
+        self._awaiting_text = False
+        self._local = []
+        self._checking = True
+        self._snoozed_field = None
+        self._banner = self._copy_offer = None
+        self._stop_open_wait()
+        self._open_when_checked = True
+        self._open_panel_too = with_drawer
+        self._open_by = self._clock.now() + OPEN_WAIT_MS / 1000
+        self._open_timer = self._clock.call_later(OPEN_WAIT_MS, self._open_wait_over)
+        log_event("check_requested", len=len(s.text))
+        self._recompute()
+        # The analysis is asked for first: the strip waits for it once the local check is back.
+        if self.on_analyze_due is not None and s.text.strip():
+            self._call("on_analyze_due", self.on_analyze_due, s, gen)
+        if self.current is s and gen == self.generation:
+            self._on_local(s, gen)
+        self._render()
+
+    def check_tone(self) -> None:
+        """The hover menu's "Check tone": the same check, then the strip opens with its
+        drawer (the tone line and the tone cards)."""
+        self.check_now(with_drawer=True)
 
     def toggle_panel(self) -> None:
         """The strip's "⋯": open the drawer, or close it again (the strip stays)."""
@@ -519,6 +640,7 @@ class Controller:
             return
         self._paused = True
         self._strip_open = False
+        self._stop_open_wait()
         if seconds is not None:
             self._pause_until = self._clock.now() + seconds
             self._pause_timer = self._clock.call_later(seconds * 1000, self.resume)
@@ -540,8 +662,83 @@ class Controller:
         s = self.current
         if s is not None and not s.gated:
             self._emit("on_snapshot", s)
-            self.scheduler.on_snapshot(s)
+            if self.checks_on_request:
+                self._quiet_snapshot(s)
+            else:
+                self.scheduler.on_snapshot(s)
         self._render()
+
+    # ------------------------------------------------------------------ check on request
+
+    def _is_checked(self, s: FieldSnapshot) -> bool:
+        return self._checked == (s.field_id, s.text)
+
+    def _quiet_snapshot(self, s: FieldSnapshot) -> None:
+        """A snapshot in "shortcut" mode: nothing is checked. A new text makes the last
+        check's result stale: it is dropped and the strip closes."""
+        self._settled = True
+        self._typing = False
+        if not self.scheduler.on_snapshot_quiet(s):
+            self._render()  # the caret (or the window) moved: the icon follows it
+            return
+        self._emit("on_typing")  # rewrites made for the old text are dropped
+        self._awaiting_text = False
+        if not self._is_checked(s):
+            self._local = []
+            self._checking = False
+            self._stop_open_wait()
+            if self._strip_open or self._panel_open:
+                self._strip_open = self._panel_open = False
+                self._banner = self._copy_offer = None
+        self._recompute()
+        self._render()
+
+    def _stop_open_wait(self) -> None:
+        self._open_when_checked = False
+        self._open_panel_too = False
+        if self._open_timer is not None:
+            self._open_timer.cancel()
+            self._open_timer = None
+
+    def _open_wait_over(self) -> None:
+        self._open_timer = None
+        if self._open_when_checked:
+            self._render()
+
+    def _maybe_open(self, inputs: ChipInputs) -> None:
+        """check_now's strip: open once the local check is back and the AI analysis is too
+        (or the wait is over)."""
+        s = self.current
+        if not self._open_when_checked or s is None:
+            return
+        if not self._is_checked(s):
+            self._stop_open_wait()
+            log_event("check_dropped", why="text_changed")
+            return
+        if self._checking or (inputs.ai_pending and self._clock.now() < self._open_by):
+            return
+        panel_too = self._open_panel_too
+        self._stop_open_wait()
+        log_event("check_strip_open", ai_back=not inputs.ai_pending)
+        self._strip_open = True
+        self._panel_open = self._panel_open or panel_too
+
+    def _mode_changed(self) -> None:
+        """`[general] check` changed while running: start (or stop) checking as you type."""
+        self._checked = None
+        self._stop_open_wait()
+        s = self.current
+        self.scheduler.on_focus_lost()  # forget the last text: the new mode starts afresh
+        if s is None or s.gated or self._paused:
+            return
+        self._local = []
+        self._checking = False
+        self._strip_open = self._panel_open = False
+        if self.checks_on_request:
+            self._quiet_snapshot(s)
+        else:
+            self._typing = False
+            self.scheduler.on_snapshot(s)
 
     # ------------------------------------------------------------------ scheduler callbacks
     # The snapshot the scheduler passes may be older than `current` (same text, earlier
@@ -612,6 +809,7 @@ class Controller:
         self._checking = False
         self._panel_open = False
         self._banner = self._copy_offer = None
+        self._stop_open_wait()
 
     def _clear_pending(self) -> None:
         self._pending = None
@@ -663,8 +861,9 @@ class Controller:
 
     def _recompute(self) -> None:
         s = self.current
-        if s is None or s.gated or self._paused or self._awaiting_text:
-            self._issues = []
+        if s is None or s.gated or self._paused or self._awaiting_text or (
+                self.checks_on_request and not self._is_checked(s)):
+            self._issues = []  # ("shortcut": nothing until the user asks for this text)
             return
         found = list(self._local)
         for provider in self.extra_issues:
@@ -718,7 +917,8 @@ class Controller:
         """The strip for `s`, None when it is hidden: nothing to say, a quiet chip state
         (hidden, paused, private), or an apply on its way."""
         if (chip.state in (ChipState.HIDDEN, ChipState.PAUSED, ChipState.PRIVATE)
-                or s.gated or self._paused or self._pending is not None):
+                or s.gated or self._paused or self._pending is not None
+                or (self.checks_on_request and not self._is_checked(s))):
             return None
         view = strip_view(strip_fix(s.text, s.caret, self._issues))
         for transform in self.extra_strip:
@@ -735,7 +935,9 @@ class Controller:
 
     def _content(self, s: FieldSnapshot, inputs: ChipInputs) -> StripView | None:
         """What the strip has to say for `s`, shown or not (a snooze does not change it)."""
-        chip = chip_view(replace(inputs, snoozed=False), self._cfg().general.min_chars_chip)
+        # A check the user asked for has no length floor: they want this text checked.
+        floor = 1 if self.checks_on_request else self._cfg().general.min_chars_chip
+        chip = chip_view(replace(inputs, snoozed=False), floor)
         return self._strip(s, chip)
 
     def _status(self, s: FieldSnapshot | None, inputs: ChipInputs,
@@ -745,7 +947,9 @@ class Controller:
         usable = content is not None and content.can_use
         return status_view(StatusInputs(
             has_field=inputs.has_field, paused=self._paused, gated=bool(s.gated),
-            checking=self._working(), typing=not self._settled, analyzing=inputs.analyzing,
+            # (a requested check: working until its AI analysis is back too)
+            checking=self._working() or (self._open_when_checked and inputs.ai_pending),
+            typing=not self._settled, analyzing=inputs.analyzing,
             n_fixes=content.n_fixes if usable and content is not None else 0,
             has_note=content is not None and not usable and not content.empty,
             ai=inputs.ai))
@@ -788,6 +992,7 @@ class Controller:
         s = self.current
         cfg = self._cfg()
         inputs = self._chip_inputs(s)
+        self._maybe_open(inputs)
         view = chip_view(inputs, cfg.general.min_chars_chip)
         xy = self._anchor(s) if s is not None else None
         if view.state is ChipState.HIDDEN or xy is None:

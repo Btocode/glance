@@ -387,7 +387,7 @@ def test_checks_are_read_only_by_default(home):
     calls = Calls()
     run_checks(make_env(home, calls=calls), CHECKS)
     verbs = {a[1] for a in calls.argvs if a[0] in ("gsettings", "systemctl")}
-    assert verbs <= {"get", "--user"}
+    assert verbs <= {"get", "list-recursively", "--user"}  # all read-only
     assert not any(a[:3] == ["systemctl", "--user", "enable"] for a in calls.argvs)
 
 
@@ -570,3 +570,62 @@ def test_shell_extension_in_disabled_extensions_is_not_enabled_and_fix_clears_it
     assert by_id(run_checks(env, CHECKS))["shell_extension"].status == "fail"
     assert ShellExtension().fix(env)
     assert ["gsettings", "set", "org.gnome.shell", "disabled-extensions", "[]"] in calls
+
+
+# ---------------------------------------------------------------- output as it goes
+
+
+def test_default_healths_asks_all_at_once_and_reports_a_timeout(monkeypatch):
+    import time
+
+    from glance.backends import api, claude, codex, gemini, keystore, opencode
+    from glance.backends.base import Health
+
+    def slow(self):
+        time.sleep(0.3)
+        return Health(True, True, "signed in")
+
+    def stuck(self):
+        time.sleep(5)
+        return Health(True, True, "signed in")
+
+    for cls in (claude.ClaudeBackend, codex.CodexBackend, opencode.OpencodeBackend,
+                api.ApiBackend):
+        monkeypatch.setattr(cls, "health", slow)
+    monkeypatch.setattr(gemini.GeminiBackend, "health", stuck)  # a cold node start
+    monkeypatch.setattr(keystore.SecretKeyStore, "__init__", lambda self: None)
+    start = time.monotonic()
+    out = checks_mod.default_healths(timeout_s=0.8)
+    took = time.monotonic() - start
+    assert took < 1.5  # 4 x 0.3 s in parallel, the stuck one cut off at 0.8 s
+    assert out == {"claude": True, "codex": True, "gemini": None, "opencode": True,
+                   "api": True}
+
+
+def test_backend_check_names_a_backend_that_timed_out(home):
+    healths = lambda: {"claude": True, "gemini": None}
+    r = by_id(run_checks(make_env(home, healths=healths), CHECKS))["backend"]
+    assert r.status == "ok" and "gemini: timed out" in r.detail
+    stuck = lambda: {"claude": None}
+    r = by_id(run_checks(make_env(home, healths=stuck), CHECKS))["backend"]
+    assert r.status == "warn" and "timed out" in r.detail
+
+
+def test_results_are_reported_as_each_check_finishes(home):
+    """The CLI prints each line as soon as it is known; a note comes before the slow AI
+    check, so a cold start never looks like a hang."""
+    events: list[str] = []
+
+    def healths():
+        events.append("healths")
+        return {"claude": True}
+
+    results = run_checks(make_env(home, healths=healths), CHECKS,
+                         on_result=lambda r: events.append(r.id),
+                         on_start=lambda text: events.append("note:" + text))
+    ids = [c.id for c in CHECKS]
+    assert [e for e in events if e in ids] == ids == [r.id for r in results]
+    i = events.index("backend")
+    assert events[i - 2].startswith("note:Checking AI") and events[i - 1] == "healths"
+    # the checks before it were already out before the AI tools were asked
+    assert events.index("session") < events.index("healths")

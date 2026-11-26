@@ -1,7 +1,8 @@
 """MacTray: the TrayPort as an NSStatusItem with the Linux tray's menu.
 
-Menu: status line, "Update available — Update now", AI backend ▸, AI usage ▸, "Show
-suggestions automatically", Pause/Resume, Quit Glance. Main thread only. Needs PyObjC.
+Menu: status line, "Update available — Update now", AI backend ▸, AI usage ▸, "Check: on
+shortcut / while typing", "Show suggestions automatically", Pause/Resume, Quit Glance. Main
+thread only. Needs PyObjC.
 """
 from __future__ import annotations
 
@@ -32,8 +33,13 @@ class MacTray:
                  auto_suggest: bool = False,
                  on_update: Callable[[], None] = lambda: None,
                  on_usage_open: Callable[[], None] = lambda: None,
-                 on_usage_details: Callable[[], None] = lambda: None) -> None:
+                 on_usage_details: Callable[[], None] = lambda: None,
+                 on_check_mode: Callable[[str], None] = lambda mode: None,
+                 check_mode: str = "shortcut", check_hint: str = "") -> None:
+        from glance.ui.tray_gtk import check_mode_labels
+
         self._on_pause, self._on_resume = on_pause, on_resume
+        self._on_check_mode = on_check_mode
         self._on_choose, self._on_setup = on_choose, on_setup
         self._on_auto = on_auto_suggest
         self._on_usage_details = on_usage_details
@@ -63,6 +69,11 @@ class MacTray:
         self._usage = NSMenu.alloc().initWithTitle_("AI usage")
         self._usage.setAutoenablesItems_(False)
         self._usage_item.setSubmenu_(self._usage)
+        self._menu.addItem_(NSMenuItem.separatorItem())
+        self._check_items = {
+            mode: self._add(self._menu, label, lambda m=mode: self._check_clicked(m))
+            for mode, label in check_mode_labels(check_hint)}
+        self.set_check_mode(check_mode)
         self._auto = self._add(self._menu, "Show suggestions automatically", self._auto_clicked)
         self._auto.setState_(1 if auto_suggest else 0)
         self._toggle = self._add(self._menu, "Pause", self._toggle_clicked)
@@ -121,6 +132,14 @@ class MacTray:
     def set_auto_suggest(self, on: bool) -> None:
         self._auto_on = on
         self._auto.setState_(1 if on else 0)
+
+    def set_check_mode(self, mode: str) -> None:
+        for m, item in self._check_items.items():
+            item.setState_(1 if m == mode else 0)  # type: ignore[attr-defined]
+
+    def _check_clicked(self, mode: str) -> None:
+        self.set_check_mode(mode)
+        self._on_check_mode(mode)
 
     def _show_state(self) -> None:
         icon, line = _STATES[self._state]

@@ -13,7 +13,7 @@ STABLE_S = 60.0       # alive this long: the next death starts from the first de
 FAIL_DEATHS = 5       # this many deaths within FAIL_WINDOW_S: `failed`
 FAIL_WINDOW_S = 60.0
 FAILED_RETRY_MS = 30_000
-STOP_WAIT_S = 2.0
+STOP_WAIT_S = 1.0  # SIGTERM, then SIGKILL: quitting never waits on a child
 
 
 class ChildSupervisor:
@@ -61,7 +61,10 @@ class ChildSupervisor:
             child.wait(timeout=STOP_WAIT_S)
         except subprocess.TimeoutExpired:
             child.kill()
-            child.wait()
+            try:
+                child.wait(timeout=STOP_WAIT_S)
+            except subprocess.TimeoutExpired:
+                log_event("child_unkillable")
 
     def poll(self) -> None:
         if not self._running or self._timer is not None:

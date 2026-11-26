@@ -19,6 +19,7 @@ from AppKit import (
     NSBezelStyleRounded,
     NSBezierPath,
     NSButton,
+    NSCursor,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
@@ -29,6 +30,7 @@ from AppKit import (
     NSPasteboardTypeString,
     NSScrollView,
     NSTextField,
+    NSTrackingArea,
     NSView,
     NSWorkspace,
 )
@@ -48,6 +50,9 @@ from glance.platform.macos.appkit_util import (
 from glance.platform.macos.hotkeys_mac import symbols
 from glance.protocol import Rect
 from glance.ui.chip_model import ChipView
+from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
+from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
+from glance.ui.hover_menu import HoverMenu
 from glance.ui.panel_model import PanelView, ToneChip
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
@@ -84,6 +89,30 @@ def cgcolor(hex_colour: str) -> Any:
     return CGColorCreateSRGB(r, g, b, 1.0)
 
 
+# NSTrackingArea options: entered/exited, cursor updates, while Glance is not the active app
+# (it never is for the overlay), over whatever part of the view is visible.
+_TRACKING = 0x01 | 0x04 | 0x80 | 0x200
+
+
+def _track(view: Any) -> None:
+    """Have `view` hear the pointer enter and leave (its mouseEntered_ / mouseExited_ /
+    cursorUpdate_), once."""
+    if getattr(view, "tracked", False):
+        return
+    view.tracked = True
+    view.addTrackingArea_(NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+        NSMakeRect(0, 0, 0, 0), _TRACKING, view, None))
+
+
+def _hover_cb(view: Any, name: str) -> None:
+    cb = getattr(view, name, None)
+    if cb is not None:
+        try:
+            cb()
+        except Exception as e:  # noqa: BLE001
+            log_event("ui_action_error", kind=type(e).__name__)
+
+
 class _Flipped(NSView):
     """A view with a top-left origin, so layout reads like the GTK overlay's."""
 
@@ -114,10 +143,25 @@ class _Card(_Flipped):
 
 
 class _Icon(_Flipped):
-    """The status icon. `state` is set by the overlay; a click calls `on_click`."""
+    """The status icon. `state` is set by the overlay; a click calls `on_click`; the
+    pointer entering and leaving it, `on_enter` / `on_leave` (the hover menu)."""
 
     def acceptsFirstMouse_(self, _event):
         return True
+
+    def viewDidMoveToWindow(self):
+        _track(self)
+
+    def mouseEntered_(self, _event):
+        NSCursor.pointingHandCursor().set()
+        _hover_cb(self, "on_enter")
+
+    def mouseExited_(self, _event):
+        NSCursor.arrowCursor().set()
+        _hover_cb(self, "on_leave")
+
+    def cursorUpdate_(self, _event):
+        NSCursor.pointingHandCursor().set()
 
     def mouseDown_(self, _event):
         cb = getattr(self, "on_click", None)
@@ -210,10 +254,38 @@ class _AskField(NSTextField):
 
 class _Button(NSButton):
     """A button that takes the click that reaches a panel of an inactive app (Glance never
-    activates for the strip or the drawer)."""
+    activates for the strip or the drawer), with the hand cursor over it."""
 
     def acceptsFirstMouse_(self, _event):
         return True
+
+    def viewDidMoveToWindow(self):
+        _track(self)
+
+    def mouseEntered_(self, _event):
+        NSCursor.pointingHandCursor().set()
+
+    def mouseExited_(self, _event):
+        NSCursor.arrowCursor().set()
+
+    def cursorUpdate_(self, _event):
+        NSCursor.pointingHandCursor().set()
+
+
+class _MenuCard(_Card):
+    """The hover menu's card: tells the overlay when the pointer enters and leaves it."""
+
+    def viewDidMoveToWindow(self):
+        _track(self)
+
+    def mouseEntered_(self, _event):
+        _hover_cb(self, "on_enter")
+
+    def mouseExited_(self, _event):
+        _hover_cb(self, "on_leave")
+
+    def cursorUpdate_(self, _event):
+        NSCursor.arrowCursor().set()
 
 
 def _label(text: str, fg: Any, width: float, bold: bool = False, lines: int = 0,
@@ -281,8 +353,15 @@ class MacOverlay:
 
     def __init__(self, on_chip_click: Callable[[], None],
                  on_panel_action: Callable[[str, dict[str, Any]], None],
-                 clock: Any, use_key: Callable[[], str] = lambda: "Alt+Return") -> None:
+                 clock: Any, use_key: Callable[[], str] = lambda: "Alt+Return",
+                 hover_menu: Callable[[], HoverMenu | None] = lambda: None) -> None:
         self._on_chip_click = on_chip_click
+        self._hover_menu = hover_menu
+        self._menu_view: HoverMenu | None = None
+        self._menu_open: Any = None
+        self._menu_close: Any = None
+        self._in_icon = self._in_menu = False
+        self._icon_xy: tuple[int, int] | None = None
         self._act = on_panel_action
         self._clock = clock
         self._use_key = use_key
@@ -305,8 +384,11 @@ class MacOverlay:
         self._icon = make_panel()
         self._icon.setHasShadow_(False)
         self._icon_view = _Icon.alloc().initWithFrame_(NSMakeRect(0, 0, *ICON_BOX))
-        self._icon_view.on_click = lambda: self._on_chip_click()
+        self._icon_view.on_click = self._icon_clicked
+        self._icon_view.on_enter = lambda: self._menu_enter("icon")
+        self._icon_view.on_leave = lambda: self._menu_leave("icon")
         self._icon.setContentView_(self._icon_view)
+        self._menu = make_panel()
         self._strip = make_panel()
         self._panel = make_panel()
 
@@ -333,6 +415,7 @@ class MacOverlay:
         self._animate()
 
     def hide_status(self) -> None:
+        self._hide_menu()
         self._icon.orderOut_(None)
         self._status_view = None
         self._animate()
@@ -455,6 +538,7 @@ class MacOverlay:
             self._icon.orderOut_(None)
             return
         x, y = clamp_to_monitor(at[0] - ICON_X, at[1] - ICON_Y, ICON_BOX, mons)
+        self._icon_xy = (x, y)
         place(self._icon, Rect(x, y, *ICON_BOX))
         if not self._icon.isVisible():
             self._icon.orderFrontRegardless()
@@ -472,6 +556,87 @@ class MacOverlay:
         self._phase = (self._phase + 1) % 12
         self._icon_view.phase = self._phase
         self._icon_view.setNeedsDisplay_(True)
+
+    # ------------------------------------------------------------------ the hover menu
+
+    def _icon_clicked(self) -> None:
+        self._hide_menu()
+        self._on_chip_click()
+
+    def _cancel(self, attr: str) -> None:
+        handle = getattr(self, attr)
+        if handle is not None:
+            handle.cancel()
+            setattr(self, attr, None)
+
+    def _menu_enter(self, where: str) -> None:
+        if where == "icon":
+            self._in_icon = True
+        else:
+            self._in_menu = True
+        self._cancel("_menu_close")
+        if where == "icon" and self._menu_view is None and self._menu_open is None:
+            self._menu_open = self._clock.call_later(MENU_OPEN_MS, self._menu_open_due)
+
+    def _menu_leave(self, where: str) -> None:
+        if where == "icon":
+            self._in_icon = False
+            self._cancel("_menu_open")
+        else:
+            self._in_menu = False
+        if not (self._in_icon or self._in_menu) and self._menu_close is None:
+            self._menu_close = self._clock.call_later(MENU_CLOSE_MS, self._menu_close_due)
+
+    def _menu_open_due(self) -> None:
+        self._menu_open = None
+        if self._in_icon and self._icon_xy is not None and self._status_view is not None:
+            menu = self._hover_menu()  # None while the user types
+            if menu is not None:
+                self._show_menu(menu)
+
+    def _menu_close_due(self) -> None:
+        self._menu_close = None
+        if not (self._in_icon or self._in_menu):
+            self._hide_menu()
+
+    def _show_menu(self, menu: HoverMenu) -> None:
+        self._menu_view = menu
+        t, width = self._t, 230.0
+        card = _MenuCard.alloc().initWithFrame_(NSMakeRect(0, 0, width + 2 * PAD, 10))
+        card.fill, card.border = color(t["strip"]), color(t["strip_border"])
+        card.on_enter = lambda: self._menu_enter("menu")
+        card.on_leave = lambda: self._menu_leave("menu")
+        rows = _Rows(card, width, top=8)
+        if menu.note:
+            rows.full(_label(menu.note, color(t["muted"]), width, size=12), gap=4)
+        for item in menu.items:
+            def run(item: Any = item) -> None:
+                self._hide_menu()
+                self._act(item.action, dict(item.args))
+
+            rows.full(self._link(item.label, run), gap=2)
+        if menu.hint:
+            rows.full(_label(menu.hint, color(t["muted"]), width, lines=1, size=12), gap=2)
+        h = int(rows.y + 6)
+        card.setFrame_(NSMakeRect(0, 0, width + 2 * PAD, h))
+        self._menu.setContentView_(card)
+        x, y = self._icon_xy or (0, 0)
+        mx, my = clamp_to_monitor(x + ICON_BOX[0], y, (int(width + 2 * PAD), h),
+                                  self.monitors())
+        place(self._menu, Rect(mx, my, int(width + 2 * PAD), h))
+        self._menu.orderFrontRegardless()
+
+    def _hide_menu(self) -> None:
+        self._cancel("_menu_open")
+        self._cancel("_menu_close")
+        self._in_menu = False
+        self._menu_view = None
+        self._menu.orderOut_(None)
+
+    def menu_items(self) -> list[str] | None:
+        """Test access: the hover menu's item labels, None while it is closed."""
+        v = self._menu_view
+        return None if v is None else [i.label for i in v.items]
 
     def _field_drawer(self) -> bool:
         return self._panel_view is not None and self._panel_anchor is not None

@@ -24,7 +24,7 @@ def desk():
     app = glance = None
     try:
         app = GtkApp(shell, TEXT, "--undo")
-        glance = Glance(shell, root)
+        glance = Glance(shell, root, name="glanced-access")
         assert wait_for(lambda: glance.status().get("shell_extension") == "running", 20)
         yield shell, app, glance
     finally:
