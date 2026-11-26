@@ -5,8 +5,13 @@
 //! mutex (so one `Grammar` is safe to share between threads) and runs under
 //! `catch_unwind`: a panic inside Harper becomes `glance_core.GrammarPanic` (a
 //! `RuntimeError`), never a dead daemon.
+//!
+//! Phase 3 adds the privacy functions (`privacy_find_secrets`, `privacy_find_protected`,
+//! `privacy_shield`, `privacy_unshield`): the Rust twin of `glance.privacy.redact` and
+//! `glance.privacy.entities`, with Python str (code point) offsets.
 
 pub mod engine;
+pub mod privacy;
 
 #[cfg(feature = "python")]
 mod python {
@@ -20,6 +25,7 @@ mod python {
     use pyo3::types::PyDict;
 
     use crate::engine::{Engine, Found, parse_dialect};
+    use crate::privacy;
 
     create_exception!(glance_core, GrammarPanic, PyRuntimeError);
 
@@ -174,8 +180,50 @@ mod python {
         }
     }
 
+    type Spans = Vec<(usize, usize, &'static str)>;
+    type Segment = (usize, usize, usize, usize, bool);
+
+    fn spans(v: Vec<privacy::Span>) -> Spans {
+        v.into_iter().map(|s| (s.start, s.end, s.kind)).collect()
+    }
+
+    /// `redact.find_secrets` as (start, end, kind) tuples.
+    #[pyfunction]
+    fn privacy_find_secrets(text: &str) -> Spans {
+        spans(privacy::find_secrets(text))
+    }
+
+    /// `entities.find_protected` as (start, end, kind) tuples.
+    #[pyfunction]
+    fn privacy_find_protected(text: &str) -> Spans {
+        spans(privacy::find_protected(text))
+    }
+
+    /// `redact.shield` as (text, mapping, has_objects, segments).
+    #[pyfunction]
+    fn privacy_shield(text: &str) -> (String, Vec<(String, String)>, bool, Vec<Segment>) {
+        let s = privacy::shield(text);
+        (s.text, s.mapping, s.has_objects, s.segments)
+    }
+
+    /// `redact.unshield` given the shielded mapping.
+    #[pyfunction]
+    fn privacy_unshield(text: &str, mapping: Vec<(String, String)>) -> Option<String> {
+        privacy::unshield(text, &mapping)
+    }
+
     #[pymodule]
     fn glance_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        // Entropy sums like the running interpreter's sum() (compensated since 3.12).
+        privacy::COMPENSATED_SUM.store(
+            m.py().version_info() >= (3, 12),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        m.add_function(wrap_pyfunction!(privacy_find_secrets, m)?)?;
+        m.add_function(wrap_pyfunction!(privacy_find_protected, m)?)?;
+        m.add_function(wrap_pyfunction!(privacy_shield, m)?)?;
+        m.add_function(wrap_pyfunction!(privacy_unshield, m)?)?;
+        m.add("PRIVACY_UNICODE_VERSION", privacy::tables::UNICODE_VERSION)?;
         m.add_class::<Grammar>()?;
         m.add("GrammarPanic", m.py().get_type::<GrammarPanic>())?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;

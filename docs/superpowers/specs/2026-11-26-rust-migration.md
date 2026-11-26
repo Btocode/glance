@@ -200,7 +200,8 @@ fallback for one release):
 
 1. **privacy** — `privacy/entities.py` (`find_protected`, spans), `privacy/redact.py`,
    `privacy/gate.py`. Pure functions over strings; highest value (they run on every
-   keystroke and guard what leaves the machine), smallest surface.
+   keystroke and guard what leaves the machine), smallest surface. **Done (P3a, below),
+   except `gate.py`, which waits for config.**
 2. **grammar glue** — `grammar/filters.py`, `lang.py`, `corrections.py`, `issues.py`
    helpers; then the whole check pipeline (`text → filtered issues`) is one Rust call.
 3. **scheduler/controller logic** — `daemon/scheduler.py`, the pure parts of
@@ -228,6 +229,74 @@ the Rust side, Hypothesis against the Python twin) for offsets and redaction.
 
 **Done when** each module's tests pass against Rust, the parity/property tests show no
 difference, and the Python twin is deleted one release later.
+
+### P3a — privacy (glance_core 0.2.0) — done
+
+**What moved.** `rust/glance_core/src/privacy/`: `find_secrets` (PEM, JWT, API keys, `key =
+value` assignments, Luhn cards, the entropy rule with its 20–23-character tweak, overlap
+precedence pem > jwt > api_key > assignment > card > entropy), `find_protected` (objects,
+code spans, URLs, mentions, `:emoji:` names, emoji runs), `shield` and `unshield`. Exposed as
+`glance_core.privacy_find_secrets / privacy_find_protected / privacy_shield /
+privacy_unshield` (tuples; Python builds the `Span`/`Shielded` dataclasses, so callers are
+unchanged). `redact.py`/`entities.py` call them when `glance_core` has them
+(`privacy/_native.py`), else their Python twins (`find_secrets_py`, `find_protected_py`,
+`shield_py`, `unshield_py`), which stay as the reference until Phase 5.
+`GLANCE_PURE_PYTHON=1` forces the twins; a text with a lone surrogate (not UTF-8, so not a
+Rust `&str`) falls back to them per call. `Shielded.map_span` and `can_apply_rewrite` stay
+Python (pure bookkeeping over the returned segments).
+
+**Not moved: `gate.py`.** It is not pure string logic: it evaluates the *user's* URL
+denylist as Python `re` patterns (look-around allowed; a broken pattern falls back to
+`re.escape`), parses URLs with `urlsplit`, and reads `Config`. Porting it would change what a
+user's pattern means, and it runs once per focus change, not per keystroke. It moves with
+config (step 5), when patterns can be validated at load.
+
+**How Python semantics were kept.** Rust's `regex` has no look-around and a different
+Unicode `\w`/`\s`/`\d`, so: Python's classes (`\w`, `\s`, `\d` with digit values, the
+emoji predicate) are tables generated from Python by `scripts/gen-privacy-tables.py`
+(`tables.rs`, Unicode 13.0 from the CI Python 3.10); look-behinds and `\b` are checked on
+each match start with a one-character retry, as Python's scanner does; `re.IGNORECASE`
+keywords spell out every code point Python lets a letter match (`ı`/`İ` for `i`, `ſ` for
+`s`, `K` for `k`); entropy sums its terms in `Counter` order the way the running
+interpreter's `sum()` does (plain before 3.12, Neumaier-compensated since, chosen at import).
+Spans are computed on bytes and returned as code-point indices.
+
+**Parity** (`tests/test_privacy_parity.py`, run with `GLANCE_REQUIRE_CORE=1` in CI): spans,
+kinds, shielded text, mapping, segments and unshield (round trip, edited, dropped, duplicated,
+swapped and invented placeholders) identical on the generated corpus (600 secrets + 400
+benign, seed 7: **0 of 1000** differ), the unit tests' inputs plus porting edge cases (**0 of
+118**), 4,000 random texts mixing secret-shaped pieces with emoji/ZWJ/flags, Bangla letters,
+signs and digits, Arabic digits, odd whitespace (`\x1c`, `\x85`, U+2028, U+3000) (**0**), and
+2,000 texts over the whole code-point range (**0**; runs only when the Python's Unicode
+version equals the tables'). Off-suite: 40,000 more random texts on 3.10 (0 differ), and the
+corpus, unit inputs, 20,000 random texts and 50,000 entropy-borderline tokens on 3.13 with
+the same abi3 build (0 differ; exercises the compensated sum). `test_redact.py` and
+`test_entities.py` now run against both implementations (`privacy_impl` fixture).
+
+**Known bounded difference.** On a Python whose Unicode is newer than 13.0 (3.11+), code
+points assigned after Unicode 13 are classified by the tables, not by that Python: 7 of the
+2,000 whole-range texts differ on 3.13 (new `So` symbols counted as emoji by Python only).
+Real text almost never contains them; generate per-version tables if it ever matters.
+
+**Speed** (release build, best of 5, this machine; Python twin vs Rust through the public
+functions, `Span` construction included):
+
+| input | function | Python | Rust | × |
+|---|---|---|---|---|
+| corpus, 1,000 texts | `find_secrets` | 27.4 ms | 3.1 ms | 8.7 |
+| corpus, 1,000 texts | `shield` | 60.3 ms | 5.1 ms | 11.9 |
+| corpus, 1,000 texts | `find_protected` | 28.2 ms | 1.6 ms | 18 |
+| 600 words (4,180 chars) | `find_secrets` | 0.54 ms | 0.023 ms | 24 |
+| 600 words | `shield` | 1.94 ms | 0.11 ms | 17 |
+| 600 words | `find_protected` | 1.26 ms | 0.11 ms | 12 |
+
+The regexes compile lazily: the first call in a process costs ~3 ms, `import glance_core`
+~1 ms.
+
+**Release.** Crate and wheel are 0.2.0; the `core-v0.2.0` tag (cut separately) builds the
+wheels and opens the pin PR as for 0.1.0. An installed 0.1.0 has no privacy functions, so
+Glance keeps the Python twins until the 0.2.0 pin lands. The wheel smoke test also checks
+`privacy_find_protected`.
 
 ## Phase 4 — per-platform capture, write-back and overlay in Rust
 

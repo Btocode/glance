@@ -8,7 +8,8 @@ from collections import Counter
 from dataclasses import dataclass
 from itertools import accumulate, pairwise
 
-from glance.privacy.entities import Span, find_protected
+from glance.privacy import _native
+from glance.privacy.entities import Span, find_protected_py
 
 _B = r"(?<![A-Za-z0-9_-])"
 _API_KEY = re.compile(
@@ -125,7 +126,21 @@ def _card_spans(base: int, run: str) -> list[Span]:
 
 
 def find_secrets(text: str) -> list[Span]:
-    """Secret spans, sorted and non-overlapping; overlaps merge, the strongest kind wins."""
+    """Secret spans, sorted and non-overlapping; overlaps merge, the strongest kind wins.
+
+    Runs in `glance_core` when it is installed (see `_native`).
+    """
+    core = _native.core
+    if core is not None:
+        try:
+            return [Span(a, b, k) for a, b, k in core.privacy_find_secrets(text)]
+        except UnicodeEncodeError:  # a lone surrogate: only the Python twin takes it
+            pass
+    return find_secrets_py(text)
+
+
+def find_secrets_py(text: str) -> list[Span]:
+    """`find_secrets` in Python: the reference the Rust twin is tested against."""
     found: list[Span] = []
     for kind, pat in (("pem", _PEM), ("jwt", _JWT), ("api_key", _API_KEY)):
         found += [Span(m.start(), m.end(), kind) for m in pat.finditer(text)]
@@ -179,9 +194,23 @@ class Shielded:
 
 
 def shield(text: str) -> Shielded:
-    secrets = find_secrets(text)
+    """Secrets become `[[GLANCE_S<n>]]`, other protected spans `[[GLANCE_E<n>]]`."""
+    core = _native.core
+    if core is not None:
+        try:
+            out, mapping, has_objects, segments = core.privacy_shield(text)
+        except UnicodeEncodeError:  # a lone surrogate: only the Python twin takes it
+            pass
+        else:
+            return Shielded(out, tuple(mapping), has_objects, tuple(segments))
+    return shield_py(text)
+
+
+def shield_py(text: str) -> Shielded:
+    """`shield` in Python: the reference the Rust twin is tested against."""
+    secrets = find_secrets_py(text)
     entities = [
-        e for e in find_protected(text)
+        e for e in find_protected_py(text)
         if not any(e.start < s.end and s.start < e.end for s in secrets)
     ]
     items = sorted(
@@ -213,6 +242,17 @@ def shield(text: str) -> Shielded:
 
 def unshield(text: str, s: Shielded) -> str | None:
     """Restore originals; None unless every placeholder occurs once, in order, and none is invented."""
+    core = _native.core
+    if core is not None:
+        try:
+            return core.privacy_unshield(text, s.mapping)
+        except UnicodeEncodeError:  # a lone surrogate: only the Python twin takes it
+            pass
+    return unshield_py(text, s)
+
+
+def unshield_py(text: str, s: Shielded) -> str | None:
+    """`unshield` in Python: the reference the Rust twin is tested against."""
     if text.count(_PLACEHOLDER_OPEN) != len(s.mapping):
         return None
     last = -1

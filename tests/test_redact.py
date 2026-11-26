@@ -2,6 +2,8 @@ import pytest
 
 from glance.privacy.redact import can_apply_rewrite, find_secrets, shield, unshield
 
+pytestmark = pytest.mark.usefixtures("privacy_impl")  # Rust and Python
+
 _PK = "PRIV" + "ATE KEY"
 PEM = "-----BEG" + "IN RSA " + _PK + "-----\nMIIEowIBAAKCAQEA1234\nabcdEFGH5678\n-----END RSA " + _PK + "-----"
 

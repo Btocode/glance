@@ -43,3 +43,16 @@ def _never_run_the_users_login_shell(monkeypatch):
     cli_path.refresh()
     yield
     cli_path.refresh()
+
+
+@pytest.fixture(params=["rust", "python"])
+def privacy_impl(request, monkeypatch):
+    """Run a privacy test against both implementations: glance_core's Rust twin and the
+    Python reference (what GLANCE_PURE_PYTHON=1 selects)."""
+    from glance.privacy import _native
+
+    if request.param == "python":
+        monkeypatch.setattr(_native, "core", None)
+    elif _native.core is None:
+        pytest.skip("glance_core (>= 0.2) is not built")
+    return request.param

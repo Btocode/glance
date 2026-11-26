@@ -66,7 +66,9 @@ jobs:
       - name: Run the default test suite
         run: .venv/bin/pytest -ra
 
-      - name: Grammar parity (glance_core vs harper-ls 3.3.0)
+      - name: Parity (glance_core vs harper-ls 3.3.0; Rust privacy vs its Python twin)
         env:
           GLANCE_REQUIRE_CORE: "1"
-        run: .venv/bin/pytest -ra -s tests/test_grammar_parity.py tests/test_harper_native.py
+        run: >-
+          .venv/bin/pytest -ra -s tests/test_grammar_parity.py tests/test_harper_native.py
+          tests/test_privacy_parity.py

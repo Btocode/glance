@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "glance-core"
-version = "0.1.0"
-description = "Glance's display-free core (in-process Harper grammar checking)"
+version = "0.2.0"
+description = "Glance's display-free core (in-process Harper grammar checking, privacy redaction)"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: Implementation :: CPython"]

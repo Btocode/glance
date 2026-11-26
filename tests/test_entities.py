@@ -4,6 +4,8 @@ import pytest
 
 from glance.privacy.entities import Span, find_protected, overlaps
 
+pytestmark = pytest.mark.usefixtures("privacy_impl")  # Rust and Python
+
 
 def found(t: str) -> list[tuple[str, str]]:
     return [(t[s.start:s.end], s.kind) for s in find_protected(t)]

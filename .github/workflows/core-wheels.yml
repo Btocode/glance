@@ -74,6 +74,7 @@ jobs:
           import glance_core
           g = glance_core.Grammar()
           assert any(d['rule'] == 'SpellCheck' for d in g.check('A zqxjword here.'))
+          assert glance_core.privacy_find_protected('hi @sam') == [(3, 7, 'mention')]
           print('glance_core', glance_core.__version__, 'Harper', glance_core.HARPER_VERSION)"
 
       - name: Checksums

@@ -5,6 +5,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from glance.privacy import _native
+
 OBJECT = "￼"  # AT-SPI embedded-object placeholder (Slack emoji, links, code: S2.5)
 
 
@@ -58,8 +60,19 @@ def find_protected(text: str) -> list[Span]:
     """Protected spans, sorted and non-overlapping.
 
     Overlapping matches merge into one span that keeps the kind of the match starting first
-    (the longer one on a tie).
+    (the longer one on a tie). Runs in `glance_core` when it is installed (see `_native`).
     """
+    core = _native.core
+    if core is not None:
+        try:
+            return [Span(a, b, k) for a, b, k in core.privacy_find_protected(text)]
+        except UnicodeEncodeError:  # a lone surrogate: only the Python twin takes it
+            pass
+    return find_protected_py(text)
+
+
+def find_protected_py(text: str) -> list[Span]:
+    """`find_protected` in Python: the reference the Rust twin is tested against."""
     found = [Span(i, i + 1, "object") for i, ch in enumerate(text) if ch == OBJECT]
     for kind, rx in _PATTERNS:
         found += [Span(m.start(), m.end(), kind) for m in rx.finditer(text)]

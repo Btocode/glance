@@ -1,9 +1,9 @@
 [package]
 name = "glance_core"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
-description = "Glance's display-free core: in-process Harper grammar checking for Python."
+description = "Glance's display-free core for Python: in-process Harper grammar checking, secret redaction and protected spans."
 publish = false
 
 [lib]
@@ -11,6 +11,7 @@ name = "glance_core"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+regex = "1.11"
 # Pinned to the exact engine of the harper-ls 3.3.0 release Glance shipped before (crates.io
 # only has 3.2.0). Default features, as harper-ls builds it, so lints match.
 harper-core = { git = "https://github.com/Automattic/harper", tag = "v3.3.0" }
