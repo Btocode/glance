@@ -436,7 +436,7 @@ fetch_tarball() {
     ensure_dir "$(dirname "$SRC")"
     local new old
     new="$(mktemp -d "$SRC.new.XXXXXX")"
-    if ! curl -fsSL --retry 3 "$url" </dev/null | tar -xz --strip-components=1 -C "$new" \
+    if ! curl -fsSL --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 30 "$url" </dev/null | tar -xz --strip-components=1 -C "$new" \
         || ! is_checkout "$new"; then
         rm -rf "$new"
         die "could not download Glance from $url"
@@ -850,7 +850,8 @@ darwin_install() {
     fi
     url="${GLANCE_RAW_URL:-https://raw.githubusercontent.com/Btocode/glance/main}"
     tmp="$(mktemp "${TMPDIR:-/tmp}/glance-install.XXXXXX")"
-    curl -fsSL --retry 3 "$url/scripts/install-macos.sh" -o "$tmp" </dev/null \
+    printf '==> Downloading the macOS installer from %s\n' "$url"
+    curl -fsSL --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 30 "$url/scripts/install-macos.sh" -o "$tmp" </dev/null \
         || { rm -f "$tmp"; die "could not download $url/scripts/install-macos.sh"; }
     bash "$tmp" "$@" || rc=$?
     rm -f "$tmp"

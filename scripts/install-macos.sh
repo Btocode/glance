@@ -218,7 +218,7 @@ fetch_tarball() {
     ensure_dir "$(dirname "$SRC")"
     local new
     new="$(mktemp -d "$SRC.new.XXXXXX")"
-    if ! curl -fsSL --retry 3 "$url" </dev/null | tar -xz --strip-components=1 -C "$new" \
+    if ! curl -fsSL --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 30 "$url" </dev/null | tar -xz --strip-components=1 -C "$new" \
         || ! is_checkout "$new"; then
         rm -rf "$new"
         die "could not download Glance from $url"
@@ -276,7 +276,7 @@ find_uv() {
     write_manifest
     # UV_UNMANAGED_INSTALL: into that directory only - no receipt in ~/.config/uv, no PATH
     # or shell-file changes.
-    curl -LsSf https://astral.sh/uv/install.sh </dev/null \
+    curl -LsSf --connect-timeout 15 --speed-limit 1024 --speed-time 30 https://astral.sh/uv/install.sh </dev/null \
         | env UV_UNMANAGED_INSTALL="$DATA_DIR/uv" sh >/dev/null || die "could not install uv"
     UV="$DATA_DIR/uv/uv"
     [ -x "$UV" ] || die "uv did not install into $DATA_DIR/uv"

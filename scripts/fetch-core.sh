@@ -90,7 +90,7 @@ install_pinned() {
     # shellcheck disable=SC2064  # expand now: $tmp is local
     trap "rm -rf '$tmp'" EXIT
     note "downloading glance_core $version (the in-process grammar engine)"
-    if ! curl -fsSL --retry 3 -o "$tmp/$name" "$BASE_URL/core-v$version/$name"; then
+    if ! curl -fsSL --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 30 -o "$tmp/$name" "$BASE_URL/core-v$version/$name"; then
         warn "could not download $name; keeping harper-ls"
         return 1
     fi

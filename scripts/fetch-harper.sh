@@ -43,7 +43,7 @@ sha256_of() {
 check() { [ "$(sha256_of "$2")" = "$1" ]; }
 
 echo "downloading harper-ls $VERSION (a few MB; can take a minute on a slow connection)"
-curl -fsSL --retry 3 -o "$tmp/$ASSET" "$URL"
+curl -fsSL --retry 3 --connect-timeout 15 --speed-limit 1024 --speed-time 30 -o "$tmp/$ASSET" "$URL"
 if ! check "$TARBALL_SHA256" "$tmp/$ASSET"; then
     echo "fetch-harper: checksum mismatch for $ASSET" >&2
     exit 1
