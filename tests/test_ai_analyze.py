@@ -559,6 +559,7 @@ def test_attach_appends_to_hooks_and_chains_on_analyze_due(tmp_path):
 def test_strip_uses_the_analysis_replacements_without_another_call(rig):
     rig.analyzed()
     calls = len(rig.backend.calls)
+    rig.c.toggle_strip()  # the status icon's click opens it
     strip = rig.overlay.strip
     assert strip.text == "send me the report now, i need it before the meeting starts."
     assert [s.text for s in strip.segments if s.changed] == ["the"] and strip.note is None
@@ -569,6 +570,9 @@ def test_strip_uses_the_analysis_replacements_without_another_call(rig):
 def test_strip_says_the_tone_is_off_when_there_is_nothing_to_fix(tmp_path):
     rig = Rig(tmp_path, analysis=Analysis("blunt", True, "curt", ()))
     rig.analyzed(snap(text="send me the report now, I need it before the meeting starts."))
+    assert rig.overlay.strip is None  # not until the status icon is clicked
+    assert rig.overlay.status.badge == "•"
+    rig.c.toggle_strip()
     strip = rig.overlay.strip
     assert not strip.can_use
     assert strip.note == "Reads blunt for team channel — ⋯ for tone options"

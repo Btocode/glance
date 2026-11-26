@@ -3,8 +3,9 @@
     overlay_probe.py [--shots DIR]
 
 Run by tests/test_xvfb.py against a private Xvfb server. It clicks with XTEST, so never
-point it at a display somebody is using. With --shots it saves the collapsed strip and the
-open drawer, light and dark, as PNGs in DIR.
+point it at a display somebody is using. With --shots it saves the status icon in each state,
+the strip opened from it, the collapsed strip and the open drawer, light and dark, as PNGs in
+DIR.
 """
 import argparse
 import json
@@ -25,10 +26,10 @@ from Xlib.ext import xtest
 
 from glance.grammar.issues import Issue
 from glance.protocol import Rect
-from glance.ui.chip_model import ChipState, ChipView
 from glance.ui.overlay_gtk import GAP, GtkOverlay, button_text
 from glance.ui.panel_model import PanelView, ToneChip, build_panel
 from glance.ui.placement import Anchor
+from glance.ui.status_model import NO_AI_LINE, StatusState, StatusView
 from glance.ui.strip_model import StripView, strip_fix
 
 TYPED = "hey team i think its fine to ship friday but we needs the tests fixed asap"
@@ -204,19 +205,81 @@ def main() -> int:
     out: dict = {"focus_before": focused(),
                  "monitors": [[m.x, m.y, m.w, m.h] for m in overlay.monitors()]}
 
-    # ---- the status dot: only for the quiet states
-    overlay.show_chip(ChipView(ChipState.FIXES, "3", None), 300, 200)
-    pump(0.2)
-    out["dot_for_fixes"] = overlay.chip_geometry()
-    overlay.show_chip(ChipView(ChipState.PAUSED, "Paused", None), 300, 200)
+    # ---- the status icon
+    overlay.show_chip(None, 300, 200)  # the chip's state draws nothing any more
+    pump(0.1)
+    overlay.show_status(StatusView(StatusState.IDLE), ANCHOR)
     pump(0.3)
-    out["dot"] = real(overlay.chip_window)
-    out["dot_reported"] = list(overlay.chip_geometry())
-    out["dot_override_redirect"] = override_redirect(overlay.chip_window)
-    click(307, 207)
-    out["focus_after_dot_click"] = focused()
-    overlay.hide_chip()
+    out["icon"] = list(overlay.status_geometry())
+    out["icon_window"] = real(overlay.status_window)
+    out["icon_override_redirect"] = override_redirect(overlay.status_window)
+    out["icon_idle"] = overlay.status_state()
+    ix, iy, iw, ih = overlay.status_geometry()
     holder_clicks()
+    click(ix + iw // 2, iy + ih // 2)
+    out["icon_click_events"] = list(events)
+    out["icon_click_holder"] = holder_clicks()
+    out["focus_after_icon_click"] = focused()
+    wx, wy, ww, wh = out["icon_window"]
+    click(wx + ww - 2, wy + wh - 2)  # inside its window, outside the circle: goes through
+    out["icon_corner_click_holder"] = holder_clicks()
+    events.clear()
+    overlay.show_status(StatusView(StatusState.WORKING, spin=True), ANCHOR)
+    pump(0.3)
+    out["icon_working"] = overlay.status_state()
+    overlay.show_status(StatusView(StatusState.READY, 3), ANCHOR)
+    pump(0.2)
+    out["icon_ready"] = overlay.status_state()
+    overlay.show_status(StatusView(StatusState.MUTED, message=NO_AI_LINE), ANCHOR)
+    pump(0.2)
+    out["icon_muted"] = overlay.status_state()
+    overlay.show_status(StatusView(StatusState.IDLE), replace(ANCHOR, tail=True))
+    pump(0.2)
+    out["icon_tail"] = list(overlay.status_geometry())
+    overlay.show_status(StatusView(StatusState.IDLE), ANCHOR.moved(50, 20))
+    pump(0.2)
+    out["icon_moved"] = list(overlay.status_geometry())
+    overlay.hide_status()
+    pump(0.2)
+    out["icon_hidden"] = [overlay.status_geometry(), overlay.status_window.get_visible(),
+                          overlay._spin is not None]
+    holder_clicks()
+
+    def icon_shots(theme: str) -> None:
+        """Each icon state, then the strip opened from it."""
+        for name, view in (("idle", StatusView(StatusState.IDLE)),
+                           ("working", StatusView(StatusState.WORKING, spin=True)),
+                           ("ready", StatusView(StatusState.READY, 3)),
+                           ("tone", StatusView(StatusState.READY)),
+                           ("muted", StatusView(StatusState.MUTED, message=NO_AI_LINE))):
+            overlay.show_status(view, ANCHOR)
+            pump(0.35)
+            icon_shot(f"status-{name}-{theme}")
+        overlay.show_status(StatusView(StatusState.READY, STRIP.n_fixes), ANCHOR)
+        overlay.show_strip(replace(STRIP, on_demand=True), ANCHOR)
+        pump(0.4)
+        icon_shot(f"status-strip-{theme}", strip=True)
+        overlay.show_strip(StripView(note=NO_AI_LINE, on_demand=True), ANCHOR)
+        overlay.show_status(StatusView(StatusState.MUTED, message=NO_AI_LINE), ANCHOR)
+        pump(0.4)
+        icon_shot(f"status-muted-strip-{theme}", strip=True)
+        overlay.hide_strip()
+        overlay.hide_status()
+        pump(0.2)
+
+    def icon_shot(name: str, strip: bool = False) -> None:
+        if not args.shots:
+            return
+        f = ANCHOR.field
+        x0, y0 = (f.x - 20, f.y - 20) if strip else (f.x + f.w - 300, f.y - 16)
+        x1 = f.x + f.w + 40
+        y1 = (max(f.y + f.h, *(g[1] + g[3] for g in [overlay.strip_geometry()] if g)) + 20
+              if strip else f.y + f.h + 16)
+        pix = Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), x0, y0,
+                                         x1 - x0, y1 - y0)
+        pix.savev(str(Path(args.shots) / f"{name}.png"), "png", [], [])
+
+    icon_shots("light")
 
     # ---- the collapsed strip
     overlay.show_strip(STRIP, ANCHOR)
@@ -227,7 +290,7 @@ def main() -> int:
     out["strip_buttons"] = [button_text(b) for b in buttons(overlay.strip_window)]
     out["strip_override_redirect"] = override_redirect(overlay.strip_window)
     out["focusable"] = [[w.get_accept_focus(), w.get_focus_on_map(), w.is_active()]
-                        for w in (overlay.chip_window, overlay.strip_window,
+                        for w in (overlay.status_window, overlay.strip_window,
                                   overlay.panel_window)]
     # theme: light unless told otherwise
     shot("strip-collapsed-light")
@@ -314,6 +377,9 @@ def main() -> int:
     out["dark_panel"] = overlay.panel_geometry()
     out["dark_strip"] = overlay.strip_geometry()
     shot("strip-expanded-dark")
+    overlay.hide_panel()
+    overlay.hide_strip()
+    icon_shots("dark")
     overlay._theme.force(False)
     page.dark(False)
     pump(0.3)
@@ -340,7 +406,7 @@ def main() -> int:
     overlay.hide_strip()
     overlay.hide_panel()
     pump(0.2)
-    out["hidden"] = [overlay.chip_geometry(), overlay.strip_geometry(),
+    out["hidden"] = [overlay.status_geometry(), overlay.strip_geometry(),
                      overlay.panel_geometry(), overlay.strip_window.get_visible(),
                      overlay.panel_window.get_visible()]
     out["events"] = events

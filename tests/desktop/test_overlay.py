@@ -2,7 +2,7 @@
 
     .venv/bin/pytest -m desktop tests/desktop/test_overlay.py -v
 
-The tests open their own window, give it the focus and show the chip and the panel beside
+The tests open their own window, give it the focus and show the status icon and the panel beside
 it for a moment. They send no keys and no clicks. (The same windows are exercised with
 clicks, on a private Xvfb server, by tests/test_xvfb.py in the default run.)
 """
@@ -18,8 +18,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from glance.ui.chip_model import ChipState, ChipView
+from glance.protocol import Rect
 from glance.ui.panel_model import IssueRow, PanelView
+from glance.ui.placement import Anchor
+from glance.ui.status_model import StatusState, StatusView
 from tests.desktop.test_capture_gtk import Desktop, Lines, _stop
 from tests.desktop.test_writeback_gtk import _pump
 
@@ -27,7 +29,7 @@ pytestmark = pytest.mark.desktop
 
 APP = Path(__file__).with_name("gtk_app.py")
 TITLE = "glance-test-app"
-FIXES = ChipView(ChipState.FIXES, "2", None)
+FIXES = StatusView(StatusState.READY, 2)
 PANEL = PanelView(
     issues=(IssueRow("harper:Typo:0:3", "Teh quick brown fox", "Did you mean The?", ("The",),
                      "Typo"),),
@@ -70,9 +72,10 @@ def stage():
         assert caret is not None
         assert _active_title() == TITLE
         yield SimpleNamespace(overlay=overlay, desktop=desktop, app=app,
-                              x=caret.x + caret.w + 4, y=caret.y + caret.h + 4)
+                              x=caret.x + caret.w + 4, y=caret.y + caret.h + 4,
+                              at=lambda x, y: Anchor(caret=Rect(x, y, 1, caret.h)))
     finally:
-        overlay.hide_chip()
+        overlay.hide_status()
         overlay.hide_panel()
         if port is not None:
             port.stop()
@@ -80,39 +83,41 @@ def stage():
         _pump(0.4)
 
 
-def test_chip_does_not_take_focus(stage):
-    stage.overlay.show_chip(FIXES, stage.x, stage.y)
+def test_status_icon_does_not_take_focus(stage):
+    stage.overlay.show_status(FIXES, stage.at(stage.x, stage.y))
     _pump(0.5)
-    assert stage.overlay.chip_geometry() is not None
+    assert stage.overlay.status_geometry() is not None
     assert _active_title() == TITLE
     assert stage.desktop.active_pid() == stage.app.pid
 
 
 def test_panel_does_not_take_focus(stage):
-    stage.overlay.show_chip(FIXES, stage.x, stage.y)
+    stage.overlay.show_status(FIXES, stage.at(stage.x, stage.y))
     stage.overlay.show_panel(PANEL, stage.x, stage.y + 26)
     _pump(0.5)
     assert stage.overlay.panel_geometry() is not None
     assert _active_title() == TITLE
     assert stage.desktop.active_pid() == stage.app.pid
     assert not stage.overlay.panel_window.is_active()
-    assert not stage.overlay.chip_window.is_active()
+    assert not stage.overlay.status_window.is_active()
 
 
-def test_chip_reposition_under_50ms(stage):
+def test_status_icon_reposition_under_50ms(stage):
     from Xlib import display
 
     d = display.Display()
     try:
-        stage.overlay.show_chip(FIXES, stage.x, stage.y)
+        stage.overlay.show_status(FIXES, stage.at(stage.x, stage.y))
         _pump(0.3)
-        xid = stage.overlay.chip_window.get_window().get_xid()
+        x0 = stage.overlay.status_geometry()[0]
+        xid = stage.overlay.status_window.get_window().get_xid()
         window = d.create_resource_object("window", xid)
         times = []
         for i in range(100):
-            want = stage.x + (i % 10) * 9 + 1
+            dx = (i % 10) * 9 + 1
+            want = x0 + dx - 1  # the window starts 1 px left of the circle
             t0 = time.monotonic()
-            stage.overlay.show_chip(FIXES, want, stage.y)
+            stage.overlay.show_status(FIXES, stage.at(stage.x + dx, stage.y))
             while window.get_geometry().x != want and time.monotonic() - t0 < 1.0:
                 _pump(0.002)
             times.append(time.monotonic() - t0)

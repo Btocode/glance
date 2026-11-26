@@ -1,11 +1,13 @@
-"""The suggestion strip end to end: glanced + glance-capture + harper-ls against a real GTK
+"""The status icon and the suggestion strip end to end: glanced + glance-capture + harper-ls against a real GTK
 text view, on a private Xvfb with its own D-Bus session and a minimal window manager. The
 display the user works on is never touched; keys and clicks go to that server only. The AI
 is the daemon's test backend (no real call).
 
     .venv/bin/pytest -m xvfb tests/desktop/test_strip.py
 
-The tests share one session and run in file order (~30 s).
+The tests share one session and run in file order (~40 s). The default `[ui] suggestions =
+"on_click"` holds until the last tests switch it to "auto": the strip is opened by a click on
+the status icon until then.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -108,6 +111,7 @@ def s(tmp_path_factory):
         log_path = home / "glanced.stderr"
         yield SimpleNamespace(request=request, buffer=buffer, screen=screen, app=app,
                               daemon=daemon, log_path=log_path,
+                              config=dirs["cfg"] / "glance" / "config.toml",
                               overlay=lambda: request("test_overlay"),
                               snapshot=lambda: (request("test_state") or {}).get("snapshot"))
     finally:
@@ -139,8 +143,102 @@ def _click(s, x: int, y: int) -> None:
     s.screen.d.sync()
 
 
+def _icon(s):
+    return _wait(lambda: s.overlay().get("status"), 10.0)
+
+
+def _click_icon(s) -> None:
+    x, y, w, h = _icon(s)
+    _click(s, x + w // 2, y + h // 2)
+
+
 def _strip(s):
+    """The strip's geometry, opened with a click on the status icon when it is not up."""
+    if not s.overlay().get("strip"):
+        assert _wait(lambda: (s.overlay().get("status_state") or {}).get("state") == "ready",
+                     10.0), s.overlay()
+        _click_icon(s)
     return _wait(lambda: s.overlay().get("strip"), 10.0)
+
+
+def _state(s):
+    return (s.overlay().get("status_state") or {}).get("state")
+
+
+def test_status_icon_appears_on_focus_at_the_caret_line(s):
+    assert _icon(s), (s.overlay(), s.log_path.read_text()[-2000:])
+    x, y, w, h = s.overlay()["status"]
+    snap = s.snapshot()
+    field, caret = snap["field_rect"], snap["caret_rect"]
+    assert (w, h) == (22, 22)
+    assert abs(y + h / 2 - (caret["y"] + caret["h"] / 2)) <= 1
+    right = field["x"] + field["w"]
+    assert right - w - 4 <= x <= right + 4  # at the field's right edge, inside or just out
+    assert not x <= caret["x"] <= x + w or not y <= caret["y"] <= y + h  # never on the caret
+
+
+def test_status_icon_shows_working_then_ready(s):
+    assert _wait(lambda: _state(s) == "ready", 10.0), s.overlay()
+    assert s.overlay()["status_state"]["badge"] == "1"
+    s.screen.chord("End")
+    s.screen.chord("space")
+    seen = _wait(lambda: _state(s) == "working", 2.0, step=0.01)
+    assert seen, s.overlay()
+    # while keys may keep coming the ring stands still: nothing is redrawn per keystroke
+    assert s.overlay()["status_state"]["spinning"] is False
+    s.screen.chord("BackSpace")
+    assert _wait(lambda: _state(s) == "ready", 5.0), s.overlay()
+    assert s.overlay()["status_state"] == {"state": "ready", "badge": "1", "spinning": False}
+    assert s.buffer() == TEXT
+
+
+def test_strip_is_hidden_until_the_icon_is_clicked(s):
+    assert _wait(lambda: _state(s) == "ready", 5.0)
+    time.sleep(1.0)  # well past the settle time: it would have shown by now
+    o = s.overlay()
+    assert o["strip"] is None and o["panel"] is None
+    assert o["enter_grabbed"] is False and o["escape_grabbed"] is False
+
+
+def test_icon_click_opens_the_strip_and_the_focus_stays_in_the_app(s):
+    _click_icon(s)
+    assert _wait(lambda: s.overlay().get("strip"), 3.0), s.overlay()
+    o = s.overlay()
+    assert o["strip_text"] == FIXED and o["can_use"] is True and o["panel"] is None
+    assert o["enter_grabbed"] is True and o["escape_grabbed"] is True
+    assert s.screen.active()[0] == s.app.pid
+    _click_icon(s)  # again: closed
+    assert _wait(lambda: s.overlay().get("strip") is None, 3.0), s.overlay()
+    assert s.overlay()["enter_grabbed"] is False
+    assert s.screen.active()[0] == s.app.pid
+
+
+def test_escape_closes_the_opened_strip(s):
+    _click_icon(s)
+    assert _wait(lambda: s.overlay().get("strip"), 3.0), s.overlay()
+    s.screen.chord("Escape")
+    assert _wait(lambda: s.overlay().get("strip") is None, 3.0), s.overlay()
+    assert _wait(lambda: not s.overlay().get("escape_grabbed"), 3.0)
+    assert _wait(lambda: _state(s) == "ready", 3.0)  # the icon stays (after the grab blur)
+    assert s.buffer() == TEXT
+
+
+def test_the_icon_follows_a_window_move(s):
+    x, y, _w, _h = _icon(s)
+    win = _app_window(s)
+    g = win.get_geometry()
+    win.configure(x=g.x + 60, y=g.y + 40)
+    s.screen.d.sync()
+
+    def followed():
+        st = s.overlay().get("status")
+        return st if st and abs(st[0] - (x + 60)) <= 3 and abs(st[1] - (y + 40)) <= 3 else None
+
+    assert _wait(followed, 2.0), (s.overlay(), (x, y))
+    win.configure(x=g.x, y=g.y)
+    s.screen.d.sync()
+    assert _wait(lambda: (st := s.overlay().get("status")) and abs(st[0] - x) <= 3, 2.0)
+    assert s.screen.active()[0] == s.app.pid
 
 
 def test_collapsed_strip_shows_only_the_corrected_sentence(s):
@@ -230,6 +328,33 @@ def test_nothing_to_fix_shows_nothing(s):
     s.screen.chord("Control_L", "End")
     s.screen.chord("Return")
     assert _wait(lambda: s.buffer() == FIXED + "\n", 3.0), repr(s.buffer())
+
+
+def test_auto_mode_shows_the_strip_without_a_click(s):
+    s.config.parent.mkdir(parents=True, exist_ok=True)
+    s.config.write_text('[ui]\nsuggestions = "auto"\n')
+    time.sleep(1.5)  # the config is polled once a second
+    s.screen.chord("Control_L", "End")
+    s.screen.type("we needs a plan for this week")
+    got = _wait(lambda: s.overlay().get("strip"), 10.0)
+    assert got, s.overlay()
+    o = s.overlay()
+    assert o["can_use"] is True and "need a plan" in o["strip_text"]
+    assert o["status_state"]["state"] == "ready"
+    assert o["escape_grabbed"] is False  # shown by itself: Esc stays the app's
+    assert s.screen.active()[0] == s.app.pid
+
+
+def test_a_bad_suggestions_value_falls_back_to_on_click(s):
+    s.config.write_text('[ui]\nsuggestions = "sometimes"\n')
+    time.sleep(1.5)
+    s.screen.chord("space")
+    s.screen.chord("BackSpace")
+    assert _wait(lambda: _state(s) == "ready", 5.0), s.overlay()
+    time.sleep(0.8)
+    assert s.overlay()["strip"] is None
+    assert "config_value_ignored key=ui.suggestions" in s.log_path.read_text()
+    assert "sometimes" not in s.log_path.read_text()
 
 
 def test_no_traceback(s):

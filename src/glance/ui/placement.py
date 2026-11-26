@@ -1,6 +1,7 @@
 """Placement: caret -> previous char -> field -> window, clamped to the anchor's monitor.
 
-`place` puts the small status dot; `place_strip` the suggestion strip and its drawer.
+`place` gives the controller its anchor point; `place_strip` puts the suggestion strip and its
+drawer, `place_status` the status icon.
 """
 from __future__ import annotations
 
@@ -95,6 +96,7 @@ class Anchor:
     field: Rect | None = None
     window: Rect | None = None
     pid: int = 0
+    tail: bool = False  # text follows the caret on its line: the line may reach the right edge
 
     def moved(self, dx: int, dy: int) -> Anchor:
         def shift(r: Rect | None) -> Rect | None:
@@ -150,3 +152,56 @@ def place_strip(anchor: Anchor, height: int, monitors: list[Rect],
         y = ref.y - gap - height
     y = max(mon.y, min(y, mon.y + mon.h - height))
     return Placed(x, y, width, above)
+
+
+# ---------------------------------------------------------------------- the status icon
+
+
+def place_status(anchor: Anchor, size: int, monitors: list[Rect],
+                 gap: int = 4) -> tuple[int, int] | None:
+    """Top-left of the `size` px status icon, or None without a usable anchor.
+
+    Vertically centred on the caret line (previous character, else the field's first line);
+    horizontally at the right end of that line, inside the field's right edge. It never covers
+    the text being typed: when the caret is near that edge or text follows it on its line, the
+    icon goes just outside the field's right edge, and when the monitor has no room there,
+    above the line.
+    """
+    line = None
+    mon = None
+    for r in (anchor.caret, anchor.prev_char):
+        mon = _usable(r, monitors, caret_like=True)
+        if mon is not None:
+            line = r
+            break
+    box = None
+    for r in (anchor.field, anchor.window):
+        m = _usable(r, monitors, caret_like=False)
+        if m is not None and r is not None and r.w > 0:
+            box = r
+            mon = mon or m
+            break
+    if mon is None or (line is None and box is None):
+        return None
+    if line is not None and box is not None and not box.x <= line.x <= box.x + box.w:
+        box = None  # the field rect is stale or wrong: stay with the caret
+    if line is not None:
+        y = round(line.y + line.h / 2 - size / 2)
+    else:
+        y = box.y + gap  # type: ignore[union-attr]
+    if box is None:
+        x = line.x + line.w + 2 * gap  # type: ignore[union-attr]
+    else:
+        right = box.x + box.w
+        inside = right - size - gap
+        clear = (line is not None and not anchor.tail
+                 and line.x + line.w + 3 * gap <= inside)
+        if clear:
+            x = inside
+        elif right + gap + size <= mon.x + mon.w:
+            x = right + gap
+        else:
+            x = inside
+            ref = line or box
+            y = ref.y - size - gap  # type: ignore[union-attr]
+    return _clamp(x, y, (size, size), mon)

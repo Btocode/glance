@@ -1,0 +1,44 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    # The default suite: no real display, no real apps, no paid calls. Its X tests start
+    # their own private Xvfb. The system Python (3.10 on 22.04) is used on purpose: the GTK,
+    # AT-SPI and Wnck bindings come from apt, as they do for users.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi gir1.2-gtk-3.0 gir1.2-atspi-2.0 gir1.2-wnck-3.0 \
+            gir1.2-notify-0.7 gir1.2-secret-1 gir1.2-ayatanaappindicator3-0.1 \
+            xvfb dbus at-spi2-core zsh shellcheck
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Fetch harper-ls
+        run: scripts/fetch-harper.sh
+
+      - name: Create the venv
+        run: |
+          uv venv --python /usr/bin/python3 --system-site-packages .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+
+      - name: Run the default test suite
+        run: .venv/bin/pytest -ra

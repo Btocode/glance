@@ -22,6 +22,14 @@ from glance.ui.chip_model import ChipInputs, ChipState, ChipView, chip_view
 from glance.ui.panel_model import PanelView, build_panel
 from glance.ui.placement import Anchor, place
 from glance.ui.ports import CapturePort, GrammarPort, NotifierPort, OverlayPort, TrayPort
+from glance.ui.status_model import (
+    CHECKING_LINE,
+    NOTHING_LINE,
+    StatusInputs,
+    StatusState,
+    StatusView,
+    status_view,
+)
 from glance.ui.strip_model import StripView, strip_fix, strip_view
 
 T = TypeVar("T")
@@ -78,6 +86,11 @@ class Controller:
       refresh()          recompute the issues and redraw; call after a provider's data changed
       request_apply()    send an edit through the verified write-back path
       use_strip()        apply what the strip shows (its "Use" button, Alt+Enter)
+      toggle_strip()     the status icon's click: open the strip, or close it again
+
+    The status icon is shown for every focused writable field (`status_icon()`); the strip
+    shows by itself only with `[ui] suggestions = "auto"`, else once the user opens it (the
+    icon, the panel hotkey) until Esc, another click, a focus change or an apply.
     Providers are never called for a gated field or while paused. A provider or listener that
     raises is logged and skipped.
 
@@ -146,6 +159,9 @@ class Controller:
         self._blurred_at: float | None = None
         self._use_back: tuple[_Shown, float] | None = None  # (fix, until): waits for its field
         self._locked = False  # the screen is locked: nothing is shown or processed
+        self._strip_open = False  # the user opened the strip (icon click, panel hotkey)
+        self._strip_visible = False  # a strip is on screen now
+        self._checking = False  # the text changed; its local check has not come back yet
         self._lock_paused = False  # ...and the lock, not the user, paused us
 
     # ------------------------------------------------------------------ read-only state
@@ -184,7 +200,17 @@ class Controller:
     def strip(self) -> StripView | None:
         """What the suggestion strip shows for the current field right now (None: hidden)."""
         s = self.current
-        return None if s is None else self._strip(s, self.chip())
+        if s is None:
+            return None
+        inputs = self._chip_inputs(s)
+        content = self._content(s, inputs)
+        return self._visible_strip(s, content, self._status(s, inputs, content))
+
+    def status_icon(self) -> StatusView:
+        """What the status icon shows for the current field right now."""
+        s = self.current
+        inputs = self._chip_inputs(s)
+        return self._status(s, inputs, None if s is None else self._content(s, inputs))
 
     # ------------------------------------------------------------------ extension
 
@@ -220,6 +246,7 @@ class Controller:
         apply_id = f"a{self._apply_seq}"
         sha = text_sha256(s.text) if expected_sha256 is None else expected_sha256
         self._pending = _Pending(apply_id, s.field_id, sha, edit.replacement)
+        self._strip_open = False  # an apply closes the strip
         self._pending_timer = self._clock.call_later(
             APPLY_TIMEOUT_MS, lambda: self._apply_timed_out(apply_id))
         self._banner = self._copy_offer = None
@@ -235,6 +262,7 @@ class Controller:
         self._capture_lost = False
         if prev is None or prev.field_id != s.field_id:
             self._panel_open = False
+            self._strip_open = False
             self._banner = self._copy_offer = None
             if s.field_id != self._snoozed_field:
                 self._snoozed_field = None
@@ -266,6 +294,7 @@ class Controller:
     def handle_focus_lost(self, reason: str) -> None:
         self._blurred_at = self._clock.now() if reason == "blur" else None
         self.current = None
+        self._strip_open = False
         self.scheduler.on_focus_lost()
         self._leave_text()
         self._emit("on_focus_lost", reason)
@@ -314,20 +343,42 @@ class Controller:
         if s is None or s.gated or self._paused or self._anchor(s) is None:
             return
         self._panel_open = True
+        self._strip_open = True  # the drawer comes with the strip above it
         self._snoozed_field = None
         self._render()
 
     def close_panel(self, snooze: bool = False) -> None:
+        """Close the drawer and the strip the user opened. `snooze` (Esc) also keeps the
+        strip from coming back by itself on this field, in "auto" mode."""
         self._panel_open = False
+        self._strip_open = False
         self._banner = self._copy_offer = None
-        if snooze and self.current is not None:
+        if snooze and self.current is not None and self._auto():
             self._snoozed_field = self.current.field_id
         self._render()
 
+    def toggle_strip(self) -> None:
+        """The status icon was clicked: open the strip (with what it has, or one line saying
+        why it has nothing), or close it when it is up."""
+        s = self.current
+        if s is None:
+            return
+        if self._strip_visible:
+            self._strip_open = self._panel_open = False
+            self._banner = self._copy_offer = None
+            if self._auto():
+                self._snoozed_field = s.field_id
+        else:
+            self._strip_open = True
+            self._snoozed_field = None
+        self._render()
+
     def toggle_panel(self) -> None:
-        """The strip's "⋯": open the drawer, or close it again."""
+        """The strip's "⋯": open the drawer, or close it again (the strip stays)."""
         if self._panel_open:
-            self.close_panel()
+            self._panel_open = False
+            self._banner = self._copy_offer = None
+            self._render()
         else:
             self.open_panel()
 
@@ -378,6 +429,7 @@ class Controller:
         """Pasted where the app leaves the choice to Glance: typed over a selection, some
         editors (GtkSourceView) make every word its own undo step."""
         self._panel_open = False
+        self._strip_open = False
         method = "paste" if self._cfg().app(s.wm_class).writeback == "auto" else "auto"
         self.request_apply(edit, method, expected_sha256=sha)
 
@@ -427,6 +479,7 @@ class Controller:
         self._revert_of = None
         self._use_back = None
         self._strip_shown = None
+        self._strip_open = False
         self._blurred_at = None
         self._leave_text()
         self._capture.send_reset()
@@ -459,6 +512,7 @@ class Controller:
             self.resume()
             return
         self._paused = True
+        self._strip_open = False
         if seconds is not None:
             self._pause_until = self._clock.now() + seconds
             self._pause_timer = self._clock.call_later(seconds * 1000, self.resume)
@@ -471,6 +525,7 @@ class Controller:
         if not self._paused:
             return
         self._paused = False
+        self._strip_open = False
         self._pause_until = None
         if self._pause_timer is not None:
             self._pause_timer.cancel()
@@ -489,6 +544,7 @@ class Controller:
     def _on_typing(self) -> None:
         self._typing = True
         self._settled = False
+        self._checking = True
         self._awaiting_text = False
         self._local = []
         self._recompute()
@@ -499,14 +555,23 @@ class Controller:
         if s is None or gen != self.generation:
             return
         if not self._grammar.alive:
+            self._checking = False  # nothing will check it
             self._render()  # tray shows degraded
             return
         text = s.text
-        self._run_bg(lambda: self._grammar.check(text), lambda found: self._local_done(gen, found))
+
+        def check() -> list[Issue]:
+            try:
+                return self._grammar.check(text)
+            except Exception:  # noqa: BLE001 - a failed check must still end "checking"
+                return []
+
+        self._run_bg(check, lambda found: self._local_done(gen, found))
 
     def _local_done(self, gen: int, found: list[Issue]) -> None:
         if gen != self.generation or self.current is None:
             return  # the text changed while the check ran
+        self._checking = False
         self._local = list(found)
         self.refresh()
 
@@ -535,6 +600,7 @@ class Controller:
         self._issues = []
         self._awaiting_text = False
         self._settled = False
+        self._checking = False
         self._panel_open = False
         self._banner = self._copy_offer = None
 
@@ -640,12 +706,61 @@ class Controller:
             view = self._call("extra_strip", transform, s, view, default=view)
         return None if view.empty else replace(view, expanded=self._panel_open)
 
+    def _auto(self) -> bool:
+        return self._cfg().ui.suggestions == "auto"
+
+    def _working(self) -> bool:
+        """The text changed and is not checked yet, or an apply is on its way."""
+        return (not self._settled or self._checking or self._awaiting_text
+                or self._pending is not None)
+
+    def _content(self, s: FieldSnapshot, inputs: ChipInputs) -> StripView | None:
+        """What the strip has to say for `s`, shown or not (a snooze does not change it)."""
+        chip = chip_view(replace(inputs, snoozed=False), self._cfg().general.min_chars_chip)
+        return self._strip(s, chip)
+
+    def _status(self, s: FieldSnapshot | None, inputs: ChipInputs,
+                content: StripView | None) -> StatusView:
+        if s is None:
+            return status_view(StatusInputs(paused=self._paused))
+        usable = content is not None and content.can_use
+        return status_view(StatusInputs(
+            has_field=inputs.has_field, paused=self._paused, gated=bool(s.gated),
+            checking=self._working(), typing=not self._settled, analyzing=inputs.analyzing,
+            n_fixes=content.n_fixes if usable and content is not None else 0,
+            has_note=content is not None and not usable and not content.empty,
+            ai=inputs.ai))
+
+    def _visible_strip(self, s: FieldSnapshot, content: StripView | None,
+                       status: StatusView) -> StripView | None:
+        """The strip as it should be on screen: by itself in "auto" mode (unless snoozed),
+        else only while the user has it open - then with one line when it has nothing."""
+        if not self._strip_open:
+            if not self._auto() or s.field_id == self._snoozed_field:
+                return None
+            return content
+        if self._pending is not None:
+            return None
+        if content is not None:
+            return replace(content, on_demand=True)
+        menu = True
+        if status.state is StatusState.MUTED:
+            line = status.message or NOTHING_LINE
+            menu = not (self._paused or s.gated)
+        elif status.state is StatusState.WORKING:
+            line = CHECKING_LINE
+        else:
+            line = NOTHING_LINE
+        return StripView(note=line, expanded=self._panel_open, menu=menu, on_demand=True)
+
     def _render(self) -> None:
         if self._locked:
             self._overlay.hide_chip()
+            self._overlay.hide_status()
             self._overlay.hide_strip()
             self._overlay.hide_panel()
             self._strip_shown = None
+            self._strip_visible = False
             self._set_tray(self.current, self._chip_inputs(self.current))
             return
         s = self.current
@@ -659,10 +774,22 @@ class Controller:
             self._overlay.show_chip(view, xy[0], xy[1])
 
         anchor = None if s is None else Anchor(s.caret_rect, s.prev_char_rect, s.field_rect,
-                                               s.window_rect, s.pid)
-        strip = None if s is None or xy is None else self._strip(s, view)
-        if strip is None or anchor is None or s is None:
+                                               s.window_rect, s.pid, _tail(s.text, s.caret))
+        content = None if s is None or xy is None else self._content(s, inputs)
+        status = self._status(s, inputs, content)
+        if status.state is StatusState.HIDDEN or anchor is None or xy is None:
+            self._overlay.hide_status()
+        else:
+            self._overlay.show_status(status, anchor)
+
+        strip = None if s is None or xy is None else self._visible_strip(s, content, status)
+        hold = (self._strip_open and self._strip_visible and content is None
+                and self._working())  # typing in an open strip: it updates once checked
+        if hold:
+            pass
+        elif strip is None or anchor is None or s is None:
             self._overlay.hide_strip()
+            self._strip_visible = False
             at = self._blurred_at
             if s is not None and (at is None or self._clock.now() - at > USE_BLUR_S):
                 self._strip_shown = None  # nothing to use (a blur, and the return, keep it)
@@ -671,6 +798,7 @@ class Controller:
             self._strip_shown = None if fix is None else \
                 _Shown(s.field_id, text_sha256(s.text), fix.edit)
             self._overlay.show_strip(strip, anchor)
+            self._strip_visible = True
 
         if self._panel_open and s is not None and xy is not None:
             panel = build_panel(s.text, self._issues, self._banner, self._copy_offer)
@@ -698,3 +826,9 @@ class Controller:
             self._tray_state = state
             self._tray.set_state(state)
 
+
+
+def _tail(text: str, caret: int) -> bool:
+    """Text follows the caret on its line (so the line may run to the field's right edge)."""
+    end = text.find("\n", caret)
+    return bool(text[caret:len(text) if end < 0 else end].strip())

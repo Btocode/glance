@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/Btocode/glance/discussions
+    about: Ask how to do something or talk an idea through before filing it.
+  - name: Report a security or privacy problem
+    url: https://github.com/Btocode/glance/security/advisories/new
+    about: Text leaks, edits into the wrong window, key handling. Please report these privately, not as an issue.

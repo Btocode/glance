@@ -33,6 +33,8 @@ class StripView:
     note: str | None = None  # e.g. "Reads blunt for team channel — ⋯ for tone options"
     guard: str | None = None  # the send-guard's question, e.g. "Sounds hostile"
     expanded: bool = False  # the drawer is open under it
+    menu: bool = True  # offers "⋯" (not for a paused or private field: there is no drawer)
+    on_demand: bool = False  # opened by the user (status icon, panel hotkey): Esc closes it
 
     @property
     def can_use(self) -> bool:

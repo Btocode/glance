@@ -50,10 +50,3 @@ def test_enum_complete():
     assert {s.name for s in ChipState} == {
         "HIDDEN", "IDLE", "FIXES", "SPINNER", "TONE", "PAUSED", "PRIVATE", "AI_LIMIT", "NO_AI", "GUARD"}
 
-
-def test_only_the_quiet_states_show_the_dot():
-    from glance.ui.chip_model import ChipState, ChipView, shows_dot
-
-    dot = {ChipState.PAUSED, ChipState.PRIVATE, ChipState.AI_LIMIT, ChipState.NO_AI}
-    for state in ChipState:
-        assert shows_dot(ChipView(state, "", None)) is (state in dot)

@@ -1,4 +1,7 @@
-"""Pure chip state model: inputs in, what the chip should show out."""
+"""Pure chip state model: inputs in, the field's state out.
+
+Nothing draws the chip any more (the status icon, `status_model`, took its place); its state
+still feeds the tray, the strip's gating and the test hooks."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -68,13 +71,3 @@ def chip_view(i: ChipInputs, min_chars: int = 15) -> ChipView:
         return ChipView(ChipState.NO_AI, "Connect an AI", None)
     return ChipView(ChipState.IDLE, "", None)
 
-
-# The old chip lives on only as a small status dot, for the states that suppress the strip.
-DOT_STATES = frozenset({ChipState.PAUSED, ChipState.PRIVATE, ChipState.AI_LIMIT,
-                        ChipState.NO_AI})
-
-
-def shows_dot(view: ChipView) -> bool:
-    """True when the chip state is drawn (as the 8 px dot); every other state is the strip's
-    business, or nothing at all."""
-    return view.state in DOT_STATES

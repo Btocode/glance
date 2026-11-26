@@ -171,5 +171,6 @@ def test_strip_carries_the_guard_question(tmp_path):
     SendGuard(rig.c, rig.ai, IgnoredRules(tmp_path / "g.json")).attach()
     rig.c.handle_snapshot(snap(FILE))
     rig.clock.advance(400)
+    rig.c.toggle_strip()  # the status icon's click
     assert rig.overlay.strip.guard == "Attachment mentioned — attached?"
     assert not rig.overlay.strip.can_use

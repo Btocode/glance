@@ -73,6 +73,11 @@ class Rig:
             d.stop()
         g = GlancedUnderTest(self.session, self.tmp.mktemp("g"), backend=backend, **kw)
         g.env.update(env or {})
+        # These tests watch the strip itself (monitors, suspend, lock): it shows by itself.
+        cfg = g.dirs["cfg"] / "glance" / "config.toml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text((cfg.read_text() if cfg.exists() else "")
+                       + '\n[ui]\nsuggestions = "auto"\n')
         self.daemons.append(g)
         g.start()
         assert until(lambda: g.status().get("capture_connected")

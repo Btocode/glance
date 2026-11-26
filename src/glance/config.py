@@ -17,6 +17,9 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 
 from glance.clock import Clock, Handle
+from glance.log import log_event
+
+SUGGESTIONS_MODES = ("on_click", "auto")  # `[ui] suggestions`
 
 POLL_MS = 1000
 
@@ -116,6 +119,9 @@ class UiCfg:
     # Applies the suggestion strip, grabbed only while the strip offers a fix. Never plain
     # Return: that is "send" in chat apps and a new line everywhere else.
     use_key: str = "Alt+Return"
+    # When the suggestion strip shows: "on_click" (default) only after a click on the status
+    # icon (or the panel hotkey); "auto" by itself whenever it has something to say.
+    suggestions: str = "on_click"
 
 
 # The ONE table of default models. Glance only does short, basic text work (spell/grammar
@@ -253,11 +259,17 @@ def _parse(data: dict[str, Any]) -> Config:
     for name in ("per_minute", "per_day"):
         if getattr(backend, name) < 0:
             raise ConfigError(f"backend.{name}", "expected zero or more")
+    ui = _build(UiCfg, data.get("ui", {}), "ui")
+    if ui.suggestions not in SUGGESTIONS_MODES:
+        # A typo here must not stop Glance: the default, and a line saying which key (the
+        # value itself is not logged).
+        log_event("config_value_ignored", key="ui.suggestions")
+        ui = dataclasses.replace(ui, suggestions=UiCfg.suggestions)
     return Config(
         general=_build(GeneralCfg, data.get("general", {}), "general"),
         privacy=_build(PrivacyCfg, data.get("privacy", {}), "privacy"),
         apps=apps,
-        ui=_build(UiCfg, data.get("ui", {}), "ui"),
+        ui=ui,
         backend=backend,
         raw={k: v for k, v in data.items() if k not in known},
     )
@@ -365,6 +377,12 @@ class ConfigWatcher:
 
     def _schedule(self) -> None:
         self._timer = self._clock.call_later(POLL_MS, self._poll)
+
+    def reload(self) -> None:
+        """Check the file now (after Glance itself wrote it), not at the next poll."""
+        if self._timer is not None:
+            self._timer.cancel()
+        self._poll()
 
     def _poll(self) -> None:
         try:

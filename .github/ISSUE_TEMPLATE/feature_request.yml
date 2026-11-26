@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest an idea or an improvement for Glance.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please keep examples to made-up text; issues are public.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+      placeholder: When I write in ..., I have to ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What you would like
+      description: How should Glance behave? Mock-ups and keyboard flows are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other tools, settings or workarounds you tried.
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Does this change what text Glance reads, stores or sends?
+      description: Glance keeps typed text off disk, argv and logs, and redacts it before any AI call. Ideas that need to change that need a careful design.
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to work on this myself (see CONTRIBUTING.md).

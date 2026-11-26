@@ -204,18 +204,33 @@ def probe(xvfb, tmp_path_factory):
 
 def test_overlay_windows_never_take_the_input_focus(probe):
     assert probe["focus_before"] is True
-    assert probe["dot_override_redirect"] and probe["strip_override_redirect"]
+    assert probe["icon_override_redirect"] and probe["strip_override_redirect"]
     assert probe["panel_override_redirect"]
-    # accept_focus, focus_on_map, is_active - for the dot, the strip and the drawer
+    # accept_focus, focus_on_map, is_active - for the icon, the strip and the drawer
     assert probe["focusable"] == [[False, False, False]] * 3
     assert probe["active_after_clicks"] == [False, False]
-    assert probe["focus_after_dot_click"] and probe["focus_with_panel"]
+    assert probe["focus_after_icon_click"] and probe["focus_with_panel"]
     assert probe["focus_after_strip_clicks"] and probe["focus_after_panel_clicks"]
 
 
-def test_the_dot_is_only_for_the_quiet_states(probe):
-    assert probe["dot_for_fixes"] is None  # the strip speaks for fixes
-    assert probe["dot"] == [300, 200, 14, 14] == probe["dot_reported"]
+def test_status_icon_sits_at_the_right_end_of_the_caret_line(probe):
+    # field (300, 270, 660, 70), caret (330, 300, 1, 18): inside the right edge, centred on
+    # the caret line
+    assert probe["icon"] == [960 - 22 - 4, 309 - 11, 22, 22]
+    assert probe["icon_window"][:2] == [probe["icon"][0] - 1, probe["icon"][1] - 5]
+    assert probe["icon_tail"][0] == 960 + 4  # text after the caret: outside the field
+    assert probe["icon_moved"] == [probe["icon"][0] + 50, probe["icon"][1] + 20, 22, 22]
+    assert probe["icon_hidden"] == [None, False, False]
+
+
+def test_status_icon_states_and_its_click(probe):
+    assert probe["icon_idle"] == {"state": "idle", "badge": None, "spinning": False}
+    assert probe["icon_working"] == {"state": "working", "badge": None, "spinning": True}
+    assert probe["icon_ready"] == {"state": "ready", "badge": "3", "spinning": False}
+    assert probe["icon_muted"] == {"state": "muted", "badge": None, "spinning": False}
+    assert probe["icon_click_events"] == [["chip_click"]]
+    assert probe["icon_click_holder"] == 0  # the icon took the click...
+    assert probe["icon_corner_click_holder"] == 1  # ...but only on its circle
 
 
 def test_collapsed_strip_shows_only_the_corrected_sentence(probe):
@@ -232,7 +247,7 @@ def test_collapsed_strip_shows_only_the_corrected_sentence(probe):
 def test_strip_lets_clicks_through_except_on_its_buttons(probe):
     assert probe["click_through_sentence"] == 1
     assert probe["clicks_on_strip_reach_holder"] == 0
-    assert probe["strip_events"] == [["chip_click"], ["use", {}], ["more", {}]]
+    assert probe["strip_events"] == [["use", {}], ["more", {}]]
 
 
 def test_strip_flips_above_the_line_near_the_bottom(probe):
@@ -294,8 +309,12 @@ def test_strip_moves_fast_and_hides(probe):
 def test_dark_theme_and_screenshots(probe):
     assert probe["dark"] is True
     shots = Path(probe["shots_dir"])
-    for name in ("strip-collapsed-light", "strip-expanded-light", "strip-collapsed-dark",
-                 "strip-expanded-dark", "selection-light"):
+    names = ["strip-collapsed-light", "strip-expanded-light", "strip-collapsed-dark",
+             "strip-expanded-dark", "selection-light"]
+    names += [f"status-{state}-{theme}" for theme in ("light", "dark")
+              for state in ("idle", "working", "ready", "tone", "muted", "strip",
+                            "muted-strip")]
+    for name in names:
         assert (shots / f"{name}.png").stat().st_size > 2000, name
 
 

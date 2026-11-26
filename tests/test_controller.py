@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from glance.config import Config
+from glance.config import Config, UiCfg
 from glance.daemon.controller import APPLY_TIMEOUT_MS, FIX_INDIVIDUALLY, Controller
 from glance.grammar.filters import IssueFilter
 from glance.grammar.issues import Issue, merge_edits
@@ -31,6 +31,7 @@ PATTERNS = {
 
 
 CARET = Rect(100, 200, 1, 18)
+AUTO = Config(ui=UiCfg(suggestions="auto"))
 
 
 def snap(text=TEH, field_id="f1", gated=None, wm_class="gedit", seq=1, caret_rect=CARET):
@@ -249,6 +250,7 @@ def test_panel_closes_when_the_field_changes(rig):
 
 
 def test_snooze_hides_chip_until_field_changes(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     rig.settle()
     rig.c.open_panel()
     rig.c.close_panel(snooze=True)
@@ -908,6 +910,7 @@ def test_recheck_leaves_a_private_field_and_a_pause_alone(rig):
 
 
 def test_strip_shows_only_the_corrected_sentence(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     rig.c.handle_snapshot(snap())
     assert rig.overlay.strip is None  # not settled yet
     rig.clock.advance(400)
@@ -922,6 +925,7 @@ def test_strip_shows_only_the_corrected_sentence(rig):
 
 
 def test_nothing_to_fix_shows_no_strip(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     rig.settle(snap(text="The quick brown fox jumps"))
     assert rig.overlay.strip is None
     rig.settle(snap(text="Teh quick brwon fox"[:3] + "x" * 20))  # Teh: a safe fix
@@ -931,6 +935,7 @@ def test_nothing_to_fix_shows_no_strip(rig):
 
 
 def test_use_applies_the_sentence_in_one_verified_edit(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     s = rig.settle(snap(text=MIXED))
     assert rig.overlay.strip.text == "The quick brwon fox the end of it"
     rig.c.use_strip()
@@ -943,6 +948,7 @@ def test_use_applies_the_sentence_in_one_verified_edit(rig):
 
 
 def test_strip_hidden_when_paused_gated_or_snoozed(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     rig.settle()
     assert rig.overlay.strip is not None
     rig.c.toggle_pause()
@@ -969,6 +975,7 @@ def test_expanded_drawer_is_placed_by_the_same_anchor(rig):
 
 
 def test_extra_strip_adds_a_note_when_there_is_nothing_to_fix(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     rig.c.extra_strip.append(lambda s, v: replace(v, note="Reads blunt"))
     rig.settle(snap(text="The quick brown fox jumps"))
     assert rig.overlay.strip.note == "Reads blunt" and not rig.overlay.strip.can_use
@@ -977,6 +984,7 @@ def test_extra_strip_adds_a_note_when_there_is_nothing_to_fix(rig):
 
 
 def test_a_broken_strip_hook_is_skipped(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     def boom(_s, _v):
         raise RuntimeError
 
@@ -986,6 +994,7 @@ def test_a_broken_strip_hook_is_skipped(rig):
 
 
 def test_enter_s_own_blur_does_not_lose_the_use(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     """Enter is a key grab: the app can report the grab's blur before the press arrives."""
     s = rig.settle()
     rig.c.handle_focus_lost("blur")
@@ -1019,6 +1028,7 @@ def test_a_use_long_after_a_blur_or_for_other_text_does_nothing(rig):
 
 
 def test_enter_after_the_blur_and_the_return_still_applies_what_was_shown(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     s = rig.settle(snap(wm_class="xed"))  # an app that leaves the method to Glance
     rig.c.handle_focus_lost("blur")
     rig.c.handle_snapshot(snap(seq=2, wm_class="xed"))  # back before the key reached glanced
@@ -1030,6 +1040,7 @@ def test_enter_after_the_blur_and_the_return_still_applies_what_was_shown(rig):
 
 
 def test_use_keeps_a_per_app_writeback_choice(rig):
+    rig.cfg = AUTO  # the strip shows by itself
     from glance.config import AppCfg
 
     rig.cfg = replace(rig.cfg, apps={"gedit": AppCfg(writeback="type")})

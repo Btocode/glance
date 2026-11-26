@@ -27,6 +27,7 @@ from glance.daemon.wiring import (
     configure_api,
     hotkeys_status,
     session_problem,
+    set_suggestions,
     tone_hotkeys,
 )
 from glance.log import log_event
@@ -388,7 +389,6 @@ def main(argv: list[str] | None = None) -> int:
     from glance.daemon.supervisor import ChildSupervisor
     from glance.grammar.harper import HarperClient
     from glance.ipc import Conn, JsonLineServer
-    from glance.ui.chip_model import ChipState
     from glance.ui.edit_window_gtk import gtk_edit_host
     from glance.ui.ghost_gtk import GtkGhost
     from glance.ui.hotkeys import bind_hotkeys, system_shortcuts
@@ -423,6 +423,7 @@ def main(argv: list[str] | None = None) -> int:
             run_ai(lambda: ai_supervisor.healths(True),
                    lambda _h: (ai.refresh_status(), setup.update_tray()))
         setup.update_tray()
+        tray.set_auto_suggest(cfg.ui.suggestions == "auto")
         controller.refresh()
 
     watcher = ConfigWatcher(config_path(), clock, on_config,
@@ -443,7 +444,10 @@ def main(argv: list[str] | None = None) -> int:
     tray = GtkTray(on_pause=lambda: handle_control(controller, "pause", {}),
                    on_resume=lambda: handle_control(controller, "resume", {}),
                    on_quit=Gtk.main_quit, on_choose=lambda name: setup.choose(name),
-                   on_setup=lambda: setup.open())
+                   on_setup=lambda: setup.open(),
+                   on_auto_suggest=lambda on: set_suggestions(
+                       update_config, config_path(), on, watcher.reload),
+                   auto_suggest=watcher.current.ui.suggestions == "auto")
     if not tray.available:
         print(f"glanced: no tray icon; to get one run: {INSTALL_HINT}", file=sys.stderr)
 
@@ -524,10 +528,9 @@ def main(argv: list[str] | None = None) -> int:
             controller.open_panel()
 
     def chip_clicked() -> None:
-        if controller.chip().state is ChipState.NO_AI:
-            setup.open()  # "Connect an AI" says what the click does
-        else:
-            toggle_panel()
+        """The status icon: opens the strip (or, for a muted state, the line saying why),
+        closes it again."""
+        controller.toggle_strip()
 
     actions: dict[str, Callable[[], None]] = {
         "panel": toggle_panel,

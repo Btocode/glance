@@ -66,14 +66,19 @@ class BackendMenu:
 class GtkTray:
     """TrayPort. `available` is False when the indicator library is missing.
 
-    Menu: status line, "AI backend ▸", Pause/Resume, Quit. `set_backends` takes rows built by
-    the caller (never a blocking health check here)."""
+    Menu: status line, "AI backend ▸", "Show suggestions automatically" (a check item: on is
+    `[ui] suggestions = "auto"`), Pause/Resume, Quit. `set_backends` takes rows built by the
+    caller (never a blocking health check here)."""
 
     def __init__(self, on_pause: Callable[[], None], on_resume: Callable[[], None],
                  on_quit: Callable[[], None],
                  on_choose: Callable[[str], None] = lambda name: None,
-                 on_setup: Callable[[], None] = lambda: None) -> None:
+                 on_setup: Callable[[], None] = lambda: None,
+                 on_auto_suggest: Callable[[bool], None] = lambda on: None,
+                 auto_suggest: bool = False) -> None:
         self._indicator = None
+        self._on_auto_suggest = on_auto_suggest
+        self._syncing = False
         self._paused = False
         self._state = "active"
         self._ai_line: str | None = None
@@ -100,8 +105,11 @@ class GtkTray:
         quit_item = Gtk.MenuItem(label="Quit Glance")
         quit_item.connect("activate", lambda _item: on_quit())
         self._backends = BackendMenu(Gtk, on_choose, on_setup)
+        self._auto = Gtk.CheckMenuItem(label="Show suggestions automatically")
+        self._auto.set_active(auto_suggest)
+        self._auto.connect("toggled", self._auto_toggled)
         for item in (self._headline, Gtk.SeparatorMenuItem(), self._backends.item,
-                     self._toggle, quit_item):
+                     self._auto, self._toggle, quit_item):
             menu.append(item)
         menu.show_all()
         self._indicator.set_menu(menu)
@@ -133,6 +141,20 @@ class GtkTray:
             line = self._ai_line
         self._indicator.set_icon_full(icon, line)
         self._headline.set_label(line)
+
+    def set_auto_suggest(self, on: bool) -> None:
+        """Reflect `[ui] suggestions` (the config may have been edited by hand)."""
+        if self._indicator is None or self._auto.get_active() == on:
+            return
+        self._syncing = True
+        try:
+            self._auto.set_active(on)
+        finally:
+            self._syncing = False
+
+    def _auto_toggled(self, item: Any) -> None:
+        if not self._syncing:
+            self._on_auto_suggest(bool(item.get_active()))
 
     def _on_toggle(self, _item: object) -> None:
         (self._on_resume if self._paused else self._on_pause)()

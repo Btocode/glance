@@ -118,9 +118,10 @@ class CaptureLink:
 
 
 class PanelEscape:
-    """An OverlayPort that holds the Escape grab exactly while the panel is on screen, and
-    the use key (Alt+Return; `use_key()` says which) exactly while the strip offers a fix,
-    the same transient rule as autocomplete's Tab. Plain Return is never taken."""
+    """An OverlayPort that holds the Escape grab exactly while the drawer, or a strip the user
+    opened (`StripView.on_demand`), is on screen, and the use key (Alt+Return; `use_key()`
+    says which) exactly while the strip offers a fix, the same transient rule as
+    autocomplete's Tab. Plain Return is never taken."""
 
     def __init__(self, overlay: OverlayPort, hotkeys: HotkeyPort,
                  on_escape: Callable[[], None],
@@ -132,11 +133,15 @@ class PanelEscape:
         self._on_use = on_use
         self._use_key = use_key
         self.panel_visible = False
+        self._strip_open = False  # a strip the user opened is up: Esc closes it
+        self._esc_wanted = False
         self._grabbed = False
         self._use_grabbed = False
 
     def show_strip(self, view: Any, anchor: Any) -> None:
         self._overlay.show_strip(view, anchor)
+        self._strip_open = bool(getattr(view, "on_demand", False))
+        self._sync_escape()
         if not (view.can_use and self._on_use is not None):
             self._release_use()
         elif not self._use_grabbed:
@@ -149,33 +154,48 @@ class PanelEscape:
     def hide_strip(self) -> None:
         self._overlay.hide_strip()
         self._release_use()
+        self._strip_open = False
+        self._sync_escape()
 
     @property
     def use_grabbed(self) -> bool:
         """The use key is Glance's right now."""
         return self._use_grabbed
 
+    @property
+    def escape_grabbed(self) -> bool:
+        return self._grabbed
+
     def _release_use(self) -> None:
         if self._use_grabbed:
             self._use_grabbed = False
             self._hotkeys.ungrab("strip_use")
 
-    def show_panel(self, view: Any, *where: Any, **kw: Any) -> None:
-        self._overlay.show_panel(view, *where, **kw)
-        if not self.panel_visible:
-            self.panel_visible = True
+    def _sync_escape(self) -> None:
+        """Grab once when Esc becomes wanted, let go when it no longer is."""
+        want = self.panel_visible or self._strip_open
+        if want == self._esc_wanted:
+            return
+        self._esc_wanted = want
+        if want:
             try:
                 self._grabbed = self._hotkeys.grab("escape", ESCAPE, self._on_escape)
             except ValueError:  # no Escape key on this keyboard: the Close button remains
                 self._grabbed = False
+        elif self._grabbed:
+            self._grabbed = False
+            self._hotkeys.ungrab("escape")
+
+    def show_panel(self, view: Any, *where: Any, **kw: Any) -> None:
+        self._overlay.show_panel(view, *where, **kw)
+        self.panel_visible = True
+        self._sync_escape()
 
     def hide_panel(self) -> None:
         self._overlay.hide_panel()
         if self.panel_visible:
             self.panel_visible = False
-            if self._grabbed:
-                self._grabbed = False
-                self._hotkeys.ungrab("escape")
+        self._sync_escape()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._overlay, name)  # the rest of the OverlayPort, unchanged

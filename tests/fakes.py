@@ -18,6 +18,7 @@ from glance.ui.hotkeys import parse_chord
 from glance.ui.panel_model import PanelView
 from glance.ui.placement import Anchor
 from glance.ui.ports import WindowInfo
+from glance.ui.status_model import StatusView
 from glance.ui.strip_model import StripView
 from glance.writeback.ports import ClipSnapshot, KeysAborted
 
@@ -356,6 +357,8 @@ class FakeOverlay:
         self.panel_anchor: Anchor | None = None
         self.strip: StripView | None = None
         self.strip_anchor: Anchor | None = None
+        self.status: StatusView | None = None
+        self.status_anchor: Anchor | None = None
         self.monitor_list = monitors if monitors is not None else [Rect(0, 0, 1920, 1080)]
         self.clipboard: list[str] = []
         self.asked: list[tuple[str, Callable[[str, bool], None]]] = []
@@ -365,6 +368,12 @@ class FakeOverlay:
 
     def hide_chip(self) -> None:
         self.chip = self.chip_xy = None
+
+    def show_status(self, view: StatusView, anchor: Anchor) -> None:
+        self.status, self.status_anchor = view, anchor
+
+    def hide_status(self) -> None:
+        self.status = self.status_anchor = None
 
     def show_panel(self, view: PanelView, x: int, y: int, anchor: Anchor | None = None) -> None:
         self.panel, self.panel_xy, self.panel_anchor = view, (x, y), anchor

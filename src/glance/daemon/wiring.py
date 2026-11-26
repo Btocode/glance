@@ -70,6 +70,21 @@ def configure_api(pools: Iterable[Mapping[str, Any]], backend_cfg: Any) -> bool:
     return changed
 
 
+def set_suggestions(update_config: Callable[[Path, str, Any], None], path: Path,
+                    auto: bool, reload: Callable[[], None]) -> None:
+    """The tray's "Show suggestions automatically": write `[ui] suggestions` (keeping the
+    file's own layout) and load it now, so it applies without waiting for the next poll.
+    A config that cannot be written is logged; the setting stays as it was."""
+    from glance.config import ConfigError
+
+    try:
+        update_config(path, "ui.suggestions", "auto" if auto else "on_click")
+    except (ConfigError, OSError) as e:
+        log_event("config_write_failed", kind=type(e).__name__)
+        return
+    reload()
+
+
 def guard_panel(guard: Any) -> Callable[[Any, Any], Any]:
     """The `extra_panel` transform that puts the send-guard's warning on the panel."""
     return lambda _s, panel: replace(panel, guard=guard.label())

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="88" viewBox="0 0 256 88" role="img" aria-labelledby="t">
+  <title id="t">Glance</title>
+  <rect x="4" y="8" width="72" height="72" rx="18" fill="#e3f1ed"/>
+  <path d="M40 16 C42 33 47 41 64 44 C47 47 42 55 40 72 C38 55 33 47 16 44 C33 41 38 33 40 16 Z" fill="#0e6b5c"/>
+  <path d="M62 14 C62.8 20 64 21.2 70 22 C64 22.8 62.8 24 62 30 C61.2 24 60 22.8 54 22 C60 21.2 61.2 20 62 14 Z" fill="#0e6b5c" opacity="0.75"/>
+  <text x="94" y="60" font-family="Inter, 'Segoe UI', Ubuntu, 'Helvetica Neue', Arial, sans-serif" font-size="46" font-weight="600" letter-spacing="-1" fill="#1b2422">Glance</text>
+</svg>

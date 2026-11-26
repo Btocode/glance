@@ -10,16 +10,24 @@ from glance.protocol import ApplyRequest, Rect
 from glance.ui.chip_model import ChipView
 from glance.ui.panel_model import PanelView
 from glance.ui.placement import Anchor
+from glance.ui.status_model import StatusView
 from glance.ui.strip_model import StripView
 
 
 class OverlayPort(Protocol):
     def show_chip(self, view: ChipView, x: int, y: int) -> None:
-        """The chip's state at (x, y). Only the quiet states (`shows_dot`) are drawn, as a
-        small dot; the rest are the strip's to show."""
+        """The chip's state at (x, y): kept for the state it reports; nothing is drawn for
+        it any more (the status icon took its place)."""
         ...
 
     def hide_chip(self) -> None: ...
+
+    def show_status(self, view: StatusView, anchor: Anchor) -> None:
+        """The status icon at the right end of the caret line; it follows the field's
+        window. A click on it is the overlay's `on_chip_click`."""
+        ...
+
+    def hide_status(self) -> None: ...
 
     def show_strip(self, view: StripView, anchor: Anchor) -> None:
         """The collapsed suggestion under the field; it follows the field's window."""

@@ -1,11 +1,12 @@
-"""GtkOverlay: the suggestion strip, its drawer and the status dot (needs a live X session).
+"""GtkOverlay: the status icon, the suggestion strip and its drawer (needs a live X session).
 
 All three are `Gtk.WindowType.POPUP` windows with `accept_focus` off: the window manager never
 manages them, so they cannot take the keyboard focus from the app being written in (findings
-S5.1). The strip lets clicks through everywhere but its two buttons. Everything is built from
+S5.1). The strip lets clicks through everywhere but its two buttons; the status icon everywhere
+but its own circle. Everything is built from
 the pure views; no text is kept here beyond what is on screen.
 
-The strip and the drawer follow the window they belong to: when it moves they move with it
+The icon, the strip and the drawer follow the window they belong to: when it moves they move with it
 in the same frame (Wnck reports the new geometry); while it is being resized they hide, and
 come back placed by the fresh field rectangles capture then sends, ~150 ms after it settles.
 
@@ -27,14 +28,19 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
 from glance.protocol import Rect
-from glance.ui.chip_model import ChipState, ChipView, shows_dot
+from glance.ui.chip_model import ChipView
 from glance.ui.panel_model import IssueRow, PanelView, ToneChip
-from glance.ui.placement import Anchor, clamp_to_monitor, place_strip
+from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
+from glance.ui.status_model import StatusState, StatusView
 from glance.ui.strip_model import StripView
 from glance.ui.theme import install, rgb
 
-DOT_PX = 8
-DOT_BOX = 14  # the dot's window: a little room around it to aim at
+ICON = 22  # the status icon's circle
+# Its window: the circle at (ICON_X, ICON_Y), with room above and right for the count badge.
+ICON_X, ICON_Y = 1, 5
+ICON_BOX = (30, 28)
+BADGE_C, BADGE_R = (23.0, 7.0), 6.5
+SPIN_MS = 125  # the working ring's frame time: 8 frames a second, only while working
 DRAWER_MIN_W = 520
 SEL_W = 460  # select-anything's panel
 GAP = 4  # between the strip and the drawer
@@ -53,8 +59,6 @@ ASK_PLACEHOLDER = "e.g. make it a bullet list"
 # The sparkle of the mockup, in a 24 px box: M12 3 l1.8 4.7 L18.5 9.5 ... z
 _SPARKLE = ((12, 3), (13.8, 7.7), (18.5, 9.5), (13.8, 11.3), (12, 16), (10.2, 11.3),
             (5.5, 9.5), (10.2, 7.7))
-_DOT_TOKEN = {ChipState.PAUSED: "dot_quiet", ChipState.PRIVATE: "dot_quiet",
-              ChipState.AI_LIMIT: "dot_warn", ChipState.NO_AI: "dot_info"}
 
 
 def _popup(type_hint: Gdk.WindowTypeHint) -> Gtk.Window:
@@ -170,8 +174,10 @@ class GtkOverlay:
         screen = Gdk.Screen.get_default()
         self._composited = bool(screen is not None and screen.is_composited())
         self._shadow = SHADOW if self._composited else NO_SHADOW
-        self._chip_view: ChipView | None = None
-        self._chip_xy: tuple[int, int] | None = None
+        self._status_view: StatusView | None = None
+        self._status_xy: tuple[int, int] | None = None
+        self._spin: int | None = None  # GLib source turning the working ring
+        self._phase = 0
         self._strip_view: StripView | None = None
         self._anchor: Anchor | None = None  # the field's, as last told (or moved along)
         self._strip_rect: tuple[int, int, int, int] | None = None
@@ -198,11 +204,12 @@ class GtkOverlay:
         self._reshow: int | None = None
         self._fresh = False  # a show_strip arrived since the resize began
 
-        self._chip = _popup(Gdk.WindowTypeHint.TOOLTIP)
-        self._chip.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
-        self._chip.connect("draw", self._draw_chip)
-        self._chip.connect("button-press-event", self._chip_pressed)
-        self._chip.set_size_request(DOT_BOX, DOT_BOX)
+        self._icon = _popup(Gdk.WindowTypeHint.TOOLTIP)
+        self._icon.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self._icon.connect("draw", self._draw_icon)
+        self._icon.connect("button-press-event", self._icon_pressed)
+        self._icon.connect("map", lambda *_a: self._icon_shape())
+        self._icon.set_size_request(*ICON_BOX)
 
         self._strip = _popup(Gdk.WindowTypeHint.TOOLTIP)
         self._strip.connect("draw", _clear)
@@ -216,7 +223,8 @@ class GtkOverlay:
 
         screen = Gdk.Screen.get_default()
         if screen is not None:
-            screen.connect("monitors-changed", lambda *_a: self._layout())
+            screen.connect("monitors-changed", lambda *_a: (self._layout(),
+                                                            self._place_icon()))
         try:
             wnck = self._screen()
             wnck.connect("active-window-changed", lambda *_a: self._follow_active())
@@ -227,26 +235,29 @@ class GtkOverlay:
     # ------------------------------------------------------------------ OverlayPort
 
     def show_chip(self, view: ChipView, x: int, y: int) -> None:
-        if not shows_dot(view):  # the strip speaks for every other state
-            self.hide_chip()
-            return
-        if view != self._chip_view:
-            self._chip_view = view
-            self._chip.set_tooltip_text(view.label or None)
-            self._chip.queue_draw()
-        xy = clamp_to_monitor(x, y, (DOT_BOX, DOT_BOX), self.monitors())
-        if xy != self._chip_xy or not self._chip.get_visible():
-            self._chip_xy = xy
-            self._chip.move(*xy)
-        if not self._chip.get_visible():
-            self._chip.show()
-            _raise(self._chip)
+        """The chip's state: nothing is drawn for it any more (the status icon is)."""
 
     def hide_chip(self) -> None:
-        if self._chip.get_visible():
-            self._chip.hide()
-        self._chip_xy = None
-        self._chip_view = None
+        pass
+
+    def show_status(self, view: StatusView, anchor: Anchor) -> None:
+        if view.state is StatusState.HIDDEN:
+            self.hide_status()
+            return
+        self._anchor = anchor
+        if view != self._status_view:
+            self._status_view = view
+            self._icon_shape()
+            self._icon.queue_draw()
+        self._place_icon()
+        self._animate()
+
+    def hide_status(self) -> None:
+        if self._icon.get_visible():
+            self._icon.hide()
+        self._status_xy = None
+        self._status_view = None
+        self._animate()
 
     def show_strip(self, view: StripView, anchor: Anchor) -> None:
         self._fresh = True
@@ -305,6 +316,63 @@ class GtkOverlay:
         clipboard.store()
 
     # ------------------------------------------------------------------ placing
+
+    def _place_icon(self) -> None:
+        """The icon at the right end of the caret line; hidden while the window resizes."""
+        if self._status_view is None or self._anchor is None or self._resizing:
+            return
+        mons = self.monitors()
+        at = place_status(self._anchor, ICON, mons)
+        if at is None:
+            if self._icon.get_visible():
+                self._icon.hide()
+            self._status_xy = None
+            return
+        xy = clamp_to_monitor(at[0] - ICON_X, at[1] - ICON_Y, ICON_BOX, mons)
+        if xy != self._status_xy or not self._icon.get_visible():
+            self._status_xy = xy
+            self._icon.move(*xy)
+        if not self._icon.get_visible():
+            self._icon.show()
+            self._icon.move(*xy)  # a place set while unmapped can be lost
+            _raise(self._icon)
+            self._icon_shape()
+
+    def _icon_shape(self) -> None:
+        """Clicks reach the icon only on its circle (and badge); the rest goes through."""
+        gdk_window = self._icon.get_window()
+        if gdk_window is None:
+            return
+        region = _rounded(ICON_X, ICON_Y, ICON, ICON, ICON // 2)
+        view = self._status_view
+        if view is not None and view.badge is not None:
+            d = int(BADGE_R * 2) + 1
+            region.union(_rounded(int(BADGE_C[0] - BADGE_R), int(BADGE_C[1] - BADGE_R),
+                                  d, d, d // 2))
+        gdk_window.input_shape_combine_region(region, 0, 0)
+        if not self._composited:
+            gdk_window.shape_combine_region(region, 0, 0)
+
+    def _animate(self) -> None:
+        """Turn the working ring while the icon shows a spinning WORKING; no timer
+        otherwise (a still ring while keys keep arriving)."""
+        view = self._status_view
+        want = (view is not None and view.state is StatusState.WORKING and view.spin
+                and self._icon.get_visible())
+        if want and self._spin is None:
+            self._spin = GLib.timeout_add(SPIN_MS, self._tick)
+        elif not want and self._spin is not None:
+            GLib.source_remove(self._spin)
+            self._spin = None
+
+    def _tick(self) -> bool:
+        view = self._status_view
+        if view is None or view.state is not StatusState.WORKING or not view.spin:
+            self._spin = None
+            return GLib.SOURCE_REMOVE
+        self._phase = (self._phase + 1) % 12
+        self._icon.queue_draw()
+        return GLib.SOURCE_CONTINUE
 
     def _field_drawer(self) -> bool:
         return self._panel_view is not None and self._panel_anchor is not None
@@ -487,6 +555,7 @@ class GtkOverlay:
                 if self._panel_anchor is not None:
                     self._panel_anchor = self._anchor
                 self._layout()  # this frame: the window only moved, so did the field
+                self._place_icon()
             return
         # A resize moves the field in ways only capture can tell: hide until it is still.
         self._anchor = anchor.moved(dx, dy)
@@ -495,6 +564,8 @@ class GtkOverlay:
         if not self._resizing:
             self._resizing = True
             self._strip.hide()
+            self._icon.hide()
+            self._animate()
             if self._field_drawer():
                 self._panel.hide()
         self._fresh = False
@@ -517,6 +588,8 @@ class GtkOverlay:
         self._resizing = False
         self._strip_rect = self._panel_xy = None
         self._layout(force=True)
+        self._place_icon()
+        self._animate()
         return GLib.SOURCE_REMOVE
 
     # ------------------------------------------------------------------ "Rewrite as…"
@@ -630,11 +703,18 @@ class GtkOverlay:
 
     # ------------------------------------------------------------------ test access
 
-    def chip_geometry(self) -> tuple[int, int, int, int] | None:
-        """(x, y, w, h) of the status dot's window as placed, None while hidden."""
-        if not self._chip.get_visible() or self._chip_xy is None:
+    def status_geometry(self) -> tuple[int, int, int, int] | None:
+        """(x, y, w, h) of the status icon's circle as placed, None while hidden."""
+        if not self._icon.get_visible() or self._status_xy is None:
             return None
-        return (*self._chip_xy, DOT_BOX, DOT_BOX)
+        return (self._status_xy[0] + ICON_X, self._status_xy[1] + ICON_Y, ICON, ICON)
+
+    def status_state(self) -> dict[str, Any] | None:
+        """What the icon shows (state, badge, animating), None while hidden."""
+        v = self._status_view
+        if v is None or not self._icon.get_visible():
+            return None
+        return {"state": v.state.value, "badge": v.badge, "spinning": self._spin is not None}
 
     def strip_geometry(self) -> tuple[int, int, int, int] | None:
         if not self._strip.get_visible() or self._strip_rect is None:
@@ -654,8 +734,8 @@ class GtkOverlay:
         return (*self._panel_xy, *self._panel_size)
 
     @property
-    def chip_window(self) -> Gtk.Window:
-        return self._chip
+    def status_window(self) -> Gtk.Window:
+        return self._icon
 
     @property
     def strip_window(self) -> Gtk.Window:
@@ -669,28 +749,83 @@ class GtkOverlay:
 
     def _restyle(self) -> None:
         """The desktop switched light/dark: the CSS is swapped; redraw what cairo draws."""
-        self._chip.queue_draw()
+        self._icon.queue_draw()
         self._strip.queue_draw()
         if self._strip_view is not None:
             self._build_strip(self._strip_view)
             self._layout(force=True)
 
-    def _draw_chip(self, widget: Gtk.Widget, cr: Any) -> bool:
+    def _draw_icon(self, widget: Gtk.Widget, cr: Any) -> bool:
+        """The round Glance mark: a muted outline when idle, a turning accent arc while
+        working, accent-filled with a count badge when ready, grey when muted."""
         _clear(widget, cr)
-        view = self._chip_view
+        view = self._status_view
         if view is None:
             return True
         t = self._theme.tokens
-        cr.arc(DOT_BOX / 2, DOT_BOX / 2, DOT_PX / 2 + 1, 0, 6.2832)
-        cr.set_source_rgba(*rgb(t, "surface"), 0.9)
+        st = view.state
+        r = ICON / 2
+        cx, cy = ICON_X + r, ICON_Y + r
+        tau = 6.2832
+        fill, ring, mark = {
+            StatusState.READY: ("accent", "accent", "on_accent"),
+            StatusState.MUTED: ("card", "card_border", "dot_quiet"),
+        }.get(st, ("strip", "strip_border", "muted"))
+        cr.arc(cx, cy, r, 0, tau)
+        cr.set_source_rgb(*rgb(t, fill))
         cr.fill()
-        cr.arc(DOT_BOX / 2, DOT_BOX / 2, DOT_PX / 2, 0, 6.2832)
-        cr.set_source_rgb(*rgb(t, _DOT_TOKEN.get(view.state, "dot_quiet")))
-        cr.fill()
+        cr.arc(cx, cy, r - 0.75, 0, tau)
+        cr.set_source_rgb(*rgb(t, ring))
+        cr.set_line_width(1.5)
+        cr.stroke()
+        if st is StatusState.WORKING:
+            start = self._phase * tau / 12
+            cr.arc(cx, cy, r - 1.25, start, start + tau / 4)
+            cr.set_source_rgb(*rgb(t, "accent"))
+            cr.set_line_width(2.5)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.stroke()
+        # the sparkle, in an 18 px box, centred
+        cr.save()
+        k = 18 / 24
+        cr.translate(cx - 12 * k, cy - 9.5 * k)
+        cr.scale(k, k)
+        cr.move_to(*_SPARKLE[0])
+        for point in _SPARKLE[1:]:
+            cr.line_to(*point)
+        cr.close_path()
+        cr.restore()
+        cr.set_source_rgb(*rgb(t, "accent" if st is StatusState.WORKING else mark))
+        cr.set_line_width(1.6)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.stroke()
+        badge = view.badge
+        if badge is not None:
+            bx, by = BADGE_C
+            cr.arc(bx, by, BADGE_R, 0, tau)
+            cr.set_source_rgb(*rgb(t, "surface"))
+            cr.fill()
+            cr.arc(bx, by, BADGE_R - 0.5, 0, tau)
+            cr.set_source_rgb(*rgb(t, "accent"))
+            cr.set_line_width(1)
+            cr.stroke()
+            if badge == "•":
+                cr.arc(bx, by, 2.2, 0, tau)
+                cr.set_source_rgb(*rgb(t, "dot_warn"))
+                cr.fill()
+            else:
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                cr.set_font_size(8.5 if len(badge) == 1 else 7)
+                ext = cr.text_extents(badge)
+                cr.move_to(bx - ext.width / 2 - ext.x_bearing,
+                           by - ext.height / 2 - ext.y_bearing)
+                cr.set_source_rgb(*rgb(t, "accent"))
+                cr.show_text(badge)
         return True
 
-    def _chip_pressed(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
-        if event.button == 1:
+    def _icon_pressed(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        # A quick second click also brings a 2BUTTON_PRESS: one toggle per click.
+        if event.button == 1 and event.type == Gdk.EventType.BUTTON_PRESS:
             self._on_chip_click()
         return True
 
@@ -759,12 +894,13 @@ class GtkOverlay:
             use.set_valign(Gtk.Align.CENTER)
             row.pack_start(use, False, False, 0)
             self._strip_buttons.append(use)
-        more = self._button("⋯", "more", "glance-quiet",
-                            *(("glance-on",) if view.expanded else ()))
-        more.set_tooltip_text("Fewer options" if view.expanded else "More options")
-        more.set_valign(Gtk.Align.CENTER)
-        row.pack_start(more, False, False, 0)
-        self._strip_buttons.append(more)
+        if view.menu:
+            more = self._button("⋯", "more", "glance-quiet",
+                                *(("glance-on",) if view.expanded else ()))
+            more.set_tooltip_text("Fewer options" if view.expanded else "More options")
+            more.set_valign(Gtk.Align.CENTER)
+            row.pack_start(more, False, False, 0)
+            self._strip_buttons.append(more)
         fit = _Fit()
         fit.pack_start(row, True, True, 0)
         fit.show_all()
