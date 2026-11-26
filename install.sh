@@ -135,8 +135,9 @@ setup_paths() {
         # A package's install: its commands live in APP_BIN (/usr/bin, /opt/glance/.venv/bin);
         # the unit runs APP_BIN/glanced and uninstall.sh finds APP_BIN/glance through VENV.
         [ -n "$APP_BIN" ] || die "--setup-only needs --app-bin DIR (where glance and glanced are)"
-        [ -x "$APP_BIN/glance" ] && [ -x "$APP_BIN/glanced" ] \
-            || die "$APP_BIN has no glance and glanced commands"
+        if [ ! -x "$APP_BIN/glance" ] || [ ! -x "$APP_BIN/glanced" ]; then
+            die "$APP_BIN has no glance and glanced commands"
+        fi
         APP_BIN="$(cd "$APP_BIN" && pwd -P)"
         VENV="$(dirname "$APP_BIN")"
     fi
