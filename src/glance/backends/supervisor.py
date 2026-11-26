@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from glance.backends import cli_path
+from glance.backends import auto_choice, cli_path
 from glance.backends.base import Analysis, Backend, BackendError, Ctx, Health
 from glance.backends.budget import Budget
 from glance.backends.usage import Usage, UsageLedger
@@ -113,6 +113,7 @@ class BackendSupervisor:
         self._main_lane = threading.Lock()
         self._spec_lane = threading.Lock()
         self._spec_running: Backend | None = None
+        self._fallback: str | None = None  # auto-chosen stand-in for a missing/broken choice
 
     # -- per-call settings ---------------------------------------------------------
     def sync(self, choice: str | None = None) -> None:
@@ -134,10 +135,13 @@ class BackendSupervisor:
     # -- selection -------------------------------------------------------------
     def _order(self) -> list[str]:
         cfg = self._cfg()
-        if cfg.choice is None or cfg.choice not in self._backends:
-            return []
-        names = [cfg.choice]
-        names += [n for n in cfg.enabled if n in self._backends and n not in names]
+        names: list[str] = []
+        if cfg.choice is not None and cfg.choice in self._backends:
+            names = [cfg.choice]
+            names += [n for n in cfg.enabled if n in self._backends and n not in names]
+        fallback = self._fallback
+        if fallback is not None and fallback in self._backends and fallback not in names:
+            names.append(fallback)
         return names
 
     def _connected(self) -> list[str]:
@@ -449,11 +453,49 @@ class BackendSupervisor:
             raise self._gave_up()
 
     # -- management --------------------------------------------------------------
-    def use(self, name: str) -> None:
+    def use(self, name: str, auto: bool = False) -> None:
+        """Write `backend.choice`. `auto`: glanced chose it, not the user (doctor says so)."""
         if name not in self._backends:
             raise ValueError(f"unknown backend: {name}")
-        update_config(self._config_path or default_config_path(), "backend.choice", name)
+        path = self._config_path or default_config_path()
+        update_config(path, "backend.choice", name)
+        auto_choice.write_marker(path, name if auto else None)
+        if not auto:
+            with self._lock:
+                self._fallback = None
         self.sync(name)  # the config reloads later; the warm process must not wait for it
+
+    @property
+    def auto_chosen(self) -> str | None:
+        """The backend standing in for a missing or broken choice, if any."""
+        return self._fallback
+
+    def auto_choose(self) -> str | None:
+        """Pick an AI when `[backend] choice` is unset or the chosen one is not usable
+        (installed, not signed out). Unset: the pick is written to the config, once. Broken:
+        the config is left alone and the pick only stands in at run time. Returns the name
+        when this call started using a new one (the caller tells the user), else None.
+        Blocks (health checks): call it off the UI thread."""
+        cfg = self._cfg()
+        if cfg.choice in self._backends and auto_choice.usable(self._check_health(cfg.choice)):
+            with self._lock:
+                self._fallback = None
+            return None
+        name = auto_choice.pick_from(self.healths())
+        with self._lock:
+            if name == self._fallback:
+                return None
+            self._fallback = name
+        if name is None:
+            self._notify()
+            return None
+        log_event("backend_auto_chosen", backend=name, wrote=cfg.choice is None)
+        if cfg.choice is None:
+            update_config(self._config_path or default_config_path(), "backend.choice", name)
+            auto_choice.write_marker(self._config_path or default_config_path(), name)
+        self.sync(name)
+        self._notify()
+        return name
 
     def cancel_all(self) -> None:
         for backend in (*self._backends.values(), *self._spec.values()):

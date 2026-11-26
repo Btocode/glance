@@ -377,10 +377,10 @@ def test_app_opt_in_works_when_app_is_not_running_and_rejects_bad_ids(home, caps
     assert cli.main(["doctor", "--fix", "--app", "a/b"]) == 2
 
 
-def test_ready_backend_but_none_chosen_does_not_say_no_ai(home):
+def test_ready_backend_but_none_chosen_is_chosen_automatically(home):
     (home / ".config/glance/config.toml").write_text("")
     r = by_id(run_checks(make_env(home), CHECKS))["backend"]
-    assert r.status == "warn" and "No AI connected" not in r.detail and "claude" in r.hint
+    assert r.status == "ok" and r.detail.startswith("claude (chosen automatically")
 
 
 def test_checks_are_read_only_by_default(home):

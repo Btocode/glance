@@ -365,6 +365,13 @@ def _update(check_only: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from glance.log import quiet
+
+    with quiet():  # log lines go to glanced's log, never to the user's terminal
+        return _main(argv)
+
+
+def _main(argv: list[str] | None) -> int:
     ap = argparse.ArgumentParser(prog="glance")
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("wrapper", help="claude zsh wrapper for Ctrl+G")

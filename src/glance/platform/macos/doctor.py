@@ -4,7 +4,8 @@ Accessibility is granted per executable, and doctor usually runs from Terminal, 
 permission says nothing about glanced's. So the permission is read from glanced's status
 (`ax_trusted`, `glanced_exe`); when glanced is not running, doctor names the interpreter it
 would run with (the venv's Python, resolved). `--fix` asks glanced to show macOS's dialog,
-which then names the right binary, and opens the Accessibility pane. No check here changes
+which then names the right binary, and opens the Accessibility pane; glanced itself asks
+macOS once at start and notices the switch going on. No check here changes
 anything outside Glance's own files except loading its own LaunchAgent.
 """
 from __future__ import annotations
@@ -27,13 +28,13 @@ from glance.doctor.checks import (
 )
 from glance.paths import harper_bin
 from glance.platform.macos import launchd
+from glance.platform.macos.ax_trust import AX_PANE, open_pane_argv
 
 # scripts/fetch-harper.sh pins these (tests check they agree).
 HARPER_SHA256 = {
     "arm64": "cbe584977b11c7859743401eeef58c193e2debe97eec17103e661496e2499ba7",
     "x86_64": "701a2c49e15d98422fcafd973d7ecd0dd7d965b4bf0c4e5a81998bf3fca6c87e",
 }
-AX_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 MIN_MACOS = 13
 
 
@@ -65,8 +66,26 @@ class Platform(_Base):
         return self.ok(f"macOS {ver} on {arch}")
 
 
+def asked_line(exe: str, opened: bool) -> str:
+    """The one thing to do: macOS already lists the binary, switched off."""
+    where = "Privacy & Security → Accessibility" + (" (opened for you)" if opened else "")
+    return f"Glance asked macOS for access: switch on {os.path.basename(exe)} under {where}"
+
+
+def switch_hint(exe: str, opened: bool, waiting: bool) -> str:
+    lines = [] if opened else ["open it: glance doctor --fix"]
+    lines.append(f"the entry is {exe}")
+    lines.append("not in the list? click +, press ⌘⇧G and paste that path")
+    if not waiting:  # an older glanced does not notice the switch by itself
+        lines.append(f"then run launchctl kickstart -k gui/{os.getuid()}/{launchd.LABEL}")
+    return "\n".join(lines)
+
+
 class Accessibility(_Base):
     id, title = "accessibility", "Accessibility permission"
+
+    def __init__(self) -> None:
+        self.opened = False  # `--fix` opened the pane (the re-run after it says so)
 
     def run(self, env):
         st = env.ctl("status", {})
@@ -83,16 +102,22 @@ class Accessibility(_Base):
         if trusted is None:
             return self.result("warn", "glanced does not report it (an older version?)",
                                grant_hint(exe))
-        return self.result("fail", f"not granted to {exe}: nothing can be read or written",
-                           grant_hint(exe))
+        if trusted is True:  # glanced has it; its capture helper is starting again
+            return self.result("warn", "granted; the capture helper is restarting",
+                               "run `glance doctor` again in a few seconds")
+        return self.result("fail", asked_line(exe, self.opened),
+                           switch_hint(exe, self.opened, st.get("ax_waiting") is True))
 
     def fix(self, env):
-        """Ask glanced to show macOS's own permission dialog (it names glanced's binary), and
-        open the Accessibility pane. The user still has to switch it on: nothing can."""
+        """Open the Accessibility pane (and, if glanced never asked macOS for this binary,
+        have it show macOS's dialog, which adds the binary to the list). The user still has
+        to switch it on: nothing can."""
         if _skip(env, "GLANCE_SKIP_TCC_PROMPT"):
             return False
-        env.ctl("ax_prompt", {"prompt": True})
-        env.run(["open", AX_PANE])
+        st = env.ctl("status", {}) or {}
+        if st.get("ax_prompted") is not True:
+            env.ctl("ax_prompt", {"prompt": True})
+        self.opened = env.run(open_pane_argv())[0] == 0
         return False
 
 
@@ -237,4 +262,4 @@ CHECKS = [Platform(), Accessibility(), PythonDeps(), Harper(), GrammarEngine(),
           ConfigCheck(), Daemon(),
           MacHotkeys(), LaunchAgent(), Backend(), Updates()]
 
-__all__ = ["CHECKS", "CheckResult", "mac_env"]
+__all__ = ["AX_PANE", "CHECKS", "CheckResult", "mac_env"]

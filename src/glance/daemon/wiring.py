@@ -13,6 +13,17 @@ NEEDS_X11 = ("glance: needs an X11 session or GNOME on Wayland; not starting "
              "(KDE, Sway and other Wayland desktops are not supported yet)")
 
 RunBg = Callable[[Callable[[], Any], Callable[[Any], None]], None]
+AUTO_CHOOSE_FIRST_MS = 3_000  # after start-up: health checks then compete with nothing
+AUTO_CHOOSE_EVERY_MS = 300_000  # a CLI signed in later, or a chosen one signed out
+
+
+def repeat(clock: Any, first_ms: int, every_ms: int, fn: Callable[[], None]) -> None:
+    """`fn` after `first_ms`, then every `every_ms` (any Clock: only `call_later` needed)."""
+    def tick() -> None:
+        clock.call_later(every_ms, tick)
+        fn()
+
+    clock.call_later(first_ms, tick)
 
 
 def thread_runner(post: Callable[[Callable[[], None]], None], name: str) -> RunBg:
@@ -206,6 +217,20 @@ class AiSetup:
     def update_tray(self) -> None:
         """Rows from the cached health (fresh after a key was saved or a Test ran)."""
         self._run_bg(self.rows, self._tray.set_backends)
+
+    def auto_choose(self, notify: Callable[[str, str], None],
+                    after: Callable[[], None] = lambda: None) -> None:
+        """No AI chosen, or the chosen one is gone: use the first connected one (in the
+        background; health checks block) and say which in one notification."""
+        from glance.backends.auto_choice import notice
+
+        def done(name: str | None) -> None:
+            if name:
+                notify(*notice(name))
+                self.update_tray()
+            after()
+
+        self._run_bg(self._sup.auto_choose, done)
 
     def choose(self, name: str) -> None:
         """The tray's radio item: use `name` (the config watcher then refreshes the status)."""

@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         harper_bin,
         ignored_path,
         overrides_path,
+        state_dir,
         update_log_path,
         usage_path,
     )
@@ -112,11 +113,14 @@ def main(argv: list[str] | None = None) -> int:
     from glance.daemon.panel_actions import PanelRouter
     from glance.daemon.supervisor import ChildSupervisor
     from glance.daemon.wiring import (
+        AUTO_CHOOSE_EVERY_MS,
+        AUTO_CHOOSE_FIRST_MS,
         AiSetup,
         RunBg,
         check_label,
         configure_api,
         hotkeys_status,
+        repeat,
         set_check_mode,
         set_suggestions,
         thread_runner,
@@ -124,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     from glance.grammar.harper_native import make_client as make_grammar_client
     from glance.ipc import Conn, JsonLineServer
+    from glance.platform.macos.ax_trust import STATE_FILE as AX_STATE_FILE
+    from glance.platform.macos.ax_trust import AxTrustWatch
     from glance.platform.macos.carbon_hotkeys import CarbonHotkeys
     from glance.platform.macos.hotkeys_mac import mac_hotkeys, mac_system_shortcuts
     from glance.platform.macos.notify import MacNotifier
@@ -165,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             run_ai(lambda: ai_supervisor.healths(True),
                    lambda _h: (ai.refresh_status(), setup.update_tray()))
         setup.update_tray()
+        auto_choose()  # the choice may have been removed, or set to one that is gone
         tray.set_auto_suggest(cfg.ui.suggestions == "auto")
         tray.set_check_mode(cfg.general.check)
         controller.refresh()
@@ -255,6 +262,9 @@ def main(argv: list[str] | None = None) -> int:
     setup = AiSetup(ai_supervisor, current_config, keys, run_ai, clock.post,
                     lambda **kw: SetupNotice(notifier, **kw), tray, update_config, config_path)
     usage_window: list[Any] = []
+
+    def auto_choose() -> None:
+        setup.auto_choose(notifier.notify, ai.refresh_status)
 
     def refresh_usage() -> None:
         from glance.backends.usage import tray_lines
@@ -356,6 +366,21 @@ def main(argv: list[str] | None = None) -> int:
         lambda state: on_child_state(
             "harper", HARPER_MISSING if harper_missing else HARPER_FAILED, state))
 
+    def on_ax_trusted() -> None:
+        """The user switched Accessibility on: the capture helper started without it, so it
+        starts again (its AX observers and key events need the permission from the start)."""
+        seen.pop("capture_ax_trusted", None)
+        capture_sup.stop()
+        capture_sup.start()
+        controller.refresh()
+        notifier.notify("Glance", "Accessibility is on: Glance can now check what you type.")
+
+    ax_watch = AxTrustWatch(
+        is_trusted=lambda: bool(AX.AXIsProcessTrusted()),
+        prompt=lambda: AX.AXIsProcessTrustedWithOptions({AX.kAXTrustedCheckOptionPrompt: True}),
+        every=clock.every, exe=os.path.realpath(sys.executable),
+        state_file=state_dir() / AX_STATE_FILE, on_trusted=on_ax_trusted)
+
     class _CaptureWatch:
         def on_capture_lost(self) -> None:
             clock.call_later(50, capture_sup.poll)
@@ -386,6 +411,8 @@ def main(argv: list[str] | None = None) -> int:
     controller.extra_status.append(lambda: {
         "platform": "macos",
         "ax_trusted": bool(AX.AXIsProcessTrusted()),
+        "ax_waiting": ax_watch.waiting,  # glanced notices the switch by itself
+        "ax_prompted": ax_watch.prompted,
         "capture_ax_trusted": seen.get("capture_ax_trusted"),
         "glanced_exe": os.path.realpath(sys.executable),
         "capture_child": capture_sup.state,
@@ -402,8 +429,9 @@ def main(argv: list[str] | None = None) -> int:
     def test_message(msg_type: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         """`ax_prompt`, and (GLANCE_TEST only) what the macOS tests ask besides `test_overlay`."""
         if msg_type == "ax_prompt":  # `glance doctor --fix`: the dialog names glanced's binary
-            return {"ok": True, "trusted": bool(AX.AXIsProcessTrustedWithOptions(
-                {AX.kAXTrustedCheckOptionPrompt: bool(payload.get("prompt"))}))}
+            if payload.get("prompt") and not AX.AXIsProcessTrusted():
+                ax_watch.prompt()
+            return {"ok": True, "trusted": bool(AX.AXIsProcessTrusted())}
         if os.environ.get("GLANCE_TEST") != "1":
             return None
         if msg_type == "test_windows":
@@ -473,8 +501,9 @@ def main(argv: list[str] | None = None) -> int:
     clock.every(POLL_CHILDREN_MS, poll_children)
     controller.refresh()
     setup.update_tray()
-    if not AX.AXIsProcessTrusted():
-        log_event("ax_not_trusted", exe=os.path.basename(sys.executable))
+    # No AI chosen (or the chosen one gone) but one is connected: use it, and say so.
+    repeat(clock, AUTO_CHOOSE_FIRST_MS, AUTO_CHOOSE_EVERY_MS, auto_choose)
+    ax_watch.start()  # without the permission: macOS's dialog (once), then poll for it
     log_event("glanced_started", tray=tray.available, platform="macos")
     try:
         app.run()

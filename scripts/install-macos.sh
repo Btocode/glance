@@ -24,7 +24,7 @@ Usage: install.sh [options]          (on macOS)
 Environment (for tests and unusual setups): GLANCE_HOME (use instead of $HOME), GLANCE_SRC,
 GLANCE_REPO_URL, GLANCE_TARBALL_URL, GLANCE_UV, GLANCE_PYTHON_VERSION, GLANCE_NO_GIT,
 GLANCE_SKIP_CLONE, GLANCE_SKIP_VENV, GLANCE_SKIP_FETCH, GLANCE_SKIP_LAUNCHCTL,
-GLANCE_SKIP_DOCTOR, GLANCE_SKIP_SWVERS.
+GLANCE_SKIP_DOCTOR, GLANCE_SKIP_SWVERS, GLANCE_SKIP_OPEN_PANE.
 EOF
 }
 
@@ -450,19 +450,59 @@ run_doctor() {
     "$VENV/bin/glance" doctor </dev/null || true
 }
 
+# Does the running glanced have the Accessibility permission? "yes", "no" or "" (unknown:
+# not running yet, or --no-start).
+ax_state() {
+    "$VENV/bin/glance" status --json </dev/null 2>/dev/null | "$VENV/bin/python" -c '
+import json, sys
+try:
+    v = json.loads(sys.stdin.read() or "{}").get("ax_trusted")
+except ValueError:
+    v = None
+print({True: "yes", False: "no"}.get(v, ""))
+' 2>/dev/null || true
+}
+
+# System Settings at Privacy & Security -> Accessibility, only for a person at a terminal
+# (never in tests or CI, nor with GLANCE_SKIP_OPEN_PANE).
+open_ax_pane() {
+    [ -z "${GLANCE_SKIP_OPEN_PANE:-}" ] || return 1
+    [ "$(uname -s)" = Darwin ] || return 1
+    [ -t 1 ] || return 1
+    have open || return 1
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" \
+        </dev/null >/dev/null 2>&1
+}
+
 print_report() {
     step "Result"
-    local py
+    local py state opened=0
     py="$(cd "$VENV/bin" && pwd -P)/python"
     py="$("$py" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null \
         || echo "$VENV/bin/python")"
+    state=""
+    # real macOS only (the tests run this script on Linux, beside a real glanced)
+    if [ "$NO_START" != 1 ] && [ "$(uname -s)" = Darwin ]; then state="$(ax_state)"; fi
     say "Glance is installed."
     say ""
-    say "One more step, once: allow Glance to read and write text fields."
-    say "    System Settings → Privacy & Security → Accessibility → +"
-    say "    add: $py"
-    say "    (press ⌘⇧G in the file dialog and paste that path), switch it on, then run:"
-    say "    launchctl kickstart -k gui/$(id -u)/$LABEL"
+    if [ "$state" = yes ]; then
+        say "Accessibility: already allowed. Glance is ready."
+    else
+        if [ "$NO_START" != 1 ] && open_ax_pane; then opened=1; fi
+        say "One more step, once: let Glance read and write text fields."
+        if [ "$NO_START" = 1 ]; then
+            say "    When Glance starts, macOS asks for Accessibility: click Open System Settings"
+            say "    and switch on $(basename "$py") under Privacy & Security → Accessibility."
+        elif [ "$opened" = 1 ]; then
+            say "    Glance asked macOS for access: switch on $(basename "$py") under"
+            say "    Privacy & Security → Accessibility (opened for you)."
+        else
+            say "    Glance asked macOS for access: switch on $(basename "$py") under"
+            say "    System Settings → Privacy & Security → Accessibility."
+        fi
+        say "    Glance starts working as soon as the switch is on."
+        say "    (the entry is $py; not in the list? click +, press ⌘⇧G, paste that path)"
+    fi
     say ""
     say "    glance doctor    check the setup again at any time"
     say "    glance status    what Glance is doing right now"

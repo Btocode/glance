@@ -22,12 +22,15 @@ from glance.daemon.links import CaptureLink, FieldPanelOverlay, PanelEscape
 from glance.daemon.panel_actions import PanelRouter
 from glance.daemon.teardown import Teardown
 from glance.daemon.wiring import (
+    AUTO_CHOOSE_EVERY_MS,
+    AUTO_CHOOSE_FIRST_MS,
     SESSION_EXIT,
     AiSetup,
     RunBg,
     check_label,
     configure_api,
     hotkeys_status,
+    repeat,
     session_problem,
     set_check_mode,
     set_suggestions,
@@ -486,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
             run_ai(lambda: ai_supervisor.healths(True),
                    lambda _h: (ai.refresh_status(), setup.update_tray()))
         setup.update_tray()
+        auto_choose()  # the choice may have been removed, or set to one that is gone
         tray.set_auto_suggest(cfg.ui.suggestions == "auto")
         tray.set_check_mode(cfg.general.check)
         controller.refresh()
@@ -643,6 +647,9 @@ def main(argv: list[str] | None = None) -> int:
     setup = AiSetup(ai_supervisor, current_config, keys, run_ai, clock.post,
                     lambda **kw: OnboardingWindow(**kw), tray, update_config, config_path)
     usage_window: list[Any] = []
+
+    def auto_choose() -> None:
+        setup.auto_choose(notifier.notify, ai.refresh_status)
 
     def refresh_usage() -> None:  # main loop: the tray menu is opening
         from glance.backends.usage import tray_lines
@@ -883,6 +890,8 @@ def main(argv: list[str] | None = None) -> int:
     GLib.timeout_add(POLL_CHILDREN_MS, poll_children)
     controller.refresh()  # the tray shows a state from the first moment
     setup.update_tray()
+    # No AI chosen (or the chosen one gone) but one is connected: use it, and say so.
+    repeat(clock, AUTO_CHOOSE_FIRST_MS, AUTO_CHOOSE_EVERY_MS, auto_choose)
     log_event("glanced_started", tray=tray.available)
     try:
         Gtk.main()

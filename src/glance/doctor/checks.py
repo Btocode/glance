@@ -593,6 +593,7 @@ class Backend(_Base):
     progress = "Checking AI command-line tools (is each one signed in?)..."
 
     def run(self, env):
+        from glance.backends.auto_choice import pick, read_marker
         from glance.config import ConfigError, load_config
 
         try:
@@ -607,17 +608,20 @@ class Backend(_Base):
         except ConfigError:
             choice = None
         if ready and choice in ready:
+            if read_marker(env.config_file) == choice:
+                return self.ok(f"{choice} (chosen automatically){late}")
             return self.ok(f"{choice} connected{late}")
         if choice in slow:
             return self.result("warn", f"{choice} timed out",
                                f"`{choice}` did not answer within {HEALTH_TIMEOUT_S:.0f} s; "
                                "run `glance doctor` again in a moment.")
+        auto = pick(ready)  # what glanced uses (it picks the same one, the same way)
+        if auto is not None:
+            gone = "" if choice is None else f"; {choice} is not connected"
+            return self.result("ok", f"{auto} (chosen automatically{gone}){late}",
+                               None if choice is None else f"keep it: `glance backend use "
+                               f"{auto}`; or sign {choice} in again")
         how = "; ".join(f"{n}: {c}" for n, c in SIGN_IN.items())
-        if ready:
-            return self.result("warn", ("No AI backend chosen" if choice is None else
-                                        f"{choice} is not connected") + late,
-                               f"connected: {', '.join(sorted(ready))}; pick one with "
-                               f"`glance backend use <name>`. Local grammar checks work.")
         return self.result("warn", "No AI connected; local grammar checks still work" + late,
                            f"{how}; then `glance backend use <name>`")
 

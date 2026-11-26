@@ -51,14 +51,14 @@ def test_accessibility_names_the_binary_glanced_runs(tmp_path):
     exe = "/Users/x/.local/share/glance/python/cpython-3.12/bin/python3.12"
     e, _ = env(tmp_path, status={"ax_trusted": False, "glanced_exe": exe})
     r = md.Accessibility().run(e)
-    assert r.status == "fail" and exe in r.detail and exe in r.hint
-    assert "Privacy & Security → Accessibility" in r.hint
+    assert r.status == "fail" and "python3.12" in r.detail and exe in r.hint
+    assert "Privacy & Security → Accessibility" in r.detail
     e, _ = env(tmp_path, status={"ax_trusted": True, "capture_ax_trusted": True,
                                  "glanced_exe": exe})
     assert md.Accessibility().run(e).status == "ok"
     e, _ = env(tmp_path, status={"ax_trusted": True, "capture_ax_trusted": False,
                                  "glanced_exe": exe})
-    assert md.Accessibility().run(e).status == "fail"
+    assert md.Accessibility().run(e).status == "warn"  # capture restarts after the grant
 
 
 def test_accessibility_without_glanced_names_this_interpreter(tmp_path):
