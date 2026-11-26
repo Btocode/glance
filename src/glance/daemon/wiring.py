@@ -35,6 +35,49 @@ def thread_runner(post: Callable[[Callable[[], None]], None], name: str) -> RunB
     return run
 
 
+EXTENSION_NOTICE = ("Log out and back in once to finish setting up Glance",
+                    ("Grammar checking and the tray icon already work. The suggestions next to "
+                    "what you type come from Glance's GNOME Shell extension, which GNOME "
+                    "starts at login."))
+EXTENSION_GRACE_S = 15  # the extension says hello within a second or two when it runs
+EXTENSION_NOTICE_EVERY_S = 24 * 3600
+
+
+class ExtensionNotice:
+    """GNOME on Wayland without the shell extension yet (enabled from the next login): one
+    desktop notification, at most once per run and once a day across restarts. Never a
+    window: glanced draws nothing of its own on Wayland."""
+
+    def __init__(self, stamp: Path, notify: Callable[[str, str], None],
+                 now: Callable[[], float] | None = None) -> None:
+        import time
+
+        self._stamp, self._notify = stamp, notify
+        self._now = now or time.time
+        self._done = False
+
+    def check(self, available: bool) -> bool:
+        """Called once the grace period is over; True when the notification was sent."""
+        if available or self._done:
+            return False
+        self._done = True
+        now = self._now()
+        try:
+            last = float(self._stamp.read_text().strip())
+        except (OSError, ValueError):
+            last = None
+        if last is not None and 0 <= now - last < EXTENSION_NOTICE_EVERY_S:
+            return False
+        try:
+            self._stamp.parent.mkdir(parents=True, exist_ok=True)
+            self._stamp.write_text(f"{now:.0f}\n")
+        except OSError:
+            pass
+        log_event("extension_notice")
+        self._notify(*EXTENSION_NOTICE)
+        return True
+
+
 def session_problem(env: Mapping[str, str]) -> str | None:
     """Why glanced must not start in this session (a Wayland desktop other than GNOME, no
     display); None when it can."""
@@ -112,24 +155,18 @@ class AiSetup:
         self._make_window, self._tray = make_window, tray
         self._update_config, self._config_path = update_config, config_path
         self._window: Any = None
-        self._offered = False
 
     # main loop
 
     def open(self) -> None:
+        """Only ever on the user's click (tray "Connect an AI…" / "Set up…"): glanced never
+        opens a window by itself at start-up, "No AI connected" is the tray icon's state."""
         if self._window is None:
             self._window = self._make_window(
                 rows_provider=lambda: self.rows(refresh=True), on_use=self.use, on_test=self.test,
                 on_set_key=self.set_key, on_api_settings=self.api_settings_changed,
                 api_settings=self.api_settings)
         self._window.show()
-
-    def offer_on_start(self) -> None:
-        """Open the window once per run when no backend has been chosen yet."""
-        if not self._offered and self._cfg().backend.choice is None:
-            self._offered = True
-            log_event("onboarding_offered")
-            self.open()
 
     def update_tray(self) -> None:
         """Rows from the cached health (fresh after a key was saved or a Test ran)."""

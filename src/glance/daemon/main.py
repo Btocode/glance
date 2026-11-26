@@ -481,7 +481,21 @@ def main(argv: list[str] | None = None) -> int:
             "AskDone": gtk_overlay.on_ask_done,
         }, shell.connection, lambda: shell.owner)
         shell_link.start()
+        # first login after install: GNOME loads the extension only from the next login
+        from glance.daemon.wiring import EXTENSION_GRACE_S, ExtensionNotice
+        from glance.paths import state_dir
+
+        extension_notice = ExtensionNotice(state_dir() / "extension-notice", notifier.notify)
+
+        def extension_check() -> bool:
+            extension_notice.check(shell.available)
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add_seconds(EXTENSION_GRACE_S, extension_check)
     else:
+        # X11 only: these draw their own GTK windows, which on Wayland (even with DISPLAY
+        # set by XWayland) would be ordinary toplevel windows popping up
+
         from glance.ui.ghost_gtk import GtkGhost
         from glance.ui.hotkeys_xlib import XlibHotkeys
         from glance.ui.overlay_gtk import GtkOverlay
@@ -789,7 +803,6 @@ def main(argv: list[str] | None = None) -> int:
     GLib.timeout_add(POLL_CHILDREN_MS, poll_children)
     controller.refresh()  # the tray shows a state from the first moment
     setup.update_tray()
-    setup.offer_on_start()
     log_event("glanced_started", tray=tray.available)
     try:
         Gtk.main()

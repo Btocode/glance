@@ -43,6 +43,12 @@ def _no_healths() -> dict[str, bool]:
     return default_healths()
 
 
+def _locate(binary: str) -> str | None:
+    from glance.backends import cli_path
+
+    return cli_path.find(binary)
+
+
 @dataclass
 class DoctorEnv:
     home: Path
@@ -52,6 +58,7 @@ class DoctorEnv:
     ctl: Callable[[str, dict], dict | None]
     which: Callable[[str], str | None]
     healths: Callable[[], dict[str, bool]] = _no_healths  # backend name -> signed in
+    locate: Callable[[str], str | None] = _locate  # a CLI's absolute path, as glanced finds it
     install_override: Callable[[str], bool] | None = None  # tests inject; default: real override
     update_status: Callable[[], str] = lambda: "unknown"  # default_env: the real lookup
     apps: tuple[str, ...] = field(default_factory=tuple)  # --app ids; set by apply_fixes
@@ -546,6 +553,20 @@ class Backend(_Base):
                            f"{how}; then `glance backend use <name>`")
 
 
+class AiClis(_Base):
+    """Where each AI CLI is, searched the way glanced searches (the login shell's PATH plus
+    the usual install dirs), since glanced's own service PATH has neither."""
+    id, title = "ai_clis", "AI command-line tools"
+
+    def run(self, env):
+        from glance.backends.cli_path import CLIS, NOT_FOUND
+
+        found = {n: env.locate(n) for n in CLIS}
+        lines = [f"{n}: {found[n] or NOT_FOUND}" for n in CLIS]
+        count = sum(1 for p in found.values() if p)
+        return self.result("ok", f"{count} of {len(CLIS)} found", "\n".join(lines))
+
+
 class Wrapper(_Base):
     id, title = "wrapper", "Ctrl+G wrapper"
 
@@ -638,6 +659,6 @@ CHECKS: list[Check] = [
     Session(), ShellExtension(), A11y(), PythonDeps(), Harper(), GrammarEngine(),
     Tray(), ConfigCheck(), Daemon(),
     Hotkeys(),
-    DesktopFlags(), RunningFlags(), Firefox(), OtherElectron(), Backend(), Wrapper(),
+    DesktopFlags(), RunningFlags(), Firefox(), OtherElectron(), Backend(), AiClis(), Wrapper(),
     PathCheck(), Autostart(), ClipboardHistory(), Updates(),
 ]

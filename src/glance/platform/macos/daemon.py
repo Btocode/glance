@@ -440,7 +440,6 @@ def main(argv: list[str] | None = None) -> int:
     clock.every(POLL_CHILDREN_MS, poll_children)
     controller.refresh()
     setup.update_tray()
-    setup.offer_on_start()
     if not AX.AXIsProcessTrusted():
         log_event("ax_not_trusted", exe=os.path.basename(sys.executable))
     log_event("glanced_started", tray=tray.available, platform="macos")

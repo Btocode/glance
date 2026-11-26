@@ -10,11 +10,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
+from glance.backends import cli_path
 from glance.backends.base import (
     BackendError,
     BaseBackend,
@@ -40,26 +39,9 @@ def classify_error(text: str) -> str:
     return "unavailable"
 
 
-_resolved: dict[str, str | None] = {}
-
-
 def resolve_binary(binary: str) -> str | None:
-    """Absolute path of the CLI, resolved once through the login shell (gemini lives under nvm)."""
-    if os.sep in binary:
-        return binary if os.access(binary, os.X_OK) else None
-    if binary not in _resolved:
-        found = shutil.which(binary)
-        if not found:
-            try:
-                out = subprocess.run(
-                    ["zsh", "-lic", f"command -v {binary}"], capture_output=True, text=True, check=False,
-                    timeout=10, stdin=subprocess.DEVNULL,
-                ).stdout.strip().splitlines()
-                found = out[-1] if out and os.access(out[-1], os.X_OK) else None
-            except (OSError, subprocess.SubprocessError):
-                found = None
-        _resolved[binary] = found
-    return _resolved[binary]
+    """Absolute path of the CLI (gemini usually lives under nvm): see `cli_path`."""
+    return cli_path.find(binary)
 
 
 class GeminiBackend(BaseBackend):

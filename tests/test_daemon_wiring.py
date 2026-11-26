@@ -308,19 +308,26 @@ def _setup(choice=None):
     return setup, posted, windows, tray, keys
 
 
-def test_onboarding_opens_once_when_no_backend_is_chosen():
-    setup, _posted, windows, _tray, _keys = _setup()
-    setup.offer_on_start()
-    setup.offer_on_start()
-    assert len(windows) == 1 and windows[0].shown == 1
-    setup.open()  # the tray's "Set up..." or the "Connect an AI" chip
+def test_onboarding_never_opens_by_itself_only_on_the_users_click():
+    setup, _posted, windows, _tray, _keys = _setup()  # no backend chosen
+    assert not hasattr(setup, "offer_on_start")
+    setup.update_tray()
+    assert windows == []
+    setup.open()  # the tray's "Connect an AI…" / "Set up…"
+    setup.open()
     assert len(windows) == 1 and windows[0].shown == 2
 
 
-def test_onboarding_not_offered_with_a_backend_chosen():
-    setup, _posted, windows, _tray, _keys = _setup("claude")
-    setup.offer_on_start()
-    assert windows == []
+def test_no_daemon_start_path_opens_the_onboarding_window():
+    from pathlib import Path
+
+    import glance.daemon.main as linux_main
+
+    src = Path(linux_main.__file__).parent.parent
+    for f in (src / "daemon" / "main.py", src / "platform" / "macos" / "daemon.py"):
+        text = f.read_text()
+        assert "offer_on_start" not in text and "setup.open()" not in text.replace(
+            "on_setup=lambda: setup.open()", ""), f
 
 
 def test_onboarding_callbacks_post_to_the_main_loop():

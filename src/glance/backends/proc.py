@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from glance.backends import cli_path
 from glance.backends.base import BackendError
 from glance.log import log_event
 from glance.paths import runtime_dir
@@ -22,6 +23,15 @@ def empty_dir() -> Path:
     d.mkdir(mode=0o700, exist_ok=True)
     d.chmod(0o700)
     return d
+
+
+def resolve_argv(argv: list[str]) -> list[str]:
+    """argv with the program as an absolute path found through `cli_path` (the daemon's own
+    PATH lacks ~/.local/bin, nvm...); BackendError("unavailable") when it is nowhere."""
+    found = cli_path.find(argv[0])
+    if found is None:
+        raise BackendError("unavailable", "FileNotFoundError")
+    return [found, *argv[1:]]
 
 
 @dataclass
@@ -155,8 +165,8 @@ class ProcRunner:
     # -- internals ---------------------------------------------------------
     def _popen(self, argv: list[str], env: dict | None = None,
                die_with_parent: bool = False) -> subprocess.Popen:
-        extra = {**(self._env or {}), **(env or {})}
-        env = {**os.environ, **extra} if extra else None
+        argv = resolve_argv(argv)
+        env = {**os.environ, **cli_path.child_env(), **(self._env or {}), **(env or {})}
         try:
             return subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

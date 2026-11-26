@@ -23,7 +23,8 @@ _STATES = {
 
 
 class BackendMenu:
-    """"AI backend ▸": a radio list of the ready backends, then "Set up…". Main thread only."""
+    """"AI backend ▸": a radio list of the ready backends, then "Set up…" ("Connect an
+    AI…" while none is ready: the only way the setup window opens). Main thread only."""
 
     def __init__(self, gtk: Any, on_choose: Callable[[str], None],
                  on_setup: Callable[[], None]) -> None:
@@ -55,7 +56,7 @@ class BackendMenu:
                 self.submenu.append(gtk.MenuItem(
                     label=f"{TITLES[name]}: {SIGN_IN[name]}", sensitive=False))
         self.submenu.append(gtk.SeparatorMenuItem())
-        setup = gtk.MenuItem(label="Set up…")
+        setup = gtk.MenuItem(label="Set up…" if ready else "Connect an AI…")
         setup.connect("activate", lambda _i: self._on_setup())
         self.submenu.append(setup)
         self.submenu.show_all()

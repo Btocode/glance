@@ -24,10 +24,22 @@ def _never_run_the_real_installer_or_network(monkeypatch):
     """No test may run the published installer or ask github.com for versions.
 
     A test that wants either must inject its own fake (popen= / run=)."""
-    import glance.update as update
+    from glance import update
 
     def refuse(*_a, **_k):
         pytest.fail("a test tried to run the real installer or reach github.com; inject a fake")
 
     monkeypatch.setattr(update, "installer_argv", refuse)
     monkeypatch.setattr(update, "_git", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _never_run_the_users_login_shell(monkeypatch):
+    """The CLI PATH resolver must not start the developer's real login shell (rc files, 3 s):
+    tests see the current PATH plus the usual dirs. Tests of the resolver pass a fake."""
+    from glance.backends import cli_path
+
+    monkeypatch.setattr(cli_path, "run_shell", lambda argv, timeout_s: None)
+    cli_path.refresh()
+    yield
+    cli_path.refresh()

@@ -88,9 +88,12 @@ class BackendControl:
         refresh = p.get("refresh") is True
 
         def work() -> dict[str, Any]:
-            healths = self._sup.healths(refresh)
+            from glance.backends import cli_path
+
+            healths = self._sup.healths(refresh)  # a refresh asks the login shell for PATH
             cfg = self._backend_cfg()
-            return {"ok": True, "choice": cfg.choice,
+            where = {n: cli_path.find(n) for n in healths if n in cli_path.CLIS}
+            return {"ok": True, "choice": cfg.choice, "where": where,
                     "models": {n: effective_model(n, cfg) for n in ORDER}, "backends": {
                 n: {"installed": h.installed, "signed_in": h.signed_in, "detail": h.detail}
                 for n, h in healths.items()}}

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
+from glance.backends import cli_path
 from glance.backends.base import Analysis, Backend, BackendError, Ctx, Health
 from glance.backends.budget import Budget
 from glance.backends.usage import Usage, UsageLedger
@@ -183,6 +184,8 @@ class BackendSupervisor:
         return h
 
     def healths(self, refresh: bool = False) -> dict[str, Health]:
+        if refresh:  # a CLI installed since start-up: ask the login shell for PATH again
+            cli_path.refresh()
         out = {name: self._check_health(name, refresh) for name in self._backends}
         self._notify()
         return out

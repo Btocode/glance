@@ -110,6 +110,7 @@ def _refused(reply: dict[str, Any]) -> int:
 
 def _backend_list() -> int:
     from glance.backends.base import Health
+    from glance.backends.cli_path import NOT_FOUND
     from glance.ui.onboarding_model import build_rows, model_text
 
     reply, code = _ask("backend_list", {"refresh": True}, SLOW_REQUEST_S)
@@ -121,10 +122,13 @@ def _backend_list() -> int:
     if not any(r.state == "ready" for r in rows):
         print("No AI connected — run one of the commands below, then: "
               "glance backend use <name>")
+    where = reply.get("where") or {}
     for r in rows:
         mark = "  (in use)" if r.selected and r.state == "ready" else ""
         print(f"{r.name:<9} {r.state_text.lower():<16} {r.command}{mark}")
         print(f"{'':<9} model: {model_text(r.model, r.name)}")
+        if r.name in where:  # where glanced (not this shell) finds the CLI
+            print(f"{'':<9} {'found at ' + where[r.name] if where[r.name] else NOT_FOUND}")
     return 0
 
 

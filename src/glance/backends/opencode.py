@@ -19,6 +19,7 @@ import subprocess
 import threading
 from collections.abc import Iterator
 
+from glance.backends import cli_path
 from glance.backends.base import (
     BackendError,
     BaseBackend,
@@ -26,7 +27,7 @@ from glance.backends.base import (
     error_detail,
     extract_json_object,
 )
-from glance.backends.proc import ProcRunner, _terminate_group, empty_dir
+from glance.backends.proc import ProcRunner, _terminate_group, empty_dir, resolve_argv
 
 _URL = re.compile(r"listening on (http://127\.0\.0\.1:\d+)")
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -95,9 +96,10 @@ class OpencodeBackend(BaseBackend):
             argv = [self.binary, "serve", "--port", "0", "--hostname", "127.0.0.1", "--pure"]
             try:
                 proc = subprocess.Popen(
-                    argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    resolve_argv(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, text=True, cwd=empty_dir(),
-                    env={**os.environ, **self.runner.env, **self._env}, start_new_session=True,
+                    env={**os.environ, **cli_path.child_env(), **self.runner.env, **self._env},
+                    start_new_session=True,
                 )
             except (FileNotFoundError, PermissionError) as e:
                 raise BackendError("unavailable", type(e).__name__) from e

@@ -114,7 +114,7 @@ class MacTray:
             for name in ORDER:
                 self._add(self._backends, f"{TITLES[name]}: {SIGN_IN[name]}", None).setEnabled_(False)  # type: ignore[attr-defined]
         self._backends.addItem_(NSMenuItem.separatorItem())
-        self._add(self._backends, "Set up…", self._on_setup)
+        self._add(self._backends, "Set up…" if ready else "Connect an AI…", self._on_setup)
         self._ai_line = headline(rows)
         self._show_state()
 

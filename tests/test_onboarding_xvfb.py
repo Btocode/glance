@@ -70,7 +70,7 @@ def test_tray_backend_menu(probe):
         "Claude: run `claude` and log in", "Codex: run `codex login`",
         "Gemini: run `gemini` to authenticate (or use an API key)",
         "OpenCode: run `opencode auth login`", "API key: run `glance backend set-key`",
-        "Set up…"]
+        "Connect an AI…"]
     assert probe["menu_ready"] == ["Claude", "Set up…"]
     assert probe["menu_active"] == ["Claude"]
     assert probe["menu_picked_on_rebuild"] == []

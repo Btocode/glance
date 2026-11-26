@@ -302,7 +302,7 @@ def test_nothing_typed_reaches_the_disk_or_the_log(rig):
     assert "Traceback" not in rig.daemon.log()
 
 
-def test_no_backend_lists_and_offers_onboarding(rig, tmp_path_factory):
+def test_no_backend_lists_and_never_opens_onboarding_by_itself(rig, tmp_path_factory):
     rig.daemon.stop()  # one glanced per display: the hotkeys are the first one's otherwise
     bare = Glanced(rig.session, tmp_path_factory.mktemp("bare"), fake_ai=False)
     try:
@@ -314,10 +314,9 @@ def test_no_backend_lists_and_offers_onboarding(rig, tmp_path_factory):
         listed = bare.request("backend_list", {}, timeout_s=30.0)
         assert listed["ok"] and listed["choice"] is None
         assert not any(b["signed_in"] for b in listed["backends"].values()), listed
-        assert wait_for(lambda: "onboarding_offered" in bare.log(), 10.0)
-        assert wait_for(lambda: "Connect an AI" in window_titles(rig.session, bare.proc.pid),
-                        10.0), bare.log()[-2000:]
         assert wait_for(lambda: bare.status().get("ai") == "none", 10.0), bare.status()
+        # "No AI connected" is the tray's state; the window opens only from the tray menu
+        assert "Connect an AI" not in window_titles(rig.session, bare.proc.pid)
     finally:
         bare.stop()
     assert "Traceback" not in bare.log()
