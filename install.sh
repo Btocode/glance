@@ -210,6 +210,10 @@ try:
 except Exception:
     gi = None
     need.append("python3-gi")
+try:
+    import cairo  # the overlay draws with pycairo through gi
+except Exception:
+    need.append("python3-gi-cairo")
 for ns, ver, pkg in (
     ("Gtk", "3.0", "gir1.2-gtk-3.0"), ("Atspi", "2.0", "gir1.2-atspi-2.0"),
     ("Wnck", "3.0", "gir1.2-wnck-3.0"), ("Notify", "0.7", "gir1.2-notify-0.7"),
