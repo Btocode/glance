@@ -20,6 +20,7 @@ from glance.doctor.checks import (
     CheckResult,
     ConfigCheck,
     DoctorEnv,
+    GrammarEngine,
     Updates,
     _Base,
     _skip,
@@ -232,7 +233,8 @@ def mac_env() -> DoctorEnv:
     return replace(default_env(), procs=list, healths=mac_healths)
 
 
-CHECKS = [Platform(), Accessibility(), PythonDeps(), Harper(), ConfigCheck(), Daemon(),
+CHECKS = [Platform(), Accessibility(), PythonDeps(), Harper(), GrammarEngine(),
+          ConfigCheck(), Daemon(),
           MacHotkeys(), LaunchAgent(), Backend(), Updates()]
 
 __all__ = ["CHECKS", "CheckResult", "mac_env"]

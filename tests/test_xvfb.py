@@ -5,6 +5,7 @@ Xvfb started by the fixture, and XTEST input is sent to that server only.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import queue
@@ -336,7 +337,25 @@ def _wait(pred, timeout: float, step: float = 0.05):
 def daemon(xvfb, tmp_path_factory):
     """glanced on the Xvfb display with its own D-Bus session (so its capture helper sees
     an empty accessibility bus, never the user's applications) and temp XDG directories.
-    It starts with an invalid config.toml."""
+    It starts with an invalid config.toml. Grammar runs on the harper-ls child (these tests
+    supervise it), even where the in-process engine is installed."""
+    with _glanced(xvfb, tmp_path_factory, "harper-ls") as d:
+        yield d
+
+
+@pytest.fixture(scope="module")
+def native_daemon(xvfb, tmp_path_factory):
+    """The same glanced with grammar in its own process (glance_core)."""
+    from glance.grammar.harper_native import available
+
+    if not available():
+        pytest.skip("glance_core is not built")
+    with _glanced(xvfb, tmp_path_factory, "native") as d:
+        yield d
+
+
+@contextlib.contextmanager
+def _glanced(xvfb, tmp_path_factory, grammar: str):
     if shutil.which("dbus-run-session") is None:
         pytest.skip("dbus-run-session is not installed")
     if not HARPER.exists():
@@ -361,7 +380,8 @@ def daemon(xvfb, tmp_path_factory):
     env = {**os.environ, "DISPLAY": xvfb, "NO_AT_BRIDGE": "1", "GDK_BACKEND": "x11",
            "XDG_SESSION_TYPE": "x11", "PATH": str(tools),
            "XDG_RUNTIME_DIR": str(dirs["rt"]), "XDG_CONFIG_HOME": str(dirs["cfg"]),
-           "XDG_DATA_HOME": str(dirs["data"]), "GLANCE_STRICT_LOG": "1"}
+           "XDG_DATA_HOME": str(dirs["data"]), "GLANCE_STRICT_LOG": "1",
+           "GLANCE_GRAMMAR": grammar}
     for name in ("WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS"):
         env.pop(name, None)
     log_path = home / "glanced.stderr"
@@ -423,6 +443,7 @@ def test_daemon_status_and_sockets(daemon):
     st = daemon.request("status")
     assert st["ok"] and st["harper_alive"] and st["capture_connected"]
     assert (st["capture_child"], st["harper_child"]) == ("up", "up")
+    assert st["grammar_engine"] == "harper-ls"
     want = "complete,fix_all,panel,pause,revert,selection,tone1,tone2,tone3,tone4"
     assert _wait(lambda: daemon.request("status")["hotkeys_grabbed"] == want, 5.0)
     st = daemon.request("status")
@@ -476,6 +497,19 @@ def test_daemon_restarts_a_killed_harper_and_is_degraded_meanwhile(daemon):
     assert _wait(lambda: daemon.request("status")["harper_alive"] is False, 2.0, 0.01)
     assert _wait(lambda: daemon.request("status")["harper_alive"] is True, 5.0)
     assert daemon.children("harper-ls") not in ([], [pid])
+
+
+def test_daemon_runs_grammar_in_process(native_daemon):
+    d = native_daemon
+    assert _wait(lambda: d.request("status")["harper_alive"], 10.0)
+    st = d.request("status")
+    assert st["grammar_engine"] == "native" and st["harper_child"] == "up"
+    assert d.children("harper-ls") == []
+    pid = d.request("ping")["pid"]
+    os.kill(pid, 15)
+    assert d.proc.wait(timeout=10) == 0
+    log = d.log_path.read_text()
+    assert "Traceback" not in log and "grammar_native_error" not in log
 
 
 def test_daemon_stops_cleanly_on_sigterm(daemon):

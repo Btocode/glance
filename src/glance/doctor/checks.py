@@ -343,6 +343,23 @@ class Harper(_Base):
         return env.run(["bash", str(script)], timeout=FETCH_TIMEOUT_S)[0] == 0
 
 
+class GrammarEngine(_Base):
+    """Which engine glanced checks grammar with: Harper in its own process (glance_core) or
+    the harper-ls child. Informational: both work; harper-ls stays installed as the fallback."""
+
+    id, title = "grammar_engine", "Grammar engine in use"
+
+    def run(self, env):
+        from glance.grammar import harper_native as hn
+
+        if hn.engine_choice({**os.environ, **env.environ}) == hn.NATIVE:
+            return self.ok(f"in-process (glance_core {hn.core_version()}, "
+                           f"Harper {hn.harper_version()})")
+        why = (f"{hn.ENGINE_ENV}=harper-ls" if hn.available()
+               else "glance_core is not installed")
+        return self.ok(f"harper-ls, a separate process ({why})")
+
+
 class Tray(_Base):
     id, title = "tray", "Tray icon support"
 
@@ -618,7 +635,8 @@ class Updates(_Base):
 
 
 CHECKS: list[Check] = [
-    Session(), ShellExtension(), A11y(), PythonDeps(), Harper(), Tray(), ConfigCheck(), Daemon(),
+    Session(), ShellExtension(), A11y(), PythonDeps(), Harper(), GrammarEngine(),
+    Tray(), ConfigCheck(), Daemon(),
     Hotkeys(),
     DesktopFlags(), RunningFlags(), Firefox(), OtherElectron(), Backend(), Wrapper(),
     PathCheck(), Autostart(), ClipboardHistory(), Updates(),

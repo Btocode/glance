@@ -1,8 +1,11 @@
 """Issue model and edit helpers. All offsets are code points into the field text."""
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import pairwise
+from typing import NamedTuple
 
 from glance.protocol import Edit
 
@@ -19,6 +22,40 @@ class Issue:
     end: int
     replacements: tuple[str, ...]
     safe: bool
+
+
+SPELL_RULE = "SpellCheck"
+_RULE_KEY = re.compile(r"^[A-Z][A-Za-z0-9]*$")
+
+
+class HarperLint(NamedTuple):
+    """One Harper lint before it becomes an Issue, from either engine (harper-ls or the
+    in-process `glance_core`). Offsets are code points; `code` is Harper's rule key."""
+
+    start: int
+    end: int
+    code: object
+    message: str
+    replacements: tuple[str, ...]
+
+
+def harper_issues(lints: Iterable[HarperLint]) -> list[Issue]:
+    """The one place a Harper lint becomes an Issue, so both engines behave the same."""
+    out: list[Issue] = []
+    seen: set[tuple[int, int, str]] = set()
+    for lint in lints:
+        start, end, code, repl = lint.start, lint.end, lint.code, lint.replacements
+        # Some spelling lints carry the replacement word as their rule key ("The" for
+        # "Teh"): not a rule then.
+        rule = code if isinstance(code, str) and _RULE_KEY.match(code) and code not in repl \
+            else SPELL_RULE
+        key = (start, end, str(code))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Issue(f"harper:{rule}:{start}:{end}", "harper", rule, lint.message,
+                         start, end, repl, len(repl) == 1 and rule != SPELL_RULE))
+    return out
 
 
 def utf16_to_cp(text: str, line: int, character: int) -> int:

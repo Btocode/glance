@@ -1,0 +1,5 @@
+# glance_core wheels (the in-process grammar engine), pinned by SHA-256.
+# Filled by .github/workflows/core-wheels.yml when a core-v<version> tag is released:
+#   <sha256>  <wheel file name>
+# scripts/fetch-core.sh installs the line matching this machine from the GitHub release
+# core-v<version in the file name>. No matching line: Glance keeps using harper-ls.

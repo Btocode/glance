@@ -1,0 +1,29 @@
+[package]
+name = "glance_core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Glance's display-free core: in-process Harper grammar checking for Python."
+publish = false
+
+[lib]
+name = "glance_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned to the exact engine of the harper-ls 3.3.0 release Glance shipped before (crates.io
+# only has 3.2.0). Default features, as harper-ls builds it, so lints match.
+harper-core = { git = "https://github.com/Automattic/harper", tag = "v3.3.0" }
+
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
+
+[dependencies.pyo3]
+version = "0.30"
+features = ["abi3-py310"]
+optional = true
+
+[features]
+default = ["python"]
+# `cargo test --no-default-features` runs the pure-Rust tests without a Python to link.
+python = ["dep:pyo3", "pyo3/extension-module"]

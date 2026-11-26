@@ -400,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
     from glance.daemon.power_dbus import on_battery
     from glance.daemon.session import SessionEvents
     from glance.daemon.supervisor import ChildSupervisor
-    from glance.grammar.harper import HarperClient
+    from glance.grammar.harper_native import make_client as make_grammar_client
     from glance.ipc import Conn, JsonLineServer
     from glance.session import GNOME_WAYLAND, session_kind
     from glance.ui.edit_window_gtk import gtk_edit_host
@@ -513,7 +513,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"glanced: no tray icon; to get one run: {INSTALL_HINT}", file=sys.stderr)
 
     link = CaptureLink(clock.post)
-    harper = SupervisedHarper(HarperClient(harper_bin(), dictionary_path()),
+    grammar_client = make_grammar_client(harper_bin(), dictionary_path())
+    harper = SupervisedHarper(grammar_client,
                               on_change=lambda: clock.post(lambda: controller.recheck()))
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="glance-bg")
     # AI calls block for seconds: they get their own threads, so grammar checks never wait
@@ -657,7 +658,8 @@ def main(argv: list[str] | None = None) -> int:
     capture_sup = ChildSupervisor(
         "capture", lambda: subprocess.Popen([sys.executable, "-m", "glance.capture.main"]),
         clock, lambda state: on_child_state("capture", CAPTURE_FAILED, state))
-    harper_missing = not harper_bin().exists()
+    harper_engine = getattr(grammar_client, "engine", "harper-ls")
+    harper_missing = harper_engine == "harper-ls" and not harper_bin().exists()
     harper_sup = ChildSupervisor(
         "harper", harper.spawn, clock,
         lambda state: on_child_state(
@@ -698,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     controller.extra_status.append(lambda: {
         "capture_child": capture_sup.state,
         "harper_child": harper_sup.state,
+        "grammar_engine": harper_engine,
         **hotkeys_status(hotkeys.grabbed(), bound_chords),
         "hotkeys_unavailable": ",".join(sorted(hotkey_problems)) or None,
         "tray": tray.available,

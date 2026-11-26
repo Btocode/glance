@@ -25,6 +25,9 @@ Usage: install.sh [options]
   --no-wrapper            do not install the `claude` wrapper, and do not ask
   --no-desktop-overrides  do not add launcher overrides for Chrome, Brave, Slack, Discord
   --no-start              enable Glance at login but do not start it now
+  --with-rust             build the in-process grammar engine (glance_core) from source with
+                          cargo instead of using a pinned prebuilt wheel; without either,
+                          grammar runs on harper-ls, as before
   -h, --help              show this help
 
 Environment (for tests and unusual setups): GLANCE_HOME (use instead of $HOME), GLANCE_SRC,
@@ -50,7 +53,7 @@ step() {
 # ---------------------------------------------------------------------- options and paths
 
 parse_args() {
-    FROM_LOCAL=0 WITH_APT=0 YES=0 NO_WRAPPER=0 NO_OVERRIDES=0 NO_START=0
+    FROM_LOCAL=0 WITH_APT=0 YES=0 NO_WRAPPER=0 NO_OVERRIDES=0 NO_START=0 WITH_RUST=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --from-local) FROM_LOCAL=1 ;;
@@ -59,6 +62,7 @@ parse_args() {
             --no-wrapper) NO_WRAPPER=1 ;;
             --no-desktop-overrides) NO_OVERRIDES=1 ;;
             --no-start) NO_START=1 ;;
+            --with-rust) WITH_RUST=1 ;;
             -h | --help) usage; exit 0 ;;
             *) usage >&2; die "unknown option: $1" ;;
         esac
@@ -525,6 +529,20 @@ fetch_harper() {
     bash "$SRC/scripts/fetch-harper.sh" </dev/null
 }
 
+# The in-process engine: a pinned wheel when one exists for this machine (or a source build
+# with --with-rust). Never fatal: without it glanced runs harper-ls, fetched above.
+install_core() {
+    if [ -n "${GLANCE_SKIP_FETCH:-}" ] || [ -n "${GLANCE_SKIP_VENV:-}" ]; then
+        return
+    fi
+    local -a args=("$VENV/bin/python")
+    [ "$WITH_RUST" = 1 ] && args+=(--with-rust)
+    if [ -f "$SRC/scripts/fetch-core.sh" ]; then
+        bash "$SRC/scripts/fetch-core.sh" "${args[@]}" </dev/null \
+            || note "the in-process grammar engine is not installed; grammar runs on harper-ls"
+    fi
+}
+
 # ---------------------------------------------------------------------- step 6: systemd
 
 user_systemctl() {
@@ -807,6 +825,7 @@ main() {
     write_manifest
     make_venv                      # 3
     fetch_harper                   # 4
+    install_core                   # 4
     install_links                  # 5
     install_unit                   # 6
     install_extension              # 6 (GNOME on Wayland)

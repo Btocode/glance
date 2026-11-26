@@ -8,3 +8,5 @@ spike/out/
 .claude/
 .superpowers/
 spike/
+rust/target/
+*.so

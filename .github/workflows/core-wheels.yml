@@ -1,0 +1,111 @@
+name: core-wheels
+
+# Builds the glance_core abi3 wheels (one per platform, any CPython >= 3.10) when a
+# core-v<version> tag is pushed, attaches them to that tag's GitHub Release with their
+# SHA-256 sums, and opens a pull request that pins them in scripts/core-wheels.sha256
+# (the installers only install a wheel pinned there).
+
+on:
+  push:
+    tags: ["core-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-22.04, target: x86_64, manylinux: "2_17" }
+          - { os: ubuntu-22.04, target: aarch64, manylinux: "2_17" }
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-14, target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/core-v')
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#core-v}"
+          have="$(sed -n 's/^version = "\(.*\)"$/\1/p' rust/glance_core/Cargo.toml | head -n 1)"
+          [ "$want" = "$have" ] || { echo "tag $want != crate $have"; exit 1; }
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: rust/glance_core
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+          sccache: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: rust/glance_core/dist/*.whl
+          if-no-files-found: error
+
+  release:
+    needs: wheels
+    if: startsWith(github.ref, 'refs/tags/core-v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Smoke-test the Linux x86_64 wheel
+        run: |
+          python3 -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*manylinux*_x86_64.whl
+          /tmp/smoke/bin/python -c "
+          import glance_core
+          g = glance_core.Grammar()
+          assert any(d['rule'] == 'SpellCheck' for d in g.check('A zqxjword here.'))
+          print('glance_core', glance_core.__version__, 'Harper', glance_core.HARPER_VERSION)"
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum glance_core-*.whl | sort -k2 > ../core-wheels.list
+          cat ../core-wheels.list
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp core-wheels.list dist/SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" dist/*.whl dist/SHA256SUMS \
+            --title "glance_core ${GITHUB_REF_NAME#core-v}" \
+            --notes "In-process grammar engine wheels (abi3, CPython >= 3.10). SHA-256: SHA256SUMS." \
+            || gh release upload "$GITHUB_REF_NAME" dist/*.whl dist/SHA256SUMS --clobber
+
+      - name: Pin the wheels (pull request)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="core-pins/${GITHUB_REF_NAME}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch -c "$branch" origin/main
+          { sed -n '/^#/p' scripts/core-wheels.sha256; cat core-wheels.list; } > pins.new
+          mv pins.new scripts/core-wheels.sha256
+          git add scripts/core-wheels.sha256
+          git commit -m "Pin glance_core ${GITHUB_REF_NAME#core-v} wheels"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Pin glance_core ${GITHUB_REF_NAME#core-v} wheels" \
+            --body "SHA-256 pins for the wheels of release ${GITHUB_REF_NAME}, written by the core-wheels workflow."

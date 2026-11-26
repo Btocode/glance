@@ -17,6 +17,8 @@ Usage: install.sh [options]          (on macOS)
 
   --from-local            install from the checkout this script sits in
   --no-start              install the LaunchAgent but do not start Glance now
+  --with-rust             build the in-process grammar engine (glance_core) from source with
+                          cargo instead of using a pinned prebuilt wheel
   -h, --help              show this help
 
 Environment (for tests and unusual setups): GLANCE_HOME (use instead of $HOME), GLANCE_SRC,
@@ -50,11 +52,12 @@ step() {
 # ---------------------------------------------------------------------- options and paths
 
 parse_args() {
-    FROM_LOCAL=0 NO_START=0
+    FROM_LOCAL=0 NO_START=0 WITH_RUST=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --from-local) FROM_LOCAL=1 ;;
             --no-start) NO_START=1 ;;
+            --with-rust) WITH_RUST=1 ;;
             # Linux-only options are accepted and ignored, so one command works everywhere.
             --with-apt | --yes | -y | --no-wrapper | --no-desktop-overrides) ;;
             -h | --help) usage; exit 0 ;;
@@ -334,6 +337,20 @@ fetch_harper() {
     XDG_DATA_HOME="$DATA_ROOT" bash "$SRC/scripts/fetch-harper.sh" </dev/null
 }
 
+# The in-process engine: a pinned wheel when one exists for this Mac (or a source build with
+# --with-rust). Never fatal: without it glanced runs harper-ls, fetched above.
+install_core() {
+    if [ -n "${GLANCE_SKIP_FETCH:-}" ] || [ -n "${GLANCE_SKIP_VENV:-}" ]; then
+        return
+    fi
+    [ -f "$SRC/scripts/fetch-core.sh" ] || return 0
+    local rust=""
+    [ "$WITH_RUST" = 1 ] && rust="--with-rust"
+    # shellcheck disable=SC2086  # $rust is one flag or nothing
+    uv_env GLANCE_UV="$UV" bash "$SRC/scripts/fetch-core.sh" "$VENV/bin/python" $rust </dev/null \
+        || note "the in-process grammar engine is not installed; grammar runs on harper-ls"
+}
+
 # ---------------------------------------------------------------------- step 5: symlinks
 
 is_our_link() {
@@ -467,6 +484,7 @@ main() {
     write_manifest
     make_venv                      # 3
     fetch_harper                   # 4
+    install_core                   # 4
     install_links                  # 5
     install_agent                  # 6
     run_doctor                     # 7

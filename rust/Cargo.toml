@@ -1,0 +1,16 @@
+[workspace]
+members = ["glance_core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# Never "abort": a panic inside Harper must reach catch_unwind and become a Python exception,
+# not take glanced down with it.
+panic = "unwind"
+strip = "symbols"

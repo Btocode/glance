@@ -1,0 +1,75 @@
+# One text per line; "\n" inside a line is a newline in the text. Lines starting with # are comments.
+Teh quick brown fox.
+Teh cat saw a zqxjword.
+Teh cat
+fine
+i think so
+A Zorblax here.
+😀 Thsi is fine.
+I 😀 recieve it
+I will recieve the report from teh team today and then reply soon.
+I will recieve the report from teh team today and then reply to them soon.
+teh cat sat on teh mat
+a teh
+abcdef
+banglish is teh thing
+kubectl rollout restart the nginx ingress. Then chek teh logs.
+@jhon https://exmaple.test `teh` and teh
+Hi there. ami kal ashbo\nok?
+ami kal ashbo na. I will sned the file.
+ami wnet hom
+Teh quick brown fox jump over the lazy dog, i think its fine. Teh quick brown fox jump over the lazy dog, i think its fine.
+She dont like apples.
+Their going to the park tomorow.
+Its a beautiful day, isnt it?
+I could of done better.
+He go to school every day.
+We was there yesterday.
+The the dog barked.
+This is a a test.
+Me and him went to the store.
+Your welcome!
+I have alot of work to do.
+Lets meet at 5pm.
+I recieved you're email.
+He is more taller than me.
+Between you and I, this is fine.
+The data shows that the results was wrong.
+Could you please send me the the file asap?
+I'm going too the store to buy some milk.
+There are less people here than yesterday.
+Its' raining outside.
+irregardless of the weather we will go.
+The meeting is on monday at 3 PM.
+i love programming in python and rust.
+Check out https://github.com/Automattic/harper for more info.
+Email me at someone@example.com if you have questions.
+Run `pip install glance` and then `glanced --help`.
+def foo(x): return x + 1  # this is pythn code
+The API returns a JSON object with an `id` field.
+I use VS Code and Neovim, and sometimes Emacs.
+Amar naam Rahim. ami tomake bhalobashi.
+kemon acho? ami bhalo achi, thanks for asking.
+apni ki kal office e asben? I need the report.
+bhai eta ki thik ache? looks good to me.
+আমি বাংলায় লিখছি। This is English.
+Great job 🎉🎉 on teh release!
+🙂🙃 recieve the packge plz
+𝓗𝓮𝓵𝓵𝓸 wrold in fancy letters.
+Café naïve résumé façade coöperate.
+The quick brown fox jumps over the lazy dog.
+First line has a speling error.\nSecond line has anothr one.\n\nThird after a blank line, teh end.
+😀 first\n😀 secnd line with emoji\nthird line normal teh
+Multiple   spaces   here and  teh  word.
+What is you're name? Where is they're house?
+I seen him yesterday at the the mall.
+In 2024 we shipped 3 releases, and 10% of users upgraded.
+Mr. Smith arrived at 10 a.m. and left at noon.
+This sentence is fine, but this one isnt.
+"Hello," she said, "how are you doing todya?"
+He said:'no way' and left.
+THIS IS ALL CAPS WITH A TYPPO.
+camelCaseWord and snake_case_word are identifiers.
+I am going to to the store; we need eggs, milk ,and bread.
+Thanks!! See you soon...
+what makes us more importent in the age of ai is likethe ability to coprehend things when someone is getting out fo control. we need a better way to handle it

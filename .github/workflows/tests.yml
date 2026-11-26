@@ -38,7 +38,35 @@ jobs:
       - name: Create the venv
         run: |
           uv venv --python /usr/bin/python3 --system-site-packages .venv
-          uv pip install --python .venv/bin/python -e ".[dev]"
+          uv pip install --python .venv/bin/python -e ".[dev]" maturin
+
+      # The in-process grammar engine (rust/glance_core). Built into the venv so the default
+      # suite runs the native unit tests and the harper-ls parity test against the real
+      # harper-ls fetched above.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Rust unit tests
+        working-directory: rust
+        run: |
+          cargo fmt --check
+          cargo test --no-default-features
+
+      - name: Build glance_core into the venv
+        working-directory: rust/glance_core
+        env:
+          VIRTUAL_ENV: ${{ github.workspace }}/.venv
+        run: ../../.venv/bin/maturin develop --release --uv
 
       - name: Run the default test suite
         run: .venv/bin/pytest -ra
+
+      - name: Grammar parity (glance_core vs harper-ls 3.3.0)
+        env:
+          GLANCE_REQUIRE_CORE: "1"
+        run: .venv/bin/pytest -ra -s tests/test_grammar_parity.py tests/test_harper_native.py

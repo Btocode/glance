@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from glance.grammar.issues import Issue, utf16_to_cp
+from glance.grammar.issues import SPELL_RULE, HarperLint, Issue, harper_issues, utf16_to_cp
 
 URI = "file:///glance/field.txt"
 # A lint slower than `timeout_s` gets this much more before the check gives up: the first
@@ -26,8 +25,7 @@ URI = "file:///glance/field.txt"
 # then keeps, ~38 MB, so it is not built ahead). A check that gave up returned nothing, and
 # nothing checked again until the text changed.
 SLOW_LINT_S = 2.0
-SPELL_RULE = "SpellCheck"
-_RULE_KEY = re.compile(r"^[A-Z][A-Za-z0-9]*$")
+__all__ = ["SPELL_RULE", "FrameReader", "HarperClient", "diagnostics_to_issues", "frame"]
 
 
 def frame(msg: dict) -> bytes:
@@ -78,28 +76,19 @@ def _replacements(actions: list[dict]) -> tuple[str, ...]:
 def diagnostics_to_issues(text: str, diagnostics: list[dict],
                           actions: dict[int, list[dict]]) -> list[Issue]:
     """`actions` maps the index in `diagnostics` to its code actions."""
-    out: list[Issue] = []
-    seen: set[tuple[int, int, str]] = set()
+    lints: list[HarperLint] = []
     for idx, d in enumerate(diagnostics):
         r = d["range"]
-        start = utf16_to_cp(text, r["start"]["line"], r["start"]["character"])
-        end = utf16_to_cp(text, r["end"]["line"], r["end"]["character"])
-        repl = _replacements(actions.get(idx, []))
-        code = d.get("code")
-        # `code` is the replacement word for some spelling lints: not a rule key then.
-        rule = code if isinstance(code, str) and _RULE_KEY.match(code) and code not in repl \
-            else SPELL_RULE
-        key = (start, end, str(code))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(Issue(f"harper:{rule}:{start}:{end}", "harper", rule,
-                         str(d.get("message", "")), start, end, repl,
-                         len(repl) == 1 and rule != SPELL_RULE))
-    return out
+        lints.append(HarperLint(
+            utf16_to_cp(text, r["start"]["line"], r["start"]["character"]),
+            utf16_to_cp(text, r["end"]["line"], r["end"]["character"]),
+            d.get("code"), str(d.get("message", "")), _replacements(actions.get(idx, []))))
+    return harper_issues(lints)
 
 
 class HarperClient:
+    engine = "harper-ls"
+
     def __init__(self, binary: Path, user_dict: Path, timeout_s: float = 0.5) -> None:
         self._binary = binary
         self._user_dict = user_dict
