@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from glance.backends.base import Analysis
+from glance.backends.base import Analysis, BackendError
 from glance.config import CHECK_MODES, Config, GeneralCfg, load_config, update_config
 from glance.daemon.controller import OPEN_WAIT_MS
 from glance.daemon.panel_actions import PanelRouter
 from glance.daemon.wiring import check_label, set_check_mode
+from glance.grammar.corrections import strip_replacement
 from glance.ui.hotkeys import parse_chord
 from glance.ui.hover_menu import (
     CHECK,
@@ -201,22 +202,130 @@ def test_no_ai_call_while_typing_one_on_the_shortcut(tmp_path):
     assert [c.kind for c in r.backend.calls] == ["analyze"]  # nothing speculative after
 
 
-def test_strip_waits_for_the_analysis(tmp_path):
+def test_strip_opens_at_once_with_a_loader_then_the_analysis(tmp_path):
     r = AiRig(tmp_path, analysis=TEH_AI, delay_ms=1500)
     r.c.handle_snapshot(ai_t.snap())
     r.c.check_now()
     r.clock.advance(100)
-    assert r.overlay.strip is None and r.overlay.status.state is StatusState.WORKING
+    strip = r.overlay.strip
+    assert strip is not None and strip.loading == "Checking with Claude…"
+    assert not strip.can_use  # the keycap waits for the AI
+    assert r.overlay.status.state is StatusState.WORKING
     r.clock.advance(1500)
-    assert r.overlay.strip is not None
+    strip = r.overlay.strip
+    assert strip is not None and strip.loading is None and strip.can_use
 
 
-def test_slow_analysis_opens_with_what_there_is(tmp_path):
+def test_slow_analysis_keeps_the_loader_until_it_is_back(tmp_path):
     r = AiRig(tmp_path, analysis=TEH_AI, delay_ms=OPEN_WAIT_MS + 3000)
     r.c.handle_snapshot(ai_t.snap())
     r.c.check_now()
     r.clock.advance(OPEN_WAIT_MS + 10)
-    assert r.overlay.strip is not None
+    assert r.overlay.strip is not None and r.overlay.strip.loading is not None
+    r.clock.advance(3000)
+    assert r.overlay.strip.loading is None
+
+
+# ------------------------------------------------- the user's sentence (AI-first accuracy)
+
+USER = "hey how are yo doing , seem sal alright , how to get  in place"
+# What Harper says about it, as in the user's report: spacing, and "sal" ("Sal", "say").
+USER_HARPER = {" ,": ("Spacing", (",",)), "  ": ("Spacing", (" ",)),
+               "sal": ("SpellCheck", ("Sal", "say"))}
+USER_AI = Analysis("casual", False, None, (), corrected=(
+    "Hey how are you doing, seems sal alright, how to get in place"))
+
+
+def _user_rig(tmp_path, analysis=USER_AI, delay_ms=2000):
+    r = AiRig(tmp_path, analysis=analysis, patterns=USER_HARPER, delay_ms=delay_ms)
+    r.c.handle_snapshot(ai_t.snap(USER))
+    r.c.check_now()
+    r.clock.advance(50)
+    return r
+
+
+def _shown(r):
+    return "".join(seg.text for seg in r.overlay.strip.segments)
+
+
+def _fix_list(r):
+    """The drawer's one-line fix list: flagged -> first replacement."""
+    return [(row.flagged, row.replacements[0]) for row in r.overlay.panel.issues]
+
+
+def _applied(text, issues):
+    out, pos = [], 0
+    for i in sorted(issues, key=lambda i: i.start):
+        out += [text[pos:i.start], i.replacements[0]]
+        pos = i.end
+    return "".join(out) + text[pos:]
+
+
+def test_user_sentence_ai_replaces_the_local_preview(tmp_path):
+    r = _user_rig(tmp_path)
+    r.c.toggle_panel()
+    # At once: the quick local fixes as a preview, the loader, the drawer's skeletons.
+    assert r.overlay.strip.loading == "Checking with Claude…"
+    preview = _shown(r)
+    assert "doing," in preview and "get in" in preview
+    assert "Sal" not in preview  # a capitalised guess at a name is not a confident fix
+    assert r.overlay.panel.loading
+    r.clock.advance(2000)
+    # The AI's corrected text replaced it, in place.
+    assert r.overlay.strip.loading is None and not r.overlay.panel.loading
+    assert _shown(r) == "Hey how are you doing, seems sal alright, how to get in place"
+    # ... and the drawer lists exactly the changes the strip shows, nothing else.
+    assert all(i.source == "llm" for i in r.c.issues)
+    assert _applied(USER, r.c.issues) == _shown(r)
+    fixes = _fix_list(r)
+    assert ("hey", "Hey") in fixes and ("yo", "you") in fixes and ("seem", "seems") in fixes
+    assert ("doing ,", "doing,") in fixes and ("get  in", "get in") in fixes
+    assert not any("say" in rep or "Sal" in rep for _f, rep in fixes)
+    shown = _shown(r)
+    r.c.use_strip()
+    (apply,) = r.c._capture.applies
+    assert apply.edit.replacement == shown
+
+
+def test_user_sentence_with_the_reported_style_of_answer(tmp_path):
+    """The answer style from the report: punctuation, case, agreement and a missing word,
+    all minimal edits; the strip shows exactly it and the fix list lists exactly it."""
+    answer = "Hey, how are you doing? Seems all right — how do we get it in place?"
+    r = _user_rig(tmp_path, analysis=Analysis("casual", False, None, (), corrected=answer),
+                  delay_ms=0)
+    r.c.toggle_panel()
+    assert _shown(r) == answer
+    assert all(i.source == "llm" for i in r.c.issues)
+    assert _applied(USER, r.c.issues) == answer
+    fixes = _fix_list(r)
+    assert ("hey", "Hey,") in fixes and ("yo", "you") in fixes and ("doing ,", "doing?") in fixes
+    assert ("seem", "Seems") in fixes
+    assert not any(rep in ("Sal", "say") for _f, rep in fixes)
+
+
+def test_user_sentence_strip_and_panel_agree_without_the_ai(tmp_path):
+    r = _user_rig(tmp_path, analysis=None, delay_ms=0)
+    r.backend.script(BackendError("timeout"))
+    r.c.handle_snapshot(ai_t.snap(USER + " "))
+    r.c.check_now()
+    r.clock.advance(50)
+    r.c.toggle_panel()
+    strip = r.overlay.strip
+    assert strip.loading is None and strip.can_use
+    assert strip.meta == "AI check timed out — showing quick fixes"
+    fixes = _fix_list(r)
+    assert ("sal", "say") not in fixes  # the list never disagrees with the strip
+    assert _applied(r.c.current.text, [i for i in r.c.issues
+                                       if strip_replacement(r.c.current.text, i)]) \
+        .strip() == _shown(r)
+
+
+def test_ai_corrections_keep_only_minimal_edits_and_protected_text(tmp_path):
+    rewrite = Analysis("casual", False, None, (), corrected=(
+        "Hello there! I hope you are doing well; it all seems fine. How can we set it up?"))
+    r = _user_rig(tmp_path, analysis=rewrite, delay_ms=0)
+    assert not any(i.source == "llm" for i in r.c.issues)  # a rewrite is not a correction
+    assert "doing," in _shown(r)  # the quick fixes stay
 
 
 # ---------------------------------------------------------------- hover menu

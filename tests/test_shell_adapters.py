@@ -150,8 +150,11 @@ def test_status_piece_says_how_the_mark_is_drawn():
     work = sc.status_piece(StatusView(StatusState.WORKING, spin=True), 0, 0)["look"]
     assert work["pulse"] and 0 < work["glow"] <= 1
     still = sc.status_piece(StatusView(StatusState.WORKING, spin=False), 0, 0)["look"]
-    assert not still["pulse"]  # keys still arriving: no animation
-    assert sc.LOOK["pulse"][0] == 1.0 and len(sc.LOOK["pulse"]) == 12
+    assert not still["pulse"] and not still["arc"]  # keys still arriving: no animation
+    assert work["arc"] and work["glow_token"] == "icon_working"
+    # a clearly visible breath: 0.35 -> 0.75 opacity over a 1.2 s cycle
+    assert len(sc.LOOK["pulse"]) == sc.LOOK["frames"] == 24 and sc.LOOK["frame_ms"] == 50
+    assert min(sc.LOOK["pulse"]) == 0.35 and max(sc.LOOK["pulse"]) == 0.75
     assert sc.LOOK["glow_pad"] == 0.25
 
 
@@ -528,3 +531,23 @@ print(bad.length === 0 ? 'OK' : JSON.stringify(bad));
     done = subprocess.run([gjs, "-m", str(script)], capture_output=True, text=True, timeout=30,
                           check=False)
     assert done.stdout.strip() == "OK", done.stdout + done.stderr
+
+
+def test_loading_pieces_carry_the_loader_and_skeletons():
+    from glance.ui.panel_model import PanelView, ToneChip, suggested_box
+    from glance.ui.strip_model import Segment, StripView
+
+    strip = StripView((Segment("Hey", True),), 1, loading="Checking with Claude…")
+    piece = sc.strip_piece(strip, 0, 0, 400, {"accent": "#0e6b5c"}, "Alt+Return")
+    assert piece["loading"] == "Checking with Claude…" and piece["use_disabled"]
+    assert not piece["can_use"]
+    view = PanelView(tone_chips=(ToneChip("friendlier", "Friendlier", 1),
+                                 ToneChip("shorter", "Shorter", 3, "Short.", "ready")),
+                     loading=True)
+    box = suggested_box(view, strip)
+    assert box.loading == "Checking with Claude…" and box.segments == ()
+    sugg = sc.suggested_piece(box, {"highlight": "#fff", "text": "#000"}, "Alt+Return")
+    panel = sc.panel_piece(view, 0, 0, 520, True, sugg)
+    assert panel["suggested"]["loading"] and panel["view"]["loading"]
+    assert [c["skeleton"] for c in panel["view"]["tone_chips"]] == [True, False]
+    assert sc.LOOK["skeleton"]["suggested"] and sc.LOOK["arc"]["sweep"] > 0

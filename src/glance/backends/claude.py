@@ -1,4 +1,13 @@
-"""claude CLI backend: structured analyze via --json-schema, streaming rewrite via stream-json."""
+"""claude CLI backend: analyze as one JSON answer (`-p --output-format json`), streaming
+rewrite via stream-json.
+
+Analyze does not use `--json-schema`: the CLI implements it as a tool call the model must
+make, then a second turn after the tool result, which doubled the call's time (measured on
+haiku: 8.6 s cold with the schema, 4.1 s without; the old 8 s budget timed out). The prompt
+spells out the JSON instead and `parse_analysis` checks it, with one repair call when it is
+off. Analyze never uses a warm process either: a stream-json session reasons before it
+answers (`thinking_tokens` frames; 4.5-10.6 s from the feed, slower than a cold `-p` call).
+"""
 from __future__ import annotations
 
 import json
@@ -7,7 +16,13 @@ import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
-from glance.backends.base import BackendError, BaseBackend, Health, error_detail
+from glance.backends.base import (
+    BackendError,
+    BaseBackend,
+    Health,
+    error_detail,
+    extract_json_object,
+)
 from glance.backends.proc import IdleProc, ProcRunner
 from glance.backends.usage import Usage, make_usage
 
@@ -68,7 +83,8 @@ class ClaudeBackend(BaseBackend):
     # Findings S6.2: a warm (pre-spawned, idle) process saves ~0.86 s a call for ~195 MB idle
     # RSS. The user prioritises speed, so it is on for the chosen backend when that is claude
     # (`backend.warm`, see BackendCfg). The supervisor turns it on with `set_warm`; a backend
-    # that is not in use never has one. Up to two idle processes (analyze and rewrite).
+    # that is not in use never has one. One idle process, for rewrites: analyze is faster
+    # cold (see the module docstring).
     WARM_ENABLED = True
 
     def __init__(self, runner: ProcRunner, model: str = "haiku", binary: str = "claude",
@@ -89,9 +105,9 @@ class ClaudeBackend(BaseBackend):
         ]
 
     def argv_json(self, system: str, schema: dict) -> list[str]:
-        return self._base(system) + [
-            "--json-schema", json.dumps(schema), "--output-format", "json",
-        ]
+        """`schema` is described in the system prompt, not passed as `--json-schema` (which
+        costs a second model turn)."""
+        return self._base(system) + ["--output-format", "json"]
 
     def argv_stream(self, system: str) -> list[str]:
         return self._base(system) + [
@@ -101,15 +117,9 @@ class ClaudeBackend(BaseBackend):
     def _argv_warm(self, kind: str) -> list[str]:
         """A warm process cannot know the call's system prompt (it depends on the profile,
         tone and app), so it starts with a fixed one and the call's goes in the message."""
-        from glance.backends.prompts import ANALYZE_SCHEMA
-
-        argv = self._base(WARM_SYSTEM) + ["--input-format", "stream-json", "--output-format",
-                                          "stream-json", "--verbose"]
-        if kind == "analyze":
-            argv += ["--json-schema", json.dumps(ANALYZE_SCHEMA)]
-        else:
-            argv += ["--include-partial-messages"]
-        return argv
+        return self._base(WARM_SYSTEM) + ["--input-format", "stream-json", "--output-format",
+                                          "stream-json", "--verbose",
+                                          "--include-partial-messages"]
 
     # -- warm spawn ------------------------------------------------------------
     @property
@@ -122,7 +132,6 @@ class ClaudeBackend(BaseBackend):
         if not on:
             self.close()
         elif not was:
-            self.prewarm("analyze")
             self.prewarm("rewrite")
 
     def set_model(self, model: str) -> None:
@@ -140,16 +149,16 @@ class ClaudeBackend(BaseBackend):
     def _restart_warm(self) -> None:
         self.close()
         if self._warm_on:
-            self.prewarm("analyze")
             self.prewarm("rewrite")
 
     def prewarm(self, kind: str, system: str | None = None) -> None:
         """Start an idle process for `kind` in the background (`system` is accepted for
-        callers that have one; the warm path does not need it). One per kind."""
-        if not self._warm_on:
-            return
+        callers that have one; the warm path does not need it). One per kind; "analyze"
+        never has one (it runs cold, see the module docstring)."""
         if kind not in ("analyze", "rewrite"):
             raise ValueError(f"unknown prewarm kind: {kind}")
+        if not self._warm_on or kind == "analyze":
+            return
         with self._spawn_lock:
             if self._spawner is None:  # ONE long-lived thread does every spawn: a process
                 # started with PR_SET_PDEATHSIG dies when the thread that started it ends
@@ -197,20 +206,6 @@ class ClaudeBackend(BaseBackend):
 
     # -- primitives --------------------------------------------------------------
     def _run_json(self, system: str, user: str, schema: dict, timeout_s: float) -> dict:
-        idle = self._take_idle("analyze") if self._warm_on else None
-        if idle is not None:
-            try:
-                result = None
-                for obj in _json_lines(idle.feed(self._warm_message(system, user), timeout_s)):
-                    if obj.get("type") == "result":
-                        result = obj
-            finally:
-                idle.kill()
-                self.prewarm("analyze")
-            if result is None:
-                raise BackendError("unavailable", "no result")
-            self._add_usage(claude_usage(result))
-            return self._structured(result)
         res = self.runner.run(self.argv_json(system, schema), user, timeout_s)
         try:  # the CLI prints one indented JSON object over many lines
             obj = json.loads(res.stdout)
@@ -232,13 +227,7 @@ class ClaudeBackend(BaseBackend):
         so = obj.get("structured_output")
         if isinstance(so, dict):
             return so
-        try:
-            parsed = json.loads(obj.get("result") or "")
-        except ValueError:
-            parsed = None
-        if not isinstance(parsed, dict):
-            raise BackendError("bad_output", "no structured_output")
-        return parsed
+        return extract_json_object(str(obj.get("result") or ""))  # fences/prose tolerated
 
     def _run_stream(self, system: str, user: str, timeout_s: float) -> Iterator[str]:
         idle = self._take_idle("rewrite") if self._warm_on else None

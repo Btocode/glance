@@ -13,30 +13,35 @@ KINDS = (*sorted(CORRECTION_KINDS), *SUGGESTION_KINDS)
 FLAGS = ("hostile", "missing_attachment", "missing_link")
 MAX_ISSUES = 40  # the whole message is reviewed, not one sentence
 
+MAX_SUGGESTIONS = 5  # rewording ideas for the drawer; corrections come as `corrected`
+
+_ISSUE_ITEM: dict = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["quote", "occurrence", "message", "replacement", "kind"],
+    "properties": {
+        "quote": {"type": "string"},
+        "occurrence": {"type": "integer", "minimum": 1},
+        "message": {"type": "string"},
+        "replacement": {"type": ["string", "null"]},
+        "kind": {"type": "string", "enum": list(KINDS)},
+    },
+}
+
+# The model returns the whole draft corrected (`corrected`) rather than a list of spans to
+# fix: one string is simpler for it to get right than quotes and occurrence counts, and the
+# corrections are recovered by diffing it against the draft (`backends.corrected`), where
+# every one is checked to be a minimal edit. `suggestions` are rewordings for the drawer only.
 ANALYZE_SCHEMA: dict = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["tone", "mismatch", "reason", "issues", "flags"],
+    "required": ["corrected", "tone", "mismatch", "reason", "suggestions", "flags"],
     "properties": {
+        "corrected": {"type": "string"},
         "tone": {"type": "string", "maxLength": 24},
         "mismatch": {"type": "boolean"},
         "reason": {"type": ["string", "null"]},
-        "issues": {
-            "type": "array",
-            "maxItems": MAX_ISSUES,
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["quote", "occurrence", "message", "replacement", "kind"],
-                "properties": {
-                    "quote": {"type": "string"},
-                    "occurrence": {"type": "integer", "minimum": 1},
-                    "message": {"type": "string"},
-                    "replacement": {"type": ["string", "null"]},
-                    "kind": {"type": "string", "enum": list(KINDS)},
-                },
-            },
-        },
+        "suggestions": {"type": "array", "maxItems": MAX_SUGGESTIONS, "items": _ISSUE_ITEM},
         "flags": {"type": "array", "items": {"type": "string", "enum": list(FLAGS)}},
     },
 }
@@ -99,27 +104,29 @@ def _context_line(ctx: Ctx) -> str:
 
 def analyze_system(ctx: Ctx) -> str:
     return (
-        "You are a writing assistant that reviews a draft message. "
+        "You proofread a draft message. "
         + _context_line(ctx)
         + " <glance_text> holds the whole draft (or, for a very long one, the part around the "
-        "writer's cursor): read all of it for context and review every sentence and paragraph "
-        "in it, not only the last one. "
-        "Judge the tone of the draft and whether it mismatches the target tone (give a short "
-        f"reason only when it does, else null). List at most {MAX_ISSUES} concrete issues, in "
-        "the order they appear; each quotes the "
-        "exact problematic substring from the draft (as short as possible), its 1-based "
-        "occurrence among identical substrings, a short message, a replacement (or null) and its "
-        "kind. Corrections come first, of kind spelling, grammar, punctuation, capitalization, "
-        "agreement or missing_word: each is the minimal edit that makes the writer's own words "
-        "correct. Keep their words, word choice and tone: never reword, rephrase, formalise or "
-        "'improve' a phrase that is already correct (\"handle it\" stays \"handle it\"). Only "
-        "then, optionally, suggestions of kind clarity, style, wording or tone for a phrase that "
-        "is correct but could read better; never label a rewording as a correction. "
-        "Set flags only when true: hostile (the draft is abusive), missing_attachment (it mentions "
-        "an attachment that cannot be there), missing_link (it refers to a link that is absent). "
+        "writer's cursor). Reply with one JSON object with exactly these keys, in this order. "
+        "\"corrected\": the whole draft with only its mistakes corrected: spelling and typos, "
+        "grammar and agreement, a clearly missing small word, punctuation (no space before a "
+        "comma, no doubled spaces) and capitalisation (sentence starts, \"I\"). Make the "
+        "minimal edit for each mistake and keep everything else exactly as written: the "
+        "writer's words, word choice, slang, tone, line breaks and formatting. Never reword, "
+        "rephrase, formalise, shorten or 'improve' a phrase that is already correct (\"handle "
+        "it\" stays \"handle it\"). With nothing wrong, it is the draft unchanged. "
+        "\"tone\": the draft's tone in one or two words. \"mismatch\": whether that tone "
+        "mismatches the target tone. \"reason\": a short reason only when it does, else null. "
+        f"\"suggestions\": at most {MAX_SUGGESTIONS} (usually none) for a phrase that is "
+        "correct but could read better, each {\"quote\": the exact substring of the draft, "
+        "\"occurrence\": its 1-based occurrence among identical substrings, \"message\": "
+        "short, \"replacement\": text or null, \"kind\": clarity, style, wording or tone}. "
+        "\"flags\": only those that are true of hostile (the draft is abusive), "
+        "missing_attachment (it mentions an attachment that cannot be there), missing_link (it "
+        "refers to a link that is absent). "
         + _COMMON
         + (_MIXED if ctx.mixed_language else "")
-        + " Answer with the JSON object only."
+        + " Answer with the JSON object only: no code fence, no explanation."
     )
 
 
@@ -226,11 +233,18 @@ def parse_analysis(obj: dict) -> Analysis:
     if not isinstance(obj, dict):
         raise _bad("not an object")
     tone, mismatch, reason = obj.get("tone"), obj.get("mismatch"), obj.get("reason")
-    issues, flags = obj.get("issues"), obj.get("flags", [])
+    corrected, flags = obj.get("corrected"), obj.get("flags", [])
+    # "suggestions" in the current shape; "issues" (corrections and suggestions) in the old
+    issues = obj.get("suggestions", obj.get("issues")) if corrected is not None \
+        else obj.get("issues", obj.get("suggestions"))
+    if issues is None and isinstance(corrected, str):
+        issues = []
     if not isinstance(tone, str) or not isinstance(mismatch, bool):
         raise _bad("tone/mismatch")
     if reason is not None and not isinstance(reason, str):
         raise _bad("reason")
+    if corrected is not None and not isinstance(corrected, str):
+        raise _bad("corrected")
     if not isinstance(issues, list) or not isinstance(flags, list):
         raise _bad("issues/flags")
     return Analysis(
@@ -239,4 +253,5 @@ def parse_analysis(obj: dict) -> Analysis:
         reason=reason,
         issues=tuple(_parse_issue(i) for i in issues[:MAX_ISSUES]),
         flags=tuple(dict.fromkeys(f for f in flags if f in FLAGS)),
+        corrected=corrected,
     )

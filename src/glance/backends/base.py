@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -12,7 +15,10 @@ from glance.backends.usage import Usage
 from glance.log import log_event
 
 ERROR_KINDS = ("timeout", "auth", "rate_limit", "bad_output", "unavailable", "cancelled")
-ANALYZE_TIMEOUT_S = 8.0
+ANALYZE_TIMEOUT_S = 8.0  # an analysis while typing: a late one is no use
+# A check the user asked for (the check shortcut, a click on the icon): the strip shows the
+# quick local fixes at once with a loader, and waits this long for the AI's corrected text.
+CHECK_TIMEOUT_S = 15.0
 REWRITE_TIMEOUT_S = 20.0
 COMPLETE_TIMEOUT_S = 8.0
 
@@ -59,6 +65,10 @@ class Analysis:
     reason: str | None
     issues: tuple[AnalysisIssue, ...]
     flags: tuple[str, ...] = ()  # subset of hostile, missing_attachment, missing_link
+    # The whole text with its corrections applied, as the model wrote it (None: an answer
+    # in the older shape, corrections among `issues`). `backends.corrected` turns it into
+    # issues, keeping only minimal edits; `issues` then holds the suggestions.
+    corrected: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +114,20 @@ def extract_json_object(text: str) -> dict:
             return obj
         pos = text.find("{", pos + 1)
     raise BackendError("bad_output", "no json object")
+
+
+_analyze_budget: ContextVar[float] = ContextVar("glance_analyze_budget",
+                                                default=ANALYZE_TIMEOUT_S)
+
+
+@contextmanager
+def analyze_budget(seconds: float) -> Iterator[None]:
+    """`analyze` calls made inside (on this thread) may take up to `seconds` in all."""
+    token = _analyze_budget.set(seconds)
+    try:
+        yield
+    finally:
+        _analyze_budget.reset(token)
 
 
 class Backend(Protocol):
@@ -194,14 +218,17 @@ class BaseBackend:
         )
 
         system, user = analyze_system(ctx), user_block(text)
+        budget = _analyze_budget.get()
+        start = time.monotonic()
         try:
-            return parse_analysis(self._json(system, user, ANALYZE_SCHEMA, ANALYZE_TIMEOUT_S))
+            return parse_analysis(self._json(system, user, ANALYZE_SCHEMA, budget))
         except BackendError as e:
             if e.kind != "bad_output":
                 raise
-        return parse_analysis(
-            self._json(system + REPAIR_SUFFIX, user, ANALYZE_SCHEMA, ANALYZE_TIMEOUT_S)
-        )
+        left = budget - (time.monotonic() - start)
+        if left < 1.0:
+            raise BackendError("timeout", "no time left to repair")
+        return parse_analysis(self._json(system + REPAIR_SUFFIX, user, ANALYZE_SCHEMA, left))
 
     def rewrite(self, text: str, tone: str, ctx: Ctx, custom: str | None = None) -> Iterator[str]:
         from glance.backends.prompts import rewrite_system, user_block

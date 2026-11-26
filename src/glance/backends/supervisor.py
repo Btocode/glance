@@ -9,7 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from glance.backends import auto_choice, cli_path
-from glance.backends.base import Analysis, Backend, BackendError, Ctx, Health
+from glance.backends.base import (
+    ANALYZE_TIMEOUT_S,
+    CHECK_TIMEOUT_S,
+    Analysis,
+    Backend,
+    BackendError,
+    Ctx,
+    Health,
+    analyze_budget,
+)
 from glance.backends.budget import Budget
 from glance.backends.usage import Usage, UsageLedger
 from glance.clock import Clock
@@ -114,6 +123,12 @@ class BackendSupervisor:
         self._spec_lane = threading.Lock()
         self._spec_running: Backend | None = None
         self._fallback: str | None = None  # auto-chosen stand-in for a missing/broken choice
+        self._calls = threading.local()  # per thread: the last failure's kind
+
+    def last_error(self) -> str | None:
+        """The kind of the last backend failure (BackendError.kind) seen by a call on this
+        thread since its `analyze` began; None when none failed."""
+        return getattr(self._calls, "error", None)
 
     # -- per-call settings ---------------------------------------------------------
     def sync(self, choice: str | None = None) -> None:
@@ -365,6 +380,7 @@ class BackendSupervisor:
     def _failed(self, name: str, e: BackendError) -> None:
         """Record a failed attempt. Sign-outs take the backend down; the rest trip the breaker."""
         log_event("backend_fail", backend=name, kind=e.kind)
+        self._calls.error = e.kind
         signed_out = e.kind == "auth"
         if not signed_out and e.kind != "timeout":
             # A signed-out CLI can fail with text nobody recognises (often `bad_output` on the
@@ -387,8 +403,11 @@ class BackendSupervisor:
 
     def analyze(self, text: str, ctx: Ctx, speculative: bool = False,
                 explicit: bool = False) -> Analysis:
-        """`explicit=True` when the user asked for this analysis: only then does it preempt."""
-        with self._lane(speculative, explicit):
+        """`explicit=True` when the user asked for this analysis: only then does it preempt,
+        and each backend gets the longer CHECK_TIMEOUT_S (else ANALYZE_TIMEOUT_S)."""
+        budget = CHECK_TIMEOUT_S if explicit else ANALYZE_TIMEOUT_S
+        self._calls.error = None
+        with self._lane(speculative, explicit), analyze_budget(budget):
             for name, backend in self._plan("analyze", speculative):
                 if not self._begin(name):
                     continue

@@ -37,10 +37,11 @@ def test_claude_argv_is_exact():
     for flag, val in (
         ("--model", "haiku"), ("--tools", ""), ("--setting-sources", ""),
         ("--output-format", "json"), ("--system-prompt", "SYS"),
-        ("--json-schema", json.dumps({"type": "object"})),
     ):
         assert a[a.index(flag) + 1] == val
     assert "--strict-mcp-config" in a and "--no-session-persistence" in a
+    # The schema is spelled out in the prompt: --json-schema costs a second model turn.
+    assert "--json-schema" not in a
     s = ClaudeBackend(ProcRunner()).argv_stream("SYS")
     assert s[:2] == ["claude", "-p"]
     assert s[s.index("--output-format") + 1] == "stream-json"
@@ -141,34 +142,44 @@ def test_prewarm_is_noop_until_warm_is_turned_on(log):
 
 
 def test_prewarm_used_once_then_replaced(log):
-    b = make(log, warm=True)
-    b.prewarm("analyze")
+    b = make(log, "rewrite", warm=True)
+    b.prewarm("rewrite")
     b.wait_warm()
-    first = b._idle["analyze"]
+    first = b._idle["rewrite"]
     assert first.alive
-    b.prewarm("analyze")  # at most one per kind: same process kept
+    b.prewarm("rewrite")  # at most one per kind: same process kept
     b.wait_warm()
-    assert b._idle["analyze"] is first
-    a = b.analyze("hello", CTX)
-    assert isinstance(a, Analysis)
+    assert b._idle["rewrite"] is first
+    assert "".join(b.rewrite("hello", "friendlier", CTX))
     recs = records(log)
     assert "--input-format" in recs[0]["argv"]
     content = json.loads(recs[0]["stdin"])["message"]["content"]
     assert content.count("hello") == 1 and content.startswith("<system>")  # the call's prompt
     b.wait_warm()
-    assert b._idle["analyze"] is not first  # replaced after use
+    assert b._idle["rewrite"] is not first  # replaced after use
     b.cancel()
     b.close()
     assert b._idle == {}
 
 
-def test_warm_process_serves_any_system_prompt(log):
+def test_analyze_never_uses_a_warm_process(log):
+    """A stream-json session reasons before it answers: slower than a cold `-p` call."""
     b = make(log, warm=True)
     b.prewarm("analyze")
     b.wait_warm()
-    b.analyze("hello", Ctx("email", "formal", "strict", "Gmail"))
-    assert "--input-format" in records(log)[0]["argv"]  # a different context: still warm
+    assert "analyze" not in b._idle
+    assert isinstance(b.analyze("hello", Ctx("email", "formal", "strict", "Gmail")), Analysis)
+    argv = records(log)[0]["argv"]
+    assert "--input-format" not in argv and "--json-schema" not in argv
     b.close()
+
+
+def test_analyze_reads_json_from_the_result_text(log):
+    from glance.backends.claude import ClaudeBackend as CB
+
+    obj = {"type": "result", "result": '```json\n{"corrected": "Hi.", "tone": "calm", '
+           '"mismatch": false, "reason": null, "suggestions": [], "flags": []}\n```'}
+    assert CB._structured(obj)["corrected"] == "Hi."
 
 
 def test_warm_flag_off_disables_prewarm(log):

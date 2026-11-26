@@ -55,7 +55,8 @@ def status_piece(view: StatusView, x: int, y: int) -> dict[str, Any]:
     return {"state": view.state.value, "badge": view.badge, "spin": view.spin,
             "message": view.message, "x": x, "y": y,
             "look": {"mark_alpha": lk.mark_alpha, "glow": lk.glow, "grey": lk.grey,
-                     "pulse": lk.pulse}}
+                     "pulse": lk.pulse, "glow_token": lk.glow_token,
+                     "arc": lk.arc is not None}}
 
 
 def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
@@ -65,6 +66,9 @@ def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
     plain.pop("full", None)  # drawn through `markup` only
     return {"view": plain, "markup": strip_markup(view, tokens.get("accent", "#0e6b5c")),
             "can_use": view.can_use, "use_label": use_label(use_key), "x": x, "y": y, "w": w,
+            # a check waiting for the AI: its loader line, and the keycap shown disabled
+            "loading": view.loading,
+            "use_disabled": view.loading is not None and bool(view.segments),
             "scroll": scroll_h if view.expanded and view.compact else None}
 
 
@@ -75,7 +79,7 @@ def suggested_piece(box: SuggestedBox, tokens: dict[str, str], use_key: str) -> 
             "lines": list(box.lines), "can_use": box.can_apply,
             "apply_label": look.apply_label(use_key), "scroll": box.scroll,
             "tone": box.tone, "working": box.working, "placeholder": box.placeholder,
-            "working_label": look.card_line(None, "loading")}
+            "working_label": look.card_line(None, "loading"), "loading": box.loading}
 
 
 def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool,
@@ -89,6 +93,7 @@ def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool,
     for chip in plain["tone_chips"]:
         chip["glyph"] = look.tone_glyph(chip["key"])
         chip["line"] = look.card_line(chip["preview"], chip["state"])
+        chip["skeleton"] = look.card_skeleton(view.loading, chip["preview"], chip["state"])
     has_tones = bool(view.tone_chips)
     return {"view": plain,
             "preview_markup": None if view.preview is None else diff_markup(view.preview),
@@ -124,7 +129,11 @@ def scene(tokens: dict[str, str], window: dict[str, Any] | None, *,
 # breath, the line glyphs and the fixed words.
 LOOK: dict[str, Any] = {
     "mark_dir": str(ASSETS), "mark_sizes": list(MARK_SIZES), "glow_pad": GLOW_PAD,
-    "pulse": list(look.PULSE),
+    "pulse": list(look.PULSE), "frames": look.FRAMES, "frame_ms": look.FRAME_MS,
+    "still_glow": look.STILL_GLOW,
+    "arc": {"sweep": look.ARC_SWEEP, "radius": look.ARC_RADIUS, "width": look.ARC_WIDTH},
+    "skeleton": {"suggested": list(look.SKELETON_SUGGESTED), "card": list(look.SKELETON_CARD),
+                 "bar_h": look.SKELETON_BAR_H, "gap": look.SKELETON_GAP},
     "glyphs": {name: [list(c) for c in path] for name, path in look.GLYPHS.items()},
     "words": {"suggested": look.SUGGESTED, "tone": look.TONE, "rewrite": look.REWRITE_LEAD,
               "return_key": look.RETURN_KEY, "esc": look.ESC_KEY, "close": look.CLOSE,

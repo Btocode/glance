@@ -284,10 +284,10 @@ def test_models_follow_the_config(tmp_path):
 def test_real_claude_backend_warm_lifecycle(log):
     b = make(log)  # fresh: off
     assert not b._warm_on
-    b.set_warm(True)  # turning it on starts the idle processes by itself
+    b.set_warm(True)  # turning it on starts the idle process by itself
     b.wait_warm()
-    assert set(b._idle) == {"analyze", "rewrite"}
-    proc = b._idle["analyze"]
+    assert set(b._idle) == {"rewrite"}  # analyze runs cold: faster (see backends/claude.py)
+    proc = b._idle["rewrite"]
     assert proc.alive
     b.set_warm(False)  # switched away: the idle processes are killed
     assert b._idle == {} and not proc.alive
@@ -305,27 +305,28 @@ def test_supervisor_with_claude_chosen_warms_then_second_call_uses_it(tmp_path, 
         clock, lambda: False, lambda s: None, config_path=tmp_path / "config.toml")
     sup.sync()
     claude.wait_warm()
-    assert set(claude._idle) == {"analyze", "rewrite"}  # an idle process before any call
-    sup.analyze("hello", CTX)  # first call is already warm
+    assert set(claude._idle) == {"rewrite"}  # an idle process before any call
+    sup.analyze("hello", CTX)  # analyze runs cold: one `-p` call, no schema turn
     claude.wait_warm()
-    sup.analyze("again", CTX)  # and so is the second, from the replacement
+    assert "".join(sup.rewrite("again", "friendlier", CTX))  # the rewrite is warm
     claude.wait_warm()
     recs = records(log)
-    assert len(recs) == 2 and all("--input-format" in r["argv"] for r in recs)
+    assert len(recs) == 2 and "--input-format" not in recs[0]["argv"]
+    assert "--input-format" in recs[1]["argv"]
     claude.set_warm(False)
 
 
 def test_model_change_restarts_the_idle_process(log):
     b = make(log, warm=True)
     b.set_model("haiku")
-    b.prewarm("analyze")
+    b.prewarm("rewrite")
     b.wait_warm()
-    proc = b._idle["analyze"]
+    proc = b._idle["rewrite"]
     b.set_model("haiku")
     assert proc.alive  # unchanged: kept
     b.set_model("sonnet")
     b.wait_warm()
-    assert not proc.alive and b.model == "sonnet" and b._idle["analyze"] is not proc
+    assert not proc.alive and b.model == "sonnet" and b._idle["rewrite"] is not proc
     b.close()
 
 

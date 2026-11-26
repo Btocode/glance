@@ -17,6 +17,7 @@ from typing import Any, TypeVar
 from glance.audience.resolver import AudienceResolver, Resolved
 from glance.backends.anchor import analysis_to_issues
 from glance.backends.base import Analysis, BackendError
+from glance.backends.corrected import corrected_issues
 from glance.backends.prompts import TONES
 from glance.backends.supervisor import AiUnavailable, BackendSupervisor
 from glance.clock import Clock, Handle
@@ -25,6 +26,7 @@ from glance.daemon.controller import Controller
 from glance.daemon.rewrite import RewriteOutcome, partial_text, rewrite_text
 from glance.diffing import DiffOp, word_diff
 from glance.features.sharpener import blanks
+from glance.grammar.corrections import CORRECTION_KINDS, ai_kind
 from glance.grammar.issues import Issue
 from glance.log import log_event
 from glance.privacy.redact import Shielded, shield
@@ -62,6 +64,25 @@ BANNERS = {
     "objects": "This field holds embedded content a rewrite cannot keep. " + _COPY,
     "rich": "Typing this back would flatten mentions, links or emoji here. " + _COPY,
 }
+BACKEND_TITLES = {"claude": "Claude", "codex": "Codex", "gemini": "Gemini",
+                  "opencode": "OpenCode", "api": "the API"}
+QUICK = " — showing quick fixes"
+# The strip's muted line when the AI part of a requested check did not come back.
+FAILED_NOTES = {
+    "timeout": "AI check timed out" + QUICK,
+    "limit": "AI paused (limit)" + QUICK,
+    "battery": "AI is off on battery" + QUICK,
+    "unavailable": "AI not available" + QUICK,
+    "auth": "AI signed out" + QUICK,
+    "rate_limit": "AI rate limited" + QUICK,
+    "failed": "AI check failed" + QUICK,
+}
+
+
+def checking_line(backend: str) -> str:
+    return f"Checking with {backend}…"
+
+
 COPY_ONLY = "Glance could not get back to your window. " + _COPY
 # Outcomes worth remembering for the text they were made for; the rest may work next time.
 _KEEP = (None, "no_change", "placeholders", "objects", "rich")
@@ -75,13 +96,20 @@ class _Entry:
     issues: tuple[Issue, ...]
     words: tuple[int, int] | None = None  # (checked, total) when only a window was sent
 
+    @property
+    def corrects(self) -> bool:
+        """The AI gave its corrected text: its corrections replace the local checker's."""
+        return self.analysis.corrected is not None
+
 
 class _Job:
     """One analyze call in flight. `cancelled` is set on the main loop, read by the job."""
 
-    def __init__(self, gen: int, key: str) -> None:
+    def __init__(self, gen: int, key: str, explicit: bool = False) -> None:
         self.gen = gen
         self.key = key
+        self.explicit = explicit  # the user asked for this check: the loader shows
+        self.backend = "AI"  # the loader's "Checking with <backend>…"
         self.spinning = False
         self.cancelled = False
 
@@ -165,7 +193,15 @@ def _entry(shielded: Shielded, analysis: Analysis, offset: int = 0) -> _Entry:
     """Anchor the issues on the shielded text the model saw, then map them back (`offset`:
     where that text starts in the field, when only a window of it was sent)."""
     issues: dict[str, Issue] = {}
-    for i in analysis_to_issues(shielded.text, analysis):
+    found = analysis_to_issues(shielded.text, analysis)
+    fixed = None if analysis.corrected is None else \
+        corrected_issues(shielded.text, analysis.corrected)
+    if fixed is None:
+        analysis = replace(analysis, corrected=None)  # a rewrite: it corrects nothing
+    else:
+        # Corrections come from the corrected text only; the list holds suggestions.
+        found = fixed + [i for i in found if ai_kind(i) not in CORRECTION_KINDS]
+    for i in found:
         span = shielded.map_span(i.start, i.end)
         if span is None or any(_PLACEHOLDER.search(r) for r in i.replacements):
             continue  # touches or invents a placeholder: it could not be applied exactly
@@ -228,6 +264,8 @@ class AiCoordinator:
         self._overrides: dict[str, str] = {}  # context key -> profile name, this session
         self._resolved: Resolved | None = None
         self._shown: tuple[FieldSnapshot, _Entry] | None = None  # for the current text
+        # (field id, text, kind): the AI part of the check asked for this text did not work
+        self._failed: tuple[str, str, str] | None = None
         self._job: _Job | None = None
         self._rw: _Rewrite | None = None  # the preview
         self._made_for: _Target | None = None
@@ -262,6 +300,7 @@ class AiCoordinator:
         c.extra_strip.append(self._strip)
         c.extra_issues.append(self._issues)
         c.extra_ignored.append(self._ignored)
+        c.extra_corrects.append(self._corrects)
         c.extra_status.append(self._status)
         c.extra_use.append(self._use_selected)
         c.add_listener(self)
@@ -379,6 +418,8 @@ class AiCoordinator:
             out["ai_pending"] = True
             if job.spinning:
                 out["analyzing"] = True
+            if job.explicit:
+                out["ai_checking"] = True
         rw = self._current_rewrite()
         if rw is not None and rw.state == "loading":
             out["analyzing"] = True  # a hotkey rewrite has no panel to show it is working
@@ -389,6 +430,8 @@ class AiCoordinator:
         return out
 
     def _panel(self, s: FieldSnapshot, panel: PanelView) -> PanelView:
+        if self._pending_check() is not None:
+            panel = replace(panel, loading=True)
         entry = self._entry_for(s)
         if entry is not None:
             panel = replace(panel, tone=entry.analysis.tone.capitalize(),
@@ -417,6 +460,12 @@ class AiCoordinator:
         entry, r = self._entry_for(s), self._resolved
         if entry is not None and entry.words is not None and not view.empty:
             view = replace(view, meta=limit_notice(*entry.words))
+        job = self._pending_check()
+        if job is not None:  # the quick fixes now, the AI's corrected text when it is back
+            return replace(view, loading=checking_line(job.backend))
+        failed = self._failure(s)
+        if failed is not None:
+            view = replace(view, meta=failed if view.meta is None else f"{failed} · {view.meta}")
         if view.segments or entry is None or r is None or not entry.analysis.mismatch:
             return view
         tone = entry.analysis.tone.lower()
@@ -446,6 +495,10 @@ class AiCoordinator:
         entry = self._entry_for(s)
         return [] if entry is None else list(entry.issues)
 
+    def _corrects(self, s: FieldSnapshot) -> bool:
+        entry = self._entry_for(s)
+        return entry is not None and entry.corrects and entry.words is None
+
     def _ignored(self, _s: FieldSnapshot) -> frozenset[str]:
         r = self._resolved
         return frozenset() if r is None else frozenset(r.profile.ignore_rules)
@@ -467,6 +520,7 @@ class AiCoordinator:
             return
         key = self._key(s, r)
         entry = self._cache.get(key)
+        explicit = self._c.requested_gen == gen  # the check shortcut, a click on the icon
         if entry is not None:
             self._shown = (s, entry)
             self._arm_speculation()
@@ -474,36 +528,66 @@ class AiCoordinator:
             return
         self._cancel_analysis()
         self._arm_speculation()
-        self._job = job = _Job(gen, key)
+        self._job = job = _Job(gen, key, explicit)
+        self._failed = None
         w0, w1 = self._window(s)
         text = s.text[w0:w1]  # the whole text, or the `max_words` around the caret
         words = None if (w0, w1) == (0, len(s.text)) else \
             (count_words(text), count_words(s.text))
+        if explicit:
+            job.backend = self._backend_title()
+            job.spinning = True  # the loader shows at once, not after the status check
 
-        def work() -> tuple[_Entry | None, str]:
-            found = None
+        def allowed() -> bool:
+            # The user asked: battery saving does not apply, only a working AI does.
+            return (self._supervisor.status() == "ok") if explicit \
+                else self._supervisor.auto_allowed()
+
+        def work() -> tuple[_Entry | None, str, str | None]:
+            found, failure = None, None
             try:
-                if self._supervisor.auto_allowed() and not job.cancelled:
+                if allowed() and not job.cancelled:
                     self._clock.post(lambda: self._spin(job))
                     shielded = shield(text)  # the backend never sees anything else
                     ctx = self._resolver.ctx(s, r, mixed_language=bool(self._language(text)))
-                    found = _entry(shielded, self._supervisor.analyze(shielded.text, ctx), w0)
+                    found = _entry(shielded, self._supervisor.analyze(
+                        shielded.text, ctx, explicit=explicit), w0)
                     if words is not None:
                         found = replace(found, words=words)
-            except (AiUnavailable, BackendError):
-                pass  # the supervisor logged it; the status below is what the chip shows
+                elif explicit and not job.cancelled:
+                    st = self._probe()  # no AI set up at all: nothing to apologise for
+                    failure = None if st == "none" else "limit" if st == "limit" \
+                        else "unavailable"
+            except AiUnavailable as e:
+                failure = e.reason if e.reason in ("limit", "battery") else (
+                    self._last_error() or "failed")
+            except BackendError as e:
+                failure = e.kind
             except Exception as e:  # noqa: BLE001 - the spinner must always be cleared
                 log_event("analyze_error", kind=type(e).__name__)
-            return found, self._probe()
+                failure = "failed"
+            return found, self._probe(), failure
 
         self._run_bg(work, lambda result: self._done(job, s, *result))
+
+    def _backend_title(self) -> str:
+        try:
+            name = self._supervisor.active() or ""
+        except Exception:  # noqa: BLE001 - only a label
+            name = ""
+        return BACKEND_TITLES.get(name, "AI")
+
+    def _last_error(self) -> str | None:
+        last = getattr(self._supervisor, "last_error", None)
+        return last() if callable(last) else None
 
     def _spin(self, job: _Job) -> None:
         if self._job is job:
             job.spinning = True
             self._c.refresh()
 
-    def _done(self, job: _Job, s: FieldSnapshot, entry: _Entry | None, status: str) -> None:
+    def _done(self, job: _Job, s: FieldSnapshot, entry: _Entry | None, status: str,
+              failure: str | None = None) -> None:
         self._ai = status
         if self._job is job:
             self._job = None
@@ -512,7 +596,25 @@ class AiCoordinator:
             if entry is not None and job.gen == self._c.generation:
                 self._cache.put(job.key, entry)
                 self._shown = (s, entry)
+            elif entry is None and job.explicit and job.gen == self._c.generation \
+                    and failure is not None and failure != "cancelled":
+                # Not silent: the strip says the quick fixes are all there is this time.
+                self._failed = (s.field_id, s.text, failure)
+                log_event("check_ai_failed", kind=failure)
         self._c.refresh()
+
+    def _pending_check(self) -> _Job | None:
+        """The analysis the user asked for, for the text in the field, still running."""
+        job = self._job
+        if job is not None and job.explicit and job.gen == self._c.generation:
+            return job
+        return None
+
+    def _failure(self, s: FieldSnapshot) -> str | None:
+        f = self._failed
+        if f is None or (f[0], f[1]) != (s.field_id, s.text):
+            return None
+        return FAILED_NOTES.get(f[2], FAILED_NOTES["failed"])
 
     # ------------------------------------------------------------------ internals
 

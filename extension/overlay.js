@@ -527,8 +527,8 @@ export class Overlay {
         const st = this._scene?.status;
         const want = Boolean(st && st.state === 'working' && st.spin && this._icon.visible);
         if (want && !this._spin) {
-            this._spin = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SPIN_MS, () => {
-                this._phase = (this._phase + 1) % 12;
+            this._spin = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._look?.frame_ms ?? SPIN_MS, () => {
+                this._phase = (this._phase + 1) % (this._look?.frames ?? 24);
                 this._iconArea.queue_repaint();
                 const still = this._scene?.status;
                 if (still && still.state === 'working' && still.spin)
@@ -556,10 +556,11 @@ export class Overlay {
         const lk = st.look ?? {mark_alpha: 1, glow: 0, grey: false, pulse: false};
         const cx = ICON_X + ICON / 2, cy = ICON_Y + ICON / 2;
         const mark = this._markSurface(MARK_PX);
-        const glowStrength = lk.pulse ? (this._look?.pulse?.[this._phase % 12] ?? lk.glow) : lk.glow;
+        const frames = this._look?.frames ?? 24;
+        const glowStrength = lk.pulse ? (this._look?.pulse?.[this._phase % frames] ?? lk.glow) : lk.glow;
         if (mark && glowStrength > 0) {
             const glow = this._markSurface(MARK_PX, 'glow');
-            const [r, g, b, a] = rgba(t.icon_glow);
+            const [r, g, b, a] = rgba(t[lk.glow_token ?? 'icon_glow'] ?? t.icon_glow);
             if (glow) {
                 const k = MARK_PX / mark.getWidth();
                 const side = glow.getWidth() * k;
@@ -570,6 +571,15 @@ export class Overlay {
                 cr.maskSurface(glow, 0, 0);
                 cr.restore();
             }
+        }
+        if (lk.arc && lk.pulse) {  // working: a thin arc turning around the mark
+            const arc = this._look?.arc ?? {sweep: 1.9, radius: 10.5, width: 1.6};
+            const start = 2 * Math.PI * (this._phase % frames) / frames;
+            cr.setLineWidth(arc.width);
+            cr.setLineCap(Cairo.LineCap.ROUND);
+            cr.setSourceRGB(...rgb(t.accent_fill));
+            cr.arc(cx, cy, arc.radius, start, start + arc.sweep);
+            cr.stroke();
         }
         if (mark) {
             const k = MARK_PX / mark.getWidth();
@@ -607,7 +617,8 @@ export class Overlay {
     // ------------------------------------------------------------------ the strip
 
     _renderStrip(strip, tokensKey) {
-        const key = strip ? JSON.stringify([strip.view, strip.markup, strip.use_label, strip.w, tokensKey]) : '';
+        const key = strip ? JSON.stringify([strip.view, strip.markup, strip.use_label, strip.w,
+            strip.loading, tokensKey]) : '';
         if (key === this._keys.strip)
             return;
         this._keys.strip = key;
@@ -642,6 +653,8 @@ export class Overlay {
                 text.add_child(sentence);
             }
         }
+        if (strip.loading)  // "Checking with Claude…": the AI's corrected text is coming
+            text.add_child(this._loader(strip.loading));
         if (v.summary && v.segments.length > 0)
             text.add_child(this._label(v.summary, 'muted', 12));
         if (v.meta)
@@ -651,8 +664,14 @@ export class Overlay {
         if (v.note && v.segments.length === 0)
             text.add_child(this._label(v.note, 'muted', 13));
         row.add_child(text);
-        if (strip.can_use)
+        if (strip.can_use) {
             row.add_child(this._button(strip.use_label, 'use', this._act('use'), 'use'));
+        } else if (strip.use_disabled) {  // the keycap waits for the AI's corrected text
+            const off = this._button(strip.use_label, 'use', () => {}, 'use-off');
+            off.reactive = false;
+            off.opacity = 115;
+            row.add_child(off);
+        }
         if (v.menu)
             row.add_child(this._button('⋯', v.expanded ? 'on' : 'quiet', this._act('more'), 'more'));
         this._strip.set_child(row);
@@ -736,6 +755,57 @@ export class Overlay {
         return header;
     }
 
+    // A loading placeholder bar (look.SKELETON_*).
+    _skeleton(width) {
+        const h = this._look?.skeleton?.bar_h ?? 10;
+        return new St.Widget({width: Math.round(width), height: h, x_expand: false,
+            style: `background-color: ${this._t.skeleton}; border-radius: 5px;`});
+    }
+
+    // A small turning arc and "Checking with Claude…", muted. Its timer runs while it is
+    // on the stage only.
+    _loader(text) {
+        const row = hbox({style: 'spacing: 6px;'});
+        const area = new St.DrawingArea({width: 12, height: 12, y_align: Clutter.ActorAlign.CENTER});
+        let phase = 0, src = 0;
+        const frames = this._look?.frames ?? 24;
+        area.connect('repaint', a => {
+            const cr = a.get_context();
+            const [r, g, b] = rgb(this._t.accent);
+            const start = 2 * Math.PI * phase / frames;
+            cr.setLineWidth(1.6);
+            cr.setLineCap(Cairo.LineCap.ROUND);
+            cr.setSourceRGBA(r, g, b, 0.25);
+            cr.arc(6, 6, 4.6, 0, 2 * Math.PI);
+            cr.stroke();
+            cr.setSourceRGB(r, g, b);
+            cr.arc(6, 6, 4.6, start, start + (this._look?.arc?.sweep ?? 1.9));
+            cr.stroke();
+            cr.$dispose();
+        });
+        const stop = () => {
+            if (src) {
+                GLib.source_remove(src);
+                src = 0;
+            }
+        };
+        area.connect('notify::mapped', () => {
+            if (area.mapped && !src) {
+                src = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._look?.frame_ms ?? 50, () => {
+                    phase = (phase + 1) % frames;
+                    area.queue_repaint();
+                    return GLib.SOURCE_CONTINUE;
+                });
+            } else if (!area.mapped) {
+                stop();
+            }
+        });
+        area.connect('destroy', stop);
+        row.add_child(area);
+        row.add_child(this._label(text, 'muted', 12, '', false));
+        return row;
+    }
+
     // A tone chip: its glyph and number key, its name, one line of its rewrite once known. A
     // click selects it (emerald border and tint) and asks for its rewrite; hovering only
     // changes its look.
@@ -754,7 +824,10 @@ export class Overlay {
             top.add_child(this._kbd(String(chip.hotkey)));
         box.add_child(top);
         box.add_child(this._label(chip.label, 'text', 13, 'font-weight: 600;', false));
-        box.add_child(this._label(chip.line ?? '', 'muted', 12, '', false));
+        if (chip.skeleton)
+            box.add_child(this._skeleton(0.8 * 90));
+        else
+            box.add_child(this._label(chip.line ?? '', 'muted', 12, '', false));
         button.set_child(box);
         clickable(button, this._act('tone', {key: chip.key}));
         this._named.set(`card:${chip.key}`, button);
@@ -825,9 +898,17 @@ export class Overlay {
         head.add_child(new St.Widget({x_expand: true}));
         if (s.working)
             head.add_child(this._label(s.working_label ?? 'Rewriting…', 'muted', 12, '', false));
+        if (s.loading)
+            head.add_child(this._loader(s.loading));
         box.add_child(head);
         let text;
-        if (s.placeholder) {
+        if (s.loading) {  // skeleton lines until the AI's corrected text is back
+            const sk = this._look?.skeleton ?? {suggested: [1, 0.82, 0.55], gap: 7};
+            text = vbox({x_expand: true, style: `spacing: ${sk.gap}px;`});
+            const inner = Math.max(120, (this._scene?.panel?.w ?? 520) - 64);
+            for (const share of sk.suggested)
+                text.add_child(this._skeleton(inner * share));
+        } else if (s.placeholder) {
             text = this._label(s.placeholder, 'muted', 13);
         } else {
             text = this._label('', 'text', 14);
@@ -964,7 +1045,7 @@ export class Overlay {
                 this._act('copy'), 'copy'));
             card.add_child(offer);
         }
-        if (v.issues.length) {
+        if (v.issues.length && !v.loading) {  // the AI's list replaces the quick one
             const footer = vbox({style: `spacing: 10px; border-top: 1px solid ${t.hairline}; padding-top: 10px;`});
             footer.add_child(this._fixLine(panel));
             if (this._details) {

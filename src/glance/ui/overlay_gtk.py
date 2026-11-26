@@ -15,6 +15,7 @@ needs it. It gives the focus back to the window that had it before it reports th
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -28,6 +29,7 @@ from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
+from glance.log import log_event
 from glance.protocol import Rect
 from glance.ui import look
 from glance.ui.chip_model import ChipView
@@ -45,7 +47,7 @@ ICON = 22  # the status icon's click target: an invisible circle around the mark
 ICON_X, ICON_Y = 1, 5
 ICON_BOX = (30, 28)
 BADGE_C, BADGE_R = (23.0, 7.0), 7.0  # the badge's cut-out disc
-SPIN_MS = 125  # the working glow's frame time: 8 frames a second, only while working
+SPIN_MS = look.FRAME_MS  # the working animation's frame time, only while working
 DRAWER_MIN_W = 520
 SEL_W = 460  # select-anything's panel
 GAP = 4  # between the strip and the drawer
@@ -144,10 +146,22 @@ def _raise(win: Gtk.Window) -> None:
         gdk_window.raise_()
 
 
+def _see_through(screen: Gdk.Screen | None) -> bool:
+    """A compositor runs and the screen has an RGBA visual: what a window leaves clear
+    (its corners, the drawer's shadow margins) shows what is under it. Otherwise that
+    would be black, so windows are cut to their cards instead."""
+    return bool(screen is not None and screen.is_composited()
+                and screen.get_rgba_visual() is not None)
+
+
 def _clear(_widget: Gtk.Widget, cr: Any) -> bool:
+    """Every draw starts from a fully transparent window (margins included)."""
+    cr.save()
+    cr.reset_clip()
     cr.set_source_rgba(0, 0, 0, 0)
     cr.set_operator(cairo.OPERATOR_SOURCE)
     cr.paint()
+    cr.restore()
     cr.set_operator(cairo.OPERATOR_OVER)
     return False
 
@@ -164,6 +178,64 @@ def _label(text: str, *classes: str, wrap: bool = True, chars: int = 60) -> Gtk.
     if wrap:
         label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
     return _classes(label, *classes)
+
+
+def _skeleton(width: int) -> Gtk.Widget:
+    """A loading placeholder bar (`look.SKELETON_*`)."""
+    bar = _classes(Gtk.Box(), "glance-skeleton")
+    bar.set_size_request(width, look.SKELETON_BAR_H)
+    bar.set_halign(Gtk.Align.START)
+    return bar
+
+
+class _Spinner(Gtk.DrawingArea):
+    """The loader's spinner: the working icon's arc (`look.ARC_*`), 12 px, turning once a
+    cycle. Its timer runs only while it is on screen."""
+
+    def __init__(self, colour: Callable[[], tuple[float, float, float]]) -> None:
+        super().__init__()
+        self._colour = colour
+        self._phase = 0
+        self._src: int | None = None
+        self.set_size_request(12, 12)
+        self.set_valign(Gtk.Align.CENTER)
+        self.connect("draw", self._draw)
+        self.connect("map", lambda *_a: self._run(True))
+        self.connect("unmap", lambda *_a: self._run(False))
+
+    def _run(self, on: bool) -> None:
+        if on and self._src is None:
+            self._src = GLib.timeout_add(look.FRAME_MS, self._tick)
+        elif not on and self._src is not None:
+            GLib.source_remove(self._src)
+            self._src = None
+
+    def _tick(self) -> bool:
+        self._phase = (self._phase + 1) % look.FRAMES
+        self.queue_draw()
+        return GLib.SOURCE_CONTINUE
+
+    def _draw(self, _w: Gtk.Widget, cr: Any) -> bool:
+        a = 2 * math.pi * self._phase / look.FRAMES
+        cr.set_line_width(1.6)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.set_source_rgba(*self._colour(), 0.25)
+        cr.arc(6, 6, 4.6, 0, 2 * math.pi)
+        cr.stroke()
+        cr.set_source_rgb(*self._colour())
+        cr.arc(6, 6, 4.6, a, a + look.ARC_SWEEP)
+        cr.stroke()
+        return False
+
+
+def _loader(text: str, colour: Callable[[], tuple[float, float, float]]) -> Gtk.Widget:
+    """A small spinner and "Checking with Claude…", muted."""
+    row = Gtk.Box(spacing=6)
+    spinner = _Spinner(colour)
+    row.pack_start(spinner, False, False, 0)
+    row.pack_start(_label(text, "glance-meta", wrap=False), False, False, 0)
+    row.set_name("loader")
+    return row
 
 
 def _escape(text: str) -> str:
@@ -233,6 +305,21 @@ def mark_region(widget: Gtk.Widget, x: int, y: int, px: int) -> cairo.Region:
             elif not on and run is not None:
                 region.union(cairo.RectangleInt(x + run, y + row, col - run, 1))
                 run = None
+    return region
+
+
+def arc_region(cx: float, cy: float, start: float) -> cairo.Region:
+    """Where the working arc (`look.ARC_*`) starting at `start` is drawn, as a region: part
+    of the icon's outline where there is no compositor."""
+    region = cairo.Region()
+    steps = 24
+    half = look.ARC_WIDTH / 2 + 0.6
+    for k in range(steps + 1):
+        t = start + look.ARC_SWEEP * k / steps
+        x = cx + look.ARC_RADIUS * math.cos(t)
+        y = cy + look.ARC_RADIUS * math.sin(t)
+        region.union(cairo.RectangleInt(int(x - half), int(y - half),
+                                        int(2 * half + 1), int(2 * half + 1)))
     return region
 
 
@@ -321,7 +408,7 @@ class GtkOverlay:
         self._theme = install()
         self._theme.on_change(self._restyle)
         screen = Gdk.Screen.get_default()
-        self._composited = bool(screen is not None and screen.is_composited())
+        self._composited = _see_through(screen)
         self._shadow = SHADOW if self._composited else NO_SHADOW
         self._status_view: StatusView | None = None
         self._status_xy: tuple[int, int] | None = None
@@ -383,6 +470,7 @@ class GtkOverlay:
         if screen is not None:
             screen.connect("monitors-changed", lambda *_a: (self._layout(),
                                                             self._place_icon()))
+            screen.connect("composited-changed", lambda *_a: self._composited_changed())
         try:
             wnck = self._screen()
             wnck.connect("active-window-changed", lambda *_a: self._follow_active())
@@ -520,6 +608,10 @@ class GtkOverlay:
             m = (ICON - MARK_PX) // 2
             seen = mark_region(self._icon, ICON_X + m, ICON_Y + m, MARK_PX)
             seen.union(badge)
+            lk = None if view is None else look.icon_look(view.state.value, view.spin,
+                                                          self._phase)
+            if lk is not None and lk.arc is not None:  # the working arc shows too
+                seen.union(arc_region(ICON_X + ICON / 2, ICON_Y + ICON / 2, lk.arc))
             gdk_window.shape_combine_region(seen, 0, 0)
 
     def _animate(self) -> None:
@@ -539,7 +631,9 @@ class GtkOverlay:
         if view is None or view.state is not StatusState.WORKING or not view.spin:
             self._spin = None
             return GLib.SOURCE_REMOVE
-        self._phase = (self._phase + 1) % 12
+        self._phase = (self._phase + 1) % look.FRAMES
+        if not self._composited:
+            self._icon_shape()  # the arc moved: so does the window's outline
         self._icon.queue_draw()
         return GLib.SOURCE_CONTINUE
 
@@ -660,6 +754,27 @@ class GtkOverlay:
             self._panel.move(*xy)
             _raise(self._panel)
         self._panel_shape()
+
+    def _composited_changed(self) -> None:
+        """A compositor started or stopped: the drawer gains or loses its shadow margins,
+        and every window its cut-out outline (else its clear parts would show black)."""
+        now = _see_through(Gdk.Screen.get_default())
+        if now == self._composited:
+            return
+        self._composited = now
+        self._shadow = SHADOW if now else NO_SHADOW
+        log_event("overlay_composited", on=now)
+        for win in (self._icon, self._strip, self._panel, self._menu):
+            gdk_window = win.get_window()
+            if gdk_window is not None and now:
+                gdk_window.shape_combine_region(None, 0, 0)
+            win.queue_draw()
+        self._icon_shape()
+        if self._panel_view is not None:
+            self._rebuild_panel(self._panel_view)
+        if self._strip_view is not None:
+            self._build_strip(self._strip_view)
+        self._layout(force=True)
 
     def _strip_shape(self) -> None:
         """Clicks go through the strip except on its buttons."""
@@ -922,6 +1037,9 @@ class GtkOverlay:
 
     # ------------------------------------------------------------------ drawing
 
+    def _accent(self) -> tuple[float, float, float]:
+        return rgb(self._theme.tokens, "accent")
+
     def _restyle(self) -> None:
         """The desktop switched light/dark: the CSS is swapped; redraw what cairo draws."""
         self._icon.queue_draw()
@@ -949,7 +1067,13 @@ class GtkOverlay:
         cx, cy = ICON_X + ICON / 2, ICON_Y + ICON / 2
         x0, y0 = cx - MARK_PX / 2, cy - MARK_PX / 2
         if lk.glow > 0:
-            paint_glow(cr, widget, x0, y0, MARK_PX, t["icon_glow"], lk.glow)
+            paint_glow(cr, widget, x0, y0, MARK_PX, t[lk.glow_token], lk.glow)
+        if lk.arc is not None:  # working: a thin arc turning around the mark
+            cr.set_line_width(look.ARC_WIDTH)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.set_source_rgb(*rgb(t, "accent_fill"))
+            cr.arc(cx, cy, look.ARC_RADIUS, lk.arc, lk.arc + look.ARC_SWEEP)
+            cr.stroke()
         if lk.grey:
             paint_mark(cr, widget, x0, y0, MARK_PX, lk.mark_alpha, tint=t["dot_quiet"])
         else:
@@ -1053,6 +1177,10 @@ class GtkOverlay:
         self._menu.resize(w, h)
         self._menu.move(mx, my)
         self._menu.show()
+        if not self._composited:  # its rounded corners would be black: cut it to them
+            gdk_window = self._menu.get_window()
+            if gdk_window is not None:
+                gdk_window.shape_combine_region(_rounded(0, 0, w, h, 10), 0, 0)
         _raise(self._menu)
 
     def _hide_menu(self) -> None:
@@ -1137,6 +1265,8 @@ class GtkOverlay:
                 text.pack_start(scroller, False, False, 0)
             else:
                 text.pack_start(sentence, False, False, 0)
+        if view.loading is not None:  # "Checking with Claude…": the AI's text is coming
+            text.pack_start(_loader(view.loading, self._accent), False, False, 0)
         for line in (view.summary if view.segments else None, view.meta):
             if line is not None:
                 text.pack_start(_label(line, "glance-note"), False, False, 0)
@@ -1147,13 +1277,16 @@ class GtkOverlay:
         row.pack_start(text, True, True, 0)
         # Clicks go through the strip but on these; the scrolling text takes the wheel.
         self._strip_buttons = [] if scroller is None else [scroller]
-        if view.can_use:
+        if view.can_use or (view.loading is not None and view.segments):
             chord = look.chord_text(self._use_key())
             use = self._button(chord, "use", "glance-use")
-            use.set_tooltip_text(f"Use this ({chord})")
             use.set_valign(Gtk.Align.CENTER)
             row.pack_start(use, False, False, 0)
-            self._strip_buttons.append(use)
+            if view.can_use:
+                use.set_tooltip_text(f"Use this ({chord})")
+                self._strip_buttons.append(use)
+            else:  # the keycap waits for the AI's corrected text
+                use.set_sensitive(False)
         if view.menu:
             more = self._button("⋯", "more", "glance-quiet",
                                 *(("glance-on",) if view.expanded else ()))
@@ -1169,7 +1302,7 @@ class GtkOverlay:
 
     # ------------------------------------------------------------------ the drawer
 
-    def _card(self, chip: ToneChip) -> Gtk.Button:
+    def _card(self, chip: ToneChip, loading: bool = False) -> Gtk.Button:
         """A tone chip: its glyph, its name, its number key and, once known, one line of
         its rewrite. A click selects it (emerald border and tint); nothing happens on hover
         but the hover look."""
@@ -1185,11 +1318,16 @@ class GtkOverlay:
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_width_chars(5)
         box.pack_start(title, False, False, 0)
-        line = look.card_line(chip.preview, chip.state)
-        preview = _label(line, "glance-card-preview", wrap=False, chars=18)
-        preview.set_ellipsize(Pango.EllipsizeMode.END)
-        preview.set_width_chars(8)
-        box.pack_start(preview, False, False, 0)
+        if look.card_skeleton(loading, chip.preview, chip.state):
+            bar = _skeleton(int(90 * look.SKELETON_CARD[0]))
+            bar.set_margin_top(4)
+            box.pack_start(bar, False, False, 0)
+        else:
+            line = look.card_line(chip.preview, chip.state)
+            preview = _label(line, "glance-card-preview", wrap=False, chars=18)
+            preview.set_ellipsize(Pango.EllipsizeMode.END)
+            preview.set_width_chars(8)
+            box.pack_start(preview, False, False, 0)
         layers = Gtk.Overlay()
         layers.add(box)
         if chip.hotkey is not None:  # its number key, top right, on every card that has one
@@ -1204,10 +1342,10 @@ class GtkOverlay:
         button.connect("clicked", lambda _b: self._act("tone", {"key": chip.key}))
         return button
 
-    def _cards(self, chips: tuple[ToneChip, ...]) -> Gtk.Widget:
+    def _cards(self, chips: tuple[ToneChip, ...], loading: bool = False) -> Gtk.Widget:
         row = Gtk.Box(spacing=8, homogeneous=True)
         for chip in chips:
-            row.pack_start(self._card(chip), True, True, 0)
+            row.pack_start(self._card(chip, loading), True, True, 0)
         return row
 
     def _rewrite_as(self) -> Gtk.Widget:
@@ -1245,7 +1383,7 @@ class GtkOverlay:
             head.pack_start(reads, True, True, 0)
         box.pack_start(head, False, False, 0)
         if cards:
-            box.pack_start(self._cards(cards), False, False, 0)
+            box.pack_start(self._cards(cards, view.loading), False, False, 0)
         if custom:
             box.pack_start(self._rewrite_as(), False, False, 0)
         return box
@@ -1262,8 +1400,14 @@ class GtkOverlay:
         if s.working:
             head.pack_end(_label(look.card_line(None, "loading"), "glance-meta", wrap=False),
                           False, False, 0)
+        if s.loading is not None:
+            head.pack_end(_loader(s.loading, self._accent), False, False, 0)
         box.pack_start(head, False, False, 0)
-        if s.placeholder is not None:
+        if s.loading is not None:  # skeleton lines until the AI's corrected text is back
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=look.SKELETON_GAP)
+            for share in look.SKELETON_SUGGESTED:
+                text.pack_start(_skeleton(int((DRAWER_MIN_W - 64) * share)), False, False, 0)
+        elif s.placeholder is not None:
             text = _label(s.placeholder, "glance-meta")
         else:
             text = Gtk.Label(xalign=0, wrap=True, selectable=False)
@@ -1436,7 +1580,7 @@ class GtkOverlay:
             offer.pack_end(self._button("Copy rewrite" if rewrite else "Copy instead", "copy",
                                         "glance-secondary"), False, False, 0)
             card.pack_start(offer, False, False, 0)
-        if view.issues:
+        if view.issues and not view.loading:  # the AI's list replaces the quick one
             footer = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10),
                               "glance-footer")
             footer.pack_start(self._fix_line(view), False, False, 0)

@@ -70,14 +70,14 @@ def confident_spelling(text: str, issue: Issue) -> str | None:
         return None  # an acronym or a camelCase name
     if word[0].isupper() and not _sentence_start(text, issue.start):
         return None  # a capitalised word mid-sentence: likely a name
-    for r in repl:  # "ai" -> "AI"
-        if r != word and r.lower() == low:
+    for r in repl:  # "ai" -> "AI" (an acronym; "sal" -> "Sal" is a guess at a name: no)
+        if r != word and r.lower() == low and r.isupper():
             return r
     if len(word) < 3:
         return None
     first = repl[0]
-    if not _WORD.fullmatch(first):
-        return None
+    if not _WORD.fullmatch(first) or first.lower() == low:
+        return None  # ("sal" -> "Sal": capitalised, it is a guess at a name)
     if len(repl) == 1:
         return first
     if first[0].lower() == low[0] and osa_distance(low, first.lower()) <= 2:
@@ -87,6 +87,11 @@ def confident_spelling(text: str, issue: Issue) -> str | None:
 
 def ai_kind(issue: Issue) -> str:
     return issue.rule.removeprefix("llm:")
+
+
+def near_miss(a: str, b: str) -> bool:
+    """`b` is `a` with a typo or an inflection (case aside)."""
+    return _close(a, b)
 
 
 def _close(a: str, b: str) -> bool:

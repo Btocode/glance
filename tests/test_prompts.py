@@ -68,10 +68,12 @@ def test_tones_table():
 
 def test_schema_shape():
     assert ANALYZE_SCHEMA["additionalProperties"] is False
-    assert set(ANALYZE_SCHEMA["required"]) == {"tone", "mismatch", "reason", "issues", "flags"}
+    assert set(ANALYZE_SCHEMA["required"]) == {"corrected", "tone", "mismatch", "reason",
+                                               "suggestions", "flags"}
     props = ANALYZE_SCHEMA["properties"]
-    assert props["tone"]["maxLength"] == 24 and props["issues"]["maxItems"] == 40
-    assert props["issues"]["items"]["properties"]["occurrence"]["minimum"] == 1
+    assert props["tone"]["maxLength"] == 24 and props["suggestions"]["maxItems"] == 5
+    assert props["suggestions"]["items"]["properties"]["occurrence"]["minimum"] == 1
+    assert props["corrected"] == {"type": "string"}
     assert set(props["flags"]["items"]["enum"]) == {"hostile", "missing_attachment", "missing_link"}
 
 
@@ -118,3 +120,22 @@ def test_parse_analysis_ok_and_bad():
         with pytest.raises(BackendError) as e:
             parse_analysis(bad)
         assert e.value.kind == "bad_output"
+
+
+def test_parse_analysis_reads_the_corrected_text_and_the_older_shape():
+    a = parse_analysis({"corrected": "Hey, how are you?", "tone": "casual", "mismatch": False,
+                        "reason": None, "suggestions": [], "flags": []})
+    assert a.corrected == "Hey, how are you?" and a.issues == ()
+    old = parse_analysis({"tone": "casual", "mismatch": False, "reason": None, "flags": [],
+                          "issues": [{"quote": "teh", "occurrence": 1, "message": "m",
+                                      "replacement": "the", "kind": "spelling"}]})
+    assert old.corrected is None and old.issues[0].quote == "teh"
+    with pytest.raises(BackendError):
+        parse_analysis({"corrected": 3, "tone": "x", "mismatch": False, "reason": None,
+                        "suggestions": [], "flags": []})
+
+
+def test_analyze_prompt_asks_for_minimal_corrections_as_one_text():
+    a = analyze_system(PLAIN)
+    assert '"corrected"' in a and "minimal edit" in a and "Never reword" in a
+    assert "JSON object only" in a

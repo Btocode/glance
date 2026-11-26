@@ -59,6 +59,9 @@ class PanelView:
     confirm: str | None = None
     # The send-guard's warning for the text in the field (e.g. "Sounds hostile").
     guard: str | None = None
+    # A check the user asked for is waiting for the AI: "Suggested" and the tone cards show
+    # skeleton placeholders until its result replaces them in place.
+    loading: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,7 @@ class SuggestedBox:
     lines: tuple[str, ...] = ()  # muted lines under it (the strip's summary and meta)
     can_apply: bool = False  # "Apply (Alt+Enter)" (the `use` action) types it
     scroll: bool = False  # long: it scrolls
+    loading: str | None = None  # the AI check is running: skeleton lines and this label
 
 
 REWRITING = "Rewriting…"
@@ -97,6 +101,8 @@ def suggested_box(view: PanelView, strip: StripView | None) -> SuggestedBox | No
         long = sum(len(x.text) for x in segs) > SCROLL_CHARS
         return SuggestedBox(segs, view.preview_label or "Rewrite", working, placeholder,
                             can_apply=view.can_apply, scroll=long)
+    if strip is not None and strip.loading is not None:
+        return SuggestedBox((), placeholder=strip.loading, loading=strip.loading)
     if strip is not None and strip.segments:
         return SuggestedBox(strip.shown, lines=tuple(x for x in (strip.summary, strip.meta) if x),
                             can_apply=strip.can_use, scroll=strip.compact)
@@ -107,10 +113,29 @@ def _excerpt(text: str, start: int, end: int) -> str:
     return text[max(0, start - EXCERPT_CONTEXT):end + EXCERPT_CONTEXT]
 
 
+def _row(text: str, i: Issue) -> IssueRow:
+    """One fix-list row. A fix of spacing or punctuation alone is shown with the word it
+    belongs to ("doing , -> doing,"), never as a bare " -> (remove)"."""
+    flagged, reps = text[i.start:i.end], i.replacements
+    if not flagged.strip() or not flagged.strip(" .,;:!?") or "" in reps:
+        x0, x1 = i.start, i.end
+        while x0 > 0 and text[x0 - 1].isspace() and x0 > i.start - 1:
+            x0 -= 1  # at most one space before, then the word
+        while x0 > 0 and not text[x0 - 1].isspace():
+            x0 -= 1
+        if not flagged.strip():  # spacing: the words on both sides
+            while x1 < len(text) and text[x1].isspace():
+                x1 += 1
+        while x1 < len(text) and not text[x1].isspace():
+            x1 += 1
+        flagged = text[x0:x1]
+        reps = tuple(text[x0:i.start] + r + text[i.end:x1] for r in reps)
+    return IssueRow(i.id, _excerpt(text, i.start, i.end), i.message, reps, i.rule, flagged)
+
+
 def build_panel(text: str, issues: list[Issue], banner: str | None = None,
                 copy_offer: str | None = None) -> PanelView:
     """The grammar part of the panel; the tone fields are filled in by `extra_panel` hooks."""
-    rows = tuple(IssueRow(i.id, _excerpt(text, i.start, i.end), i.message, i.replacements,
-                          i.rule, text[i.start:i.end]) for i in issues)
+    rows = tuple(_row(text, i) for i in issues)
     return PanelView(issues=rows, banner=banner, can_fix_all=any(i.safe for i in issues),
                      copy_offer=copy_offer)

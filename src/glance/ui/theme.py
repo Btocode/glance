@@ -66,6 +66,8 @@ LIGHT: dict[str, str] = {
     "strip_shadow": "rgba(23, 25, 28, 0.10)",  # and a soft neutral shadow (8 px blur)
     "use_border": "#10B981",    # the strip's Alt+Enter chip
     "icon_glow": "rgba(16, 185, 129, 0.12)",  # behind the status icon's mark: very faint
+    "icon_working": "rgba(16, 185, 129, 1.0)",  # the working glow (look.PULSE is its alpha)
+    "skeleton": "#e7ebef",  # loading placeholder bars
     "text": "#17191c",
     "body": "#24292f",
     "muted": "#5a636e",
@@ -99,6 +101,8 @@ DARK: dict[str, str] = {
     "strip_shadow": "rgba(62, 207, 142, 0.12)",  # at most a whisper of one (8 px blur)
     "use_border": "#3ECF8E",
     "icon_glow": "rgba(62, 207, 142, 0.30)",
+    "icon_working": "rgba(62, 207, 142, 1.0)",
+    "skeleton": "#28313b",
     "text": "#e6edf3",
     "body": "#d8e0e8",
     "muted": "#8b98a8",
@@ -169,6 +173,9 @@ def css(t: dict[str, str]) -> str:
 .glance-root, .glance-root label, .glance-root button, .glance-root entry {{
     font-family: {FONT}; font-size: 14px; }}
 .glance-root label {{ color: {t['body']}; }}
+.glance-root {{ background-color: transparent; background-image: none; }}
+.glance-skeleton {{ background-color: {t['skeleton']}; border-radius: 5px; }}
+.glance-root button.glance-use:disabled {{ opacity: 0.45; }}
 .glance-root button {{
     background-image: none; box-shadow: none; text-shadow: none; -gtk-icon-shadow: none;
     min-height: 0; min-width: 0; }}

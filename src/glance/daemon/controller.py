@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 from glance.clock import Clock, Handle
 from glance.config import Config
 from glance.daemon.scheduler import CheckScheduler
-from glance.grammar.corrections import SPELL_RULE, SPLIT_RULE, ai_correction
+from glance.grammar.corrections import SPELL_RULE, SPLIT_RULE, ai_correction, strip_replacement
 from glance.grammar.filters import IssueFilter
 from glance.grammar.issues import Issue, issue_edit, merge_edits
 from glance.log import log_event
@@ -86,6 +86,9 @@ class Controller:
       extra_issues       providers of more issues for a snapshot (dropped where they overlap
                          a local one)
       extra_ignored      providers of rule names to ignore for a snapshot
+      extra_corrects     predicates: True when another source's corrections replace the
+                         local checker's for a snapshot (the AI's corrected text)
+      requested_gen      the generation of the last check the user asked for (check_now)
       extra_status       providers of extra `status()` entries (numbers, bools, short enums)
       extra_use          tried in order before `use_strip()` applies the corrected text; one
                          that returns True has applied something else (a selected tone)
@@ -149,6 +152,8 @@ class Controller:
         self.extra_strip: list[Callable[[FieldSnapshot, StripView], StripView]] = []
         self.extra_issues: list[Callable[[FieldSnapshot], list[Issue]]] = []
         self.extra_ignored: list[Callable[[FieldSnapshot], frozenset[str]]] = []
+        self.extra_corrects: list[Callable[[FieldSnapshot], bool]] = []
+        self.requested_gen: int | None = None
         self.extra_status: list[Callable[[], dict[str, Any]]] = []
         self.extra_use: list[Callable[[], bool]] = []
         self._listeners: list[object] = []
@@ -493,6 +498,7 @@ class Controller:
         self._check_back = None
         self._checked_at = now
         gen = self.scheduler.check_now(s)
+        self.requested_gen = gen
         self._checked = (s.field_id, s.text)
         self._settled = True
         self._typing = False
@@ -729,8 +735,9 @@ class Controller:
             self._render()
 
     def _maybe_open(self, inputs: ChipInputs) -> None:
-        """check_now's strip: open once the local check is back and the AI analysis is too
-        (or the wait is over)."""
+        """check_now's strip: open at once while the AI checks (its loader, then the quick
+        local fixes as a preview, replaced in place by the AI's corrected text), else once
+        the local check is back."""
         s = self.current
         if not self._open_when_checked or s is None:
             return
@@ -738,7 +745,7 @@ class Controller:
             self._stop_open_wait()
             log_event("check_dropped", why="text_changed")
             return
-        if self._checking or (inputs.ai_pending and self._clock.now() < self._open_by):
+        if self._checking and not inputs.ai_checking:
             return
         panel_too = self._open_panel_too
         self._stop_open_wait()
@@ -896,6 +903,10 @@ class Controller:
         for rules in self.extra_ignored:
             ignored |= self._call("extra_ignored", rules, s, default=frozenset())
         kept = self._filter.apply(s.text, found, s.wm_class, extra_ignored=ignored)
+        if any(self._call("extra_corrects", p, s, default=False) for p in self.extra_corrects):
+            # The AI's corrected text is back for exactly this text: the strip and the
+            # drawer show its corrections, not the quick local ones (which were the preview).
+            kept = [i for i in kept if i.source != "harper"]
         local = [i for i in kept if i.source == "harper"]
         # Where the AI analysis corrects a word the local checker only says is misspelled,
         # the AI's choice wins (it reads the context: "fo" -> "of", not "for").
@@ -910,7 +921,8 @@ class Controller:
         # Otherwise the local checker wins where another source flags the same text.
         others = [i for i in kept if i.source != "harper"
                   and not any(i.start < h.end and h.start < i.end for h in local)]
-        self._issues = sorted(local + others, key=lambda i: (i.start, i.end))
+        self._issues = sorted((_strip_first(s.text, i) for i in local + others),
+                              key=lambda i: (i.start, i.end))
 
     def _anchor(self, s: FieldSnapshot) -> tuple[int, int] | None:
         ui = self._cfg().ui
@@ -971,7 +983,8 @@ class Controller:
         return status_view(StatusInputs(
             has_field=inputs.has_field, paused=self._paused, gated=bool(s.gated),
             # (a requested check: working until its AI analysis is back too)
-            checking=self._working() or (self._open_when_checked and inputs.ai_pending),
+            checking=self._working() or inputs.ai_checking
+            or (self._open_when_checked and inputs.ai_pending),
             typing=not self._settled, analyzing=inputs.analyzing,
             n_fixes=content.n_fixes if usable and content is not None else 0,
             has_note=content is not None and not usable and not content.empty,
@@ -1076,6 +1089,16 @@ class Controller:
             self._tray_state = state
             self._tray.set_state(state)
 
+
+
+def _strip_first(text: str, i: Issue) -> Issue:
+    """`i` with the replacement the strip uses first: the drawer's fix list, a click on a
+    fix and the strip's corrected text then all say the same ("sal -> say" is never listed
+    beside a strip that typed something else)."""
+    r = strip_replacement(text, i)
+    if r is None or (i.replacements and i.replacements[0] == r):
+        return i
+    return replace(i, replacements=(r, *(x for x in i.replacements if x != r)))
 
 
 def _shifted(i: Issue, by: int) -> Issue:

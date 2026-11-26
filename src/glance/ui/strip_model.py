@@ -52,6 +52,10 @@ class StripView:
     full: tuple[Segment, ...] = ()  # compact: the whole corrected text, shown when expanded
     summary: str | None = None  # compact: "7 fixes across the message"
     meta: str | None = None  # muted, e.g. "Long text: AI checked 600 of 1,450 words …"
+    # A check the user asked for is waiting for the AI ("Checking with Claude…"): what is
+    # shown is the quick local preview, the loader runs and the keycap is disabled until
+    # the AI's corrected text replaces it.
+    loading: str | None = None
 
     @property
     def compact(self) -> bool:
@@ -65,11 +69,12 @@ class StripView:
 
     @property
     def can_use(self) -> bool:
-        return bool(self.segments) and self.n_fixes > 0
+        return bool(self.segments) and self.n_fixes > 0 and self.loading is None
 
     @property
     def empty(self) -> bool:
-        return not self.segments and self.note is None and self.guard is None
+        return (not self.segments and self.note is None and self.guard is None
+                and self.loading is None)
 
     @property
     def text(self) -> str:

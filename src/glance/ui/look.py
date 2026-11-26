@@ -35,30 +35,53 @@ _MAC_KEYS = {**_KEYS, "return": "⏎", "enter": "⏎", "tab": "⇥", "backspace"
 @dataclass(frozen=True)
 class IconLook:
     mark_alpha: float  # the mark's opacity
-    glow: float  # the glow's strength, times the theme's `icon_glow` alpha (0: none)
+    glow: float  # the glow's strength, times the alpha of the theme token `glow_token`
     grey: bool  # the mark as a flat grey silhouette (muted)
     pulse: bool  # the glow breathes (PULSE, one step per frame)
+    glow_token: str = "icon_glow"  # the theme token the glow is drawn in
+    # Working, animated: a thin arc around the mark starts at this angle (radians, 0 at
+    # three o'clock, clockwise) and sweeps ARC_SWEEP. None: no arc (never a ring at rest).
+    arc: float | None = None
 
 
 ICON_LOOKS = {
     "idle": IconLook(0.7, 0.0, False, False),
-    "working": IconLook(0.9, 1.0, False, True),
+    "working": IconLook(1.0, 1.0, False, True, "icon_working"),
     "ready": IconLook(1.0, 1.0, False, False),
     "muted": IconLook(0.55, 0.0, True, False),
 }
 
-# The working glow over the 12 animation frames (8 a second: a 1.5 s breath), as factors.
-PULSE = tuple(round(0.6 + 0.4 * math.cos(2 * math.pi * i / 12), 3) for i in range(12))
+# The working state's animation: FRAMES frames FRAME_MS apart (a 1.2 s cycle). The glow
+# breathes between 0.35 and 0.75 opacity (`icon_working` is opaque, so these are its
+# alpha) and the arc goes round once a cycle. Only while the icon spins: never while keys
+# arrive (a still glow, no arc, costs nothing per keystroke).
+FRAMES = 24
+FRAME_MS = 50
+PULSE = tuple(round(0.55 - 0.2 * math.cos(2 * math.pi * i / FRAMES), 3) for i in range(FRAMES))
+STILL_GLOW = 0.55
+ARC_SWEEP = 1.9  # radians: about a third of the circle
+ARC_RADIUS = 10.5  # px from the mark's centre (the mark is 18 px)
+ARC_WIDTH = 1.6
 
 
 def icon_look(state: str, spin: bool = False, phase: int = 0) -> IconLook:
-    """How the icon is drawn in `state` (StatusState's value). Working breathes only while
-    `spin` (not while keys arrive: a still glow costs nothing per keystroke); `phase` is
-    the animation frame."""
+    """How the icon is drawn in `state` (StatusState's value). Working breathes and its arc
+    turns only while `spin` (not while keys arrive); `phase` is the animation frame."""
     base = ICON_LOOKS.get(state, ICON_LOOKS["idle"])
     if state == "working":
-        return replace(base, glow=PULSE[phase % 12] if spin else PULSE[3], pulse=spin)
+        if not spin:
+            return replace(base, glow=STILL_GLOW, pulse=False)
+        i = phase % FRAMES
+        return replace(base, glow=PULSE[i], pulse=True, arc=2 * math.pi * i / FRAMES)
     return base
+
+
+# Loading states, the same in every renderer: the strip's loader line, and the skeleton
+# bars that stand in for "Suggested" and the tone cards' lines while a check runs.
+SKELETON_SUGGESTED = (1.0, 0.82, 0.55)  # bar widths, as a share of the box's width
+SKELETON_CARD = (0.8,)
+SKELETON_BAR_H = 10
+SKELETON_GAP = 7
 
 
 def chord_keys(chord: str, mac: bool = False) -> list[str]:
@@ -96,6 +119,12 @@ def subline(mode: str, has_tones: bool) -> str:
 
 
 CARD_HINT = "Click to preview"
+
+
+def card_skeleton(view_loading: bool, preview: str | None, state: str | None) -> bool:
+    """A tone card shows a skeleton bar for its line while the check runs, until it has a
+    rewrite of its own (or is being rewritten)."""
+    return view_loading and not preview and state is None
 
 
 def card_line(preview: str | None, state: str | None) -> str:

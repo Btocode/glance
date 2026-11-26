@@ -37,6 +37,7 @@ class ChipInputs:
     ai: str = "off"  # off | ok | none | limit
     guard: str | None = None
     ai_pending: bool = False  # an AI analysis for this text is asked for and not back yet
+    ai_checking: bool = False  # ...and the user asked for it (check shortcut, icon click)
 
 
 @dataclass(frozen=True)

@@ -71,6 +71,10 @@ def test_the_icon_glow_is_shipped_beside_every_mark_size():
     assert glow_path(17).endswith("glance-glow-18.png")
     assert icon_look("ready").glow > 0 and icon_look("idle").glow == 0
     assert icon_look("idle").mark_alpha == 0.7 and icon_look("muted").grey
+    # working: no ring at rest; while it spins, the arc turns and the glow breathes
+    assert icon_look("working").arc is None and icon_look("idle").arc is None
+    a, b = icon_look("working", True, 0), icon_look("working", True, 6)
+    assert a.arc is not None and b.arc is not None and a.arc != b.arc and a.glow != b.glow
 
 
 def test_css_uses_the_tokens_and_the_type_scale():

@@ -34,6 +34,7 @@ from AppKit import (
     NSMutableAttributedString,
     NSPasteboard,
     NSPasteboardTypeString,
+    NSProgressIndicator,
     NSRectFillUsingOperation,
     NSScrollView,
     NSTextField,
@@ -73,7 +74,7 @@ BADGE_C, BADGE_R = (23.0, 7.0), 7.0
 MARK_PX = 18.0  # the brand mark in the icon's (invisible) click target
 _SOURCE_OVER = 2  # NSCompositingOperationSourceOver
 _SOURCE_ATOP = 5  # NSCompositingOperationSourceAtop
-SPIN_MS = 125
+SPIN_MS = look.FRAME_MS  # the working animation's frame time, only while working
 DRAWER_MIN_W = 520
 GAP = 4
 PAD = 10
@@ -298,11 +299,21 @@ class _Icon(_Flipped):
         if lk.glow > 0:
             glow = mark_image(MARK_PX, "glow")
             side = glow.size().width
-            alpha = min(1.0, rgba(t["icon_glow"])[3] * lk.glow)
-            soft = tinted(glow, t["icon_glow"])
+            alpha = min(1.0, rgba(t[lk.glow_token])[3] * lk.glow)
+            soft = tinted(glow, t[lk.glow_token])
             soft.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
                 NSMakeRect(cx - side / 2, cy - side / 2, side, side), NSZeroRect,
                 _SOURCE_OVER, alpha, True, None)
+        if lk.arc is not None:  # working: a thin arc turning around the mark
+            deg = 57.29578
+            arc = NSBezierPath.bezierPath()
+            arc.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
+                NSMakePoint(cx, cy), look.ARC_RADIUS, lk.arc * deg,
+                (lk.arc + look.ARC_SWEEP) * deg, False)
+            arc.setLineWidth_(look.ARC_WIDTH)
+            arc.setLineCapStyle_(1)  # round
+            color(t["accent_fill"]).setStroke()
+            arc.stroke()
         mark = mark_image(MARK_PX)
         if lk.grey:
             mark = tinted(mark, t["dot_quiet"])
@@ -400,6 +411,25 @@ def _keycap(text: str, t: dict[str, str], size: float = 11.0) -> Any:
     layer.setBorderWidth_(1.0)
     layer.setCornerRadius_(4.0)
     return lab
+
+
+def _skeleton(t: dict[str, str], width: float) -> Any:
+    """A loading placeholder bar (`look.SKELETON_*`)."""
+    bar = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, max(8.0, width), look.SKELETON_BAR_H))
+    bar.fill, bar.radius, bar.border = color(t["skeleton"]), look.SKELETON_BAR_H / 2, None
+    return bar
+
+
+def _loader(text: str, t: dict[str, str], width: float) -> list[Any]:
+    """A small native spinner and "Checking with Claude…", muted (for `_Rows.run`)."""
+    spin = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(0, 0, 12, 12))
+    spin.setStyle_(1)  # spinning
+    spin.setControlSize_(2)  # mini
+    spin.setDisplayedWhenStopped_(False)
+    spin.startAnimation_(None)
+    lab = _label(text, color(t["muted"]), width - 18, lines=1, size=12)
+    lab.sizeToFit()
+    return [spin, lab]
 
 
 def _glyph(name: str, fg: Any, px: float = 14.0) -> Any:
@@ -653,7 +683,7 @@ class MacOverlay:
             self._spin = None
 
     def _tick(self) -> None:
-        self._phase = (self._phase + 1) % 12
+        self._phase = (self._phase + 1) % look.FRAMES
         self._icon_view.phase = self._phase
         self._icon_view.setNeedsDisplay_(True)
 
@@ -887,6 +917,10 @@ class MacOverlay:
         buttons = []
         if view.can_use:
             buttons.append(self._use_chip(look.chord_text(self._use_key(), mac=True)))
+        elif view.loading is not None and view.segments:  # waits for the AI's text
+            off = _keycap(look.chord_text(self._use_key(), mac=True), t)
+            off.setAlphaValue_(0.45)
+            buttons.append(off)
         if view.menu:
             more = self._link("⋯", lambda: self._act("more", {}), strong=True, muted=True)
             buttons.append(more)
@@ -909,6 +943,8 @@ class MacOverlay:
                 rows.full(self._scrolled(lab, text_w), gap=2)
             else:
                 rows.full(lab, gap=2)
+        if view.loading is not None:  # "Checking with Claude…": the AI's text is coming
+            rows.run(_loader(view.loading, t, text_w), gap=6)
         for line in (view.summary if view.segments else None, view.meta):
             if line is not None:
                 rows.full(_label(line, color(t["muted"]), text_w, size=12), gap=2)
@@ -953,7 +989,7 @@ class MacOverlay:
 
     # ------------------------------------------------------------------ the drawer
 
-    def _chip(self, chip: ToneChip, width: float) -> Any:
+    def _chip(self, chip: ToneChip, width: float, loading: bool = False) -> Any:
         """A tone chip: its glyph and number key, its name, one line of its rewrite. A click
         selects it (emerald border and tint) and asks for its rewrite."""
         t = self._t
@@ -974,9 +1010,14 @@ class MacOverlay:
         title = _label(chip.label, color(t["text"]), width - 20, bold=True, lines=1)
         title.setFrameOrigin_(NSMakePoint(10, 26))
         card.addSubview_(title)
-        preview = _label(line, color(t["muted"]), width - 20, lines=1, size=12)
-        preview.setFrameOrigin_(NSMakePoint(10, 43))
-        card.addSubview_(preview)
+        if look.card_skeleton(loading, chip.preview, chip.state):
+            bar = _skeleton(t, (width - 20) * look.SKELETON_CARD[0])
+            bar.setFrameOrigin_(NSMakePoint(10, 46))
+            card.addSubview_(bar)
+        else:
+            preview = _label(line, color(t["muted"]), width - 20, lines=1, size=12)
+            preview.setFrameOrigin_(NSMakePoint(10, 43))
+            card.addSubview_(preview)
         cover = self._cover(card, lambda: self._act("tone", {"key": chip.key}),
                             f"card:{chip.key}")
         if chip.preview:
@@ -1075,7 +1116,23 @@ class MacOverlay:
             head.append(tag)
         right = [_label(look.card_line(None, "loading"), color(t["muted"]), 100, lines=1,
                         size=12)] if box_view.working else []
+        if box_view.loading is not None:
+            right = _loader(box_view.loading, t, 200)
         rows.run(head, right=right, gap=8)
+        if box_view.loading is not None:  # skeleton lines until the AI's text is back
+            inner = rows.width - 24
+            h = len(look.SKELETON_SUGGESTED) * (look.SKELETON_BAR_H + look.SKELETON_GAP) + 13
+            box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, rows.width, h))
+            box.fill, box.radius, box.border = color(t["card"]), 8.0, color(t["card_border"])
+            y = 10.0
+            for share in look.SKELETON_SUGGESTED:
+                bar = _skeleton(t, inner * share)
+                bar.setFrameOrigin_(NSMakePoint(12, y))
+                box.addSubview_(bar)
+                y += look.SKELETON_BAR_H + look.SKELETON_GAP
+            rows.full(box, gap=8)
+            rows.y += 4
+            return
         s = NSMutableAttributedString.alloc().init()
         if box_view.placeholder is not None:
             s.appendAttributedString_(_attr(box_view.placeholder, color(t["muted"]), size=13.0))
@@ -1118,7 +1175,7 @@ class MacOverlay:
         if cards:
             n = len(cards)
             w = (rows.width - 8 * (n - 1)) / n
-            rows.run([self._chip(c, w) for c in cards], gap=8)
+            rows.run([self._chip(c, w, view.loading) for c in cards], gap=8)
         if custom:
             rows.full(self._rewrite_as(rows.width), gap=8)
         rows.y += 4
@@ -1161,7 +1218,7 @@ class MacOverlay:
                              color(t["muted"]), inner - 140, lines=2)],
                      right=[self._act_button("Copy rewrite" if rewrite else "Copy instead",
                                              "copy")])
-        if view.issues:
+        if view.issues and not view.loading:  # the AI's list replaces the quick one
             self._rule(rows)
             n = len(view.issues)
             line = [self._link(look.fixes_label(n), self._toggle_details, muted=True)]
