@@ -36,10 +36,11 @@ def _plain(value: Any) -> Any:
 
 
 def strip_markup(view: StripView, accent: str) -> str:
-    """The corrected sentence as Pango markup: the fixes bold in the accent colour."""
+    """The corrected text as Pango markup (the compact view, or the whole text once expanded:
+    `view.shown`): the fixes bold in the accent colour."""
     return "".join(
         f'<span foreground="{accent}" weight="bold">{escape(s.text, quote=False)}</span>'
-        if s.changed else escape(s.text, quote=False) for s in view.segments)
+        if s.changed else escape(s.text, quote=False) for s in view.shown)
 
 
 def use_label(use_key: str) -> str:
@@ -55,9 +56,13 @@ def status_piece(view: StatusView, x: int, y: int) -> dict[str, Any]:
 
 
 def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
-                use_key: str) -> dict[str, Any]:
-    return {"view": _plain(view), "markup": strip_markup(view, tokens.get("accent", "#0e6b5c")),
-            "can_use": view.can_use, "use_label": use_label(use_key), "x": x, "y": y, "w": w}
+                use_key: str, scroll_h: int = 0) -> dict[str, Any]:
+    """`scroll`: the expanded whole text scrolls past `scroll_h` px (None: not expanded)."""
+    plain = _plain(view)
+    plain.pop("full", None)  # drawn through `markup` only
+    return {"view": plain, "markup": strip_markup(view, tokens.get("accent", "#0e6b5c")),
+            "can_use": view.can_use, "use_label": use_label(use_key), "x": x, "y": y, "w": w,
+            "scroll": scroll_h if view.expanded and view.compact else None}
 
 
 def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool) -> dict[str, Any]:

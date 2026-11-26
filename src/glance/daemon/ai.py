@@ -28,10 +28,11 @@ from glance.features.sharpener import blanks
 from glance.grammar.issues import Issue
 from glance.log import log_event
 from glance.privacy.redact import Shielded, shield
-from glance.protocol import ApplyResult, Edit, FieldSnapshot, text_sha256
+from glance.protocol import ApplyResult, FieldSnapshot, text_sha256
 from glance.ui.panel_model import PanelView, ToneChip
 from glance.ui.ports import OverlayPort
 from glance.ui.strip_model import StripView
+from glance.wordlimit import DEFAULT_MAX_WORDS, count_words, limit_notice, word_window
 
 T = TypeVar("T")
 
@@ -72,6 +73,7 @@ class _Entry:
 
     analysis: Analysis
     issues: tuple[Issue, ...]
+    words: tuple[int, int] | None = None  # (checked, total) when only a window was sent
 
 
 class _Job:
@@ -151,14 +153,15 @@ def _display(text: str, shielded: Shielded) -> str:
     return _PLACEHOLDER.sub(sub, text)
 
 
-def _entry(shielded: Shielded, analysis: Analysis) -> _Entry:
-    """Anchor the issues on the shielded text the model saw, then map them back."""
+def _entry(shielded: Shielded, analysis: Analysis, offset: int = 0) -> _Entry:
+    """Anchor the issues on the shielded text the model saw, then map them back (`offset`:
+    where that text starts in the field, when only a window of it was sent)."""
     issues: dict[str, Issue] = {}
     for i in analysis_to_issues(shielded.text, analysis):
         span = shielded.map_span(i.start, i.end)
         if span is None or any(_PLACEHOLDER.search(r) for r in i.replacements):
             continue  # touches or invents a placeholder: it could not be applied exactly
-        start, end = span
+        start, end = span[0] + offset, span[1] + offset
         issue = replace(i, id=f"llm:{i.rule}:{start}:{end}", start=start, end=end,
                         message=_display(i.message, shielded))
         issues.setdefault(issue.id, issue)
@@ -199,6 +202,7 @@ class AiCoordinator:
         overlay: OverlayPort | None = None,
         rich: Callable[[FieldSnapshot], bool] = lambda s: False,
         writeback: Callable[[FieldSnapshot], str] = lambda s: "auto",
+        max_words: Callable[[], int] = lambda: DEFAULT_MAX_WORDS,
     ) -> None:
         self._c = controller
         self._supervisor = supervisor
@@ -210,6 +214,7 @@ class AiCoordinator:
         self._overlay = overlay
         self._rich = rich
         self._writeback = writeback  # the field's app `writeback` setting
+        self._max_words = max_words  # `[ai] max_words`: the most words one call is sent
         self._ai = "off"  # off (not known yet) | ok | none | limit
         self._probing = False
         self._overrides: dict[str, str] = {}  # context key -> profile name, this session
@@ -394,8 +399,11 @@ class AiCoordinator:
         return panel
 
     def _strip(self, s: FieldSnapshot, view: StripView) -> StripView:
-        """Nothing to fix but the tone is off for the audience: one line says so."""
+        """Nothing to fix but the tone is off for the audience: one line says so. A text
+        longer than `[ai] max_words` says the AI only read part of it."""
         entry, r = self._entry_for(s), self._resolved
+        if entry is not None and entry.words is not None and not view.empty:
+            view = replace(view, meta=limit_notice(*entry.words))
         if view.segments or entry is None or r is None or not entry.analysis.mismatch:
             return view
         tone = entry.analysis.tone.lower()
@@ -452,7 +460,10 @@ class AiCoordinator:
         self._cancel_analysis()
         self._arm_speculation()
         self._job = job = _Job(gen, key)
-        text = s.text
+        w0, w1 = self._window(s)
+        text = s.text[w0:w1]  # the whole text, or the `max_words` around the caret
+        words = None if (w0, w1) == (0, len(s.text)) else \
+            (count_words(text), count_words(s.text))
 
         def work() -> tuple[_Entry | None, str]:
             found = None
@@ -461,7 +472,9 @@ class AiCoordinator:
                     self._clock.post(lambda: self._spin(job))
                     shielded = shield(text)  # the backend never sees anything else
                     ctx = self._resolver.ctx(s, r, mixed_language=bool(self._language(text)))
-                    found = _entry(shielded, self._supervisor.analyze(shielded.text, ctx))
+                    found = _entry(shielded, self._supervisor.analyze(shielded.text, ctx), w0)
+                    if words is not None:
+                        found = replace(found, words=words)
             except (AiUnavailable, BackendError):
                 pass  # the supervisor logged it; the status below is what the chip shows
             except Exception as e:  # noqa: BLE001 - the spinner must always be cleared
@@ -500,9 +513,16 @@ class AiCoordinator:
         profile = self._resolver.profile(self._overrides.get(r.key, ""))
         return r if profile is None else Resolved(profile, r.key, "override")
 
+    def _window(self, s: FieldSnapshot) -> tuple[int, int]:
+        """What of the field's text one AI call is sent: all of it, or `[ai] max_words`
+        words around the caret, aligned to sentences."""
+        return word_window(s.text, s.caret, self._max_words())
+
     def _key(self, s: FieldSnapshot, r: Resolved) -> str:
         p = r.profile
-        return cache_key(s.text, p.name, p.target_tone, p.strictness, s.wm_class)
+        w0, w1 = self._window(s)
+        text = s.text if (w0, w1) == (0, len(s.text)) else f"{w0}:{w1}\0{s.text}"
+        return cache_key(text, p.name, p.target_tone, p.strictness, s.wm_class)
 
     def _entry_for(self, s: FieldSnapshot | None) -> _Entry | None:
         shown = self._shown
@@ -711,7 +731,7 @@ class AiCoordinator:
             n = len(blanks(o.text))
             if n:
                 return f"{n} blank(s) to fill in after applying"
-        return None
+        return o.notice()
 
     def _copy_text(self, s: FieldSnapshot) -> str | None:
         rw = self._current_rewrite()
@@ -737,21 +757,23 @@ class AiCoordinator:
         r = self._resolved
         assert r is not None
         text, rich = s.text, bool(self._rich(s))
+        w0, w1 = self._window(s)  # a text over `[ai] max_words`: the part around the caret
 
         def work() -> tuple[RewriteOutcome, str]:
             try:
-                shielded = shield(text)  # only to show the stream: the path shields itself
+                # Only to show the stream: the path shields itself.
+                shielded = shield(text[w0:w1])
 
                 def on_delta(delta: str) -> None:
                     rw.partial += delta
                     now = self._clock.now()
                     if rw.last_render is None or (now - rw.last_render) * 1000 >= RENDER_MS:
                         rw.last_render = now
-                        self._clock.post(lambda: self._render_partial(rw, shielded))
+                        self._clock.post(lambda: self._render_partial(rw, shielded, w0, w1))
 
                 ctx = self._resolver.ctx(s, r, mixed_language=bool(self._language(text)))
                 outcome = rewrite_text(self._supervisor, text, rw.tone, ctx, rw.custom,
-                                       on_delta, rich=rich)
+                                       on_delta, rich=rich, window=(w0, w1))
             except Exception as e:  # noqa: BLE001 - the preview must always leave "loading"
                 log_event("rewrite_error", kind=type(e).__name__)
                 outcome = RewriteOutcome(None, False, "failed")
@@ -759,9 +781,10 @@ class AiCoordinator:
 
         self._run_bg(work, lambda result: self._rewrite_done(rw, *result))
 
-    def _render_partial(self, rw: _Rewrite, shielded: Shielded) -> None:
+    def _render_partial(self, rw: _Rewrite, shielded: Shielded, w0: int, w1: int) -> None:
         if self._current_rewrite() is rw and rw.state == "loading":
-            rw.shown = word_diff(rw.original, partial_text(shielded, rw.partial))
+            o = rw.original
+            rw.shown = word_diff(o, o[:w0] + partial_text(shielded, rw.partial) + o[w1:])
             self._c.refresh()
 
     def _rewrite_done(self, rw: _Rewrite, outcome: RewriteOutcome, status: str) -> None:
@@ -805,8 +828,9 @@ class AiCoordinator:
         # Only where the app leaves the choice to Glance: a per-app `type`/`paste` wins.
         s = self._c.current
         method = "paste" if s is None or self._writeback(s) == "auto" else "auto"
-        apply_id = self._c.request_apply(Edit(0, len(rw.original), o.text), method,
-                                         expected_sha256=rw.target.sha)
+        edit = o.edit(rw.original)  # the whole field, or the window that was rewritten
+        assert edit is not None
+        apply_id = self._c.request_apply(edit, method, expected_sha256=rw.target.sha)
         if apply_id:
             self._applied = (apply_id, rw.target.field_id, o.text)
 
@@ -887,6 +911,7 @@ class AiCoordinator:
             return
         self._spec = job = _Speculation(target)
         text, rich = s.text, bool(self._rich(s))
+        window = self._window(s)
 
         def work() -> list[tuple[str, RewriteOutcome]]:
             out: list[tuple[str, RewriteOutcome]] = []
@@ -898,7 +923,7 @@ class AiCoordinator:
                     if job.cancelled:
                         break
                     outcome = rewrite_text(self._supervisor, text, tone, ctx, rich=rich,
-                                           speculative=True)
+                                           speculative=True, window=window)
                     if outcome.reason not in _KEEP:
                         break  # stopped, out of budget or failing: not worth the next one
                     out.append((tone, outcome))

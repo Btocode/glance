@@ -943,8 +943,8 @@ def test_use_applies_the_sentence_in_one_verified_edit(rig):
     assert rig.overlay.strip.text == "The quick brown fox the end of it"
     rig.c.use_strip()
     (req,) = rig.capture.applies
-    assert req.edit == merge_edits(MIXED, [Edit(0, 3, "The"), Edit(10, 15, "brown"),
-                                           Edit(20, 23, "the")])
+    # the whole field, all of its fixes, in one edit
+    assert req.edit == Edit(0, len(MIXED), "The quick brown fox the end of it")
     assert req.expected_sha256 == text_sha256(s.text)
     assert rig.overlay.strip is None  # while it is applied: nothing more to use
     rig.c.use_strip()
@@ -1007,7 +1007,8 @@ def test_enter_s_own_blur_does_not_lose_the_use(rig):
     assert rig.capture.applies == []  # nothing typed while the field is away
     rig.c.handle_snapshot(snap(seq=2))  # the release: the same field, the same text
     (req,) = rig.capture.applies
-    assert req.edit == Edit(0, 3, "The") and req.expected_sha256 == text_sha256(s.text)
+    assert req.edit == Edit(0, len(TEH), "The" + TEH[3:])
+    assert req.expected_sha256 == text_sha256(s.text)
 
 
 def test_a_use_long_after_a_blur_or_for_other_text_does_nothing(rig):
@@ -1039,7 +1040,8 @@ def test_enter_after_the_blur_and_the_return_still_applies_what_was_shown(rig):
     assert rig.overlay.strip is None  # not settled again yet
     rig.c.use_strip()
     (req,) = rig.capture.applies
-    assert req.edit == Edit(0, 3, "The") and req.expected_sha256 == text_sha256(s.text)
+    assert req.edit == Edit(0, len(TEH), "The" + TEH[3:])
+    assert req.expected_sha256 == text_sha256(s.text)
     assert req.method == "paste"  # one undo step in every editor
 
 

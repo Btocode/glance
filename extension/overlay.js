@@ -389,8 +389,19 @@ export class Overlay {
             sentence.clutter_text.set_markup(strip.markup);
             sentence.x_expand = true;
             this._named.set('strip-text', sentence);
-            text.add_child(sentence);
+            // "⋯" opened a compact view: the whole corrected text, scrolling past `scroll` px.
+            if (strip.scroll) {
+                const box = vbox({x_expand: true});
+                box.add_child(sentence);
+                text.add_child(this._scroll(box, strip.scroll));
+            } else {
+                text.add_child(sentence);
+            }
         }
+        if (v.summary && v.segments.length > 0)
+            text.add_child(this._label(v.summary, 'muted', 12));
+        if (v.meta)
+            text.add_child(this._label(v.meta, 'muted', 12));
         if (v.guard)
             text.add_child(this._label(v.guard, 'warn_text', 13, 'font-weight: 600;'));
         if (v.note && v.segments.length === 0)

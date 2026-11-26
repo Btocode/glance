@@ -70,7 +70,7 @@ def test_schema_shape():
     assert ANALYZE_SCHEMA["additionalProperties"] is False
     assert set(ANALYZE_SCHEMA["required"]) == {"tone", "mismatch", "reason", "issues", "flags"}
     props = ANALYZE_SCHEMA["properties"]
-    assert props["tone"]["maxLength"] == 24 and props["issues"]["maxItems"] == 12
+    assert props["tone"]["maxLength"] == 24 and props["issues"]["maxItems"] == 40
     assert props["issues"]["items"]["properties"]["occurrence"]["minimum"] == 1
     assert set(props["flags"]["items"]["enum"]) == {"hostile", "missing_attachment", "missing_link"}
 

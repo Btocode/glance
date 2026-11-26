@@ -32,7 +32,7 @@ from glance.ui.chip_model import ChipView
 from glance.ui.panel_model import IssueRow, PanelView, ToneChip
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
-from glance.ui.strip_model import StripView
+from glance.ui.strip_model import StripView, scroll_max_h
 from glance.ui.theme import install, rgb
 
 ICON = 22  # the status icon's circle
@@ -869,6 +869,7 @@ class GtkOverlay:
             old.destroy()
         t = self._theme.tokens
         warn = view.guard is not None and not view.segments
+        scroller: Gtk.Widget | None = None
         row = _classes(Gtk.Box(spacing=10), "glance-strip", *(("glance-warn",) if warn else ()))
         row.pack_start(self._sparkle(warn), False, False, 0)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -876,18 +877,31 @@ class GtkOverlay:
         if view.segments:
             sentence = Gtk.Label(xalign=0, wrap=True, selectable=False)
             sentence.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            sentence.set_lines(3)
-            sentence.set_ellipsize(Pango.EllipsizeMode.END)
+            scroll = view.expanded and view.compact  # "⋯": the whole corrected text
+            if not scroll:
+                sentence.set_lines(5)
+                sentence.set_ellipsize(Pango.EllipsizeMode.END)
             sentence.set_markup("".join(
                 f'<span foreground="{t["accent"]}" weight="600">{_escape(s.text)}</span>'
-                if s.changed else _escape(s.text) for s in view.segments))
-            text.pack_start(_classes(sentence, "glance-sentence"), False, False, 0)
+                if s.changed else _escape(s.text) for s in view.shown))
+            _classes(sentence, "glance-sentence")
+            if scroll:
+                rect = self._strip_rect
+                max_h = scroll_max_h(self.monitors(), *(rect[:2] if rect else (None, None)))
+                scroller = self._scroller(sentence, max_h)
+                text.pack_start(scroller, False, False, 0)
+            else:
+                text.pack_start(sentence, False, False, 0)
+        for line in (view.summary if view.segments else None, view.meta):
+            if line is not None:
+                text.pack_start(_label(line, "glance-note"), False, False, 0)
         if view.guard is not None:
             text.pack_start(_label(view.guard, "glance-guard"), False, False, 0)
         if view.note is not None and not view.segments:
             text.pack_start(_label(view.note, "glance-note"), False, False, 0)
         row.pack_start(text, True, True, 0)
-        self._strip_buttons = []
+        # Clicks go through the strip but on these; the scrolling text takes the wheel.
+        self._strip_buttons = [] if scroller is None else [scroller]
         if view.can_use:
             use = self._button("Use  Alt+⏎", "use", "glance-primary")
             use.set_tooltip_text("Replace with this (Alt+Enter)")

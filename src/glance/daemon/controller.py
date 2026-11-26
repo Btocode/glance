@@ -32,6 +32,7 @@ from glance.ui.status_model import (
     status_view,
 )
 from glance.ui.strip_model import StripView, strip_fix, strip_view
+from glance.wordlimit import LOCAL_MAX_WORDS, word_window
 
 T = TypeVar("T")
 
@@ -407,7 +408,7 @@ class Controller:
         self.request_apply(merged)
 
     def use_strip(self) -> None:
-        """Apply the corrected sentence the strip shows: one edit, one undo step."""
+        """Apply the corrected text the strip shows: one edit, one undo step."""
         s, shown, at = self.current, self._strip_shown, self._blurred_at
         recent = shown is not None and at is not None and self._clock.now() - at <= USE_BLUR_S
         if s is None:
@@ -559,13 +560,16 @@ class Controller:
             self._checking = False  # nothing will check it
             self._render()  # tray shows degraded
             return
-        text = s.text
+        # The whole text, up to LOCAL_MAX_WORDS words: beyond that, those around the caret.
+        w0, w1 = word_window(s.text, s.caret, LOCAL_MAX_WORDS)
+        text = s.text[w0:w1]
 
         def check() -> list[Issue]:
             try:
-                return self._grammar.check(text)
+                found = self._grammar.check(text)
             except Exception:  # noqa: BLE001 - a failed check must still end "checking"
                 return []
+            return found if w0 == 0 else [_shifted(i, w0) for i in found]
 
         self._run_bg(check, lambda found: self._local_done(gen, found))
 
@@ -837,6 +841,12 @@ class Controller:
             self._tray_state = state
             self._tray.set_state(state)
 
+
+
+def _shifted(i: Issue, by: int) -> Issue:
+    """An issue found in a window of the text, at its place in the whole text."""
+    start, end = i.start + by, i.end + by
+    return replace(i, id=f"{i.source}:{i.rule}:{start}:{end}", start=start, end=end)
 
 
 def _tail(text: str, caret: int) -> bool:

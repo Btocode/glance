@@ -1,7 +1,15 @@
 import re
 
 from glance.grammar.issues import Issue, apply_edit
-from glance.ui.strip_model import MAX_UNIT_CHARS, Segment, StripView, strip_fix, unit_around
+from glance.protocol import Rect
+from glance.ui.strip_model import (
+    COMPACT_CHARS,
+    Segment,
+    StripView,
+    scroll_max_h,
+    strip_fix,
+    strip_view,
+)
 
 
 def _find(text, word, nth=0):
@@ -43,25 +51,50 @@ def test_nothing_to_fix_is_none():
     assert strip_fix("", 0, []) is None
 
 
-def test_only_the_paragraph_around_the_caret():
+def test_the_whole_text_every_paragraph_and_the_whole_field_is_replaced():
     text = "teh first line here\nwe needs more\nlast i line"
     issues = [harper(text, "teh", "the"), harper(text, "needs", "need"),
               harper(text, "i", "I")]
-    at = text.index("more")
-    fix = strip_fix(text, at, issues)
-    assert fix is not None and fix.n_fixes == 1
-    assert "".join(s.text for s in fix.segments) == "we need more"
-    assert apply_edit(text, fix.edit) == "teh first line here\nwe need more\nlast i line"
+    fix = strip_fix(text, text.index("more"), issues)
+    assert fix is not None and fix.n_fixes == 3  # the badge counts all of them
+    corrected = "the first line here\nwe need more\nlast I line"
+    assert "".join(s.text for s in fix.segments) == corrected
+    assert (fix.edit.start, fix.edit.end) == (0, len(text))  # the whole field, one step
+    assert apply_edit(text, fix.edit) == corrected
+    view = strip_view(fix)
+    assert not view.compact and view.text == corrected and view.n_fixes == 3
 
 
-def test_a_long_paragraph_is_cut_to_the_sentence_around_the_caret():
-    first = "This is a sentence that goes on and on. " * 8
-    text = first + "We needs it now. And more here."
-    assert len(text) > MAX_UNIT_CHARS
-    start, end = unit_around(text, text.index("now"))
-    assert text[start:end] == "We needs it now."
-    fix = strip_fix(text, text.index("now"), [harper(text, "needs", "need")])
-    assert "".join(s.text for s in fix.segments) == "We need it now."
+def test_a_long_text_is_compact_with_its_changed_sentences_only():
+    fine = "This sentence is fine and has nothing to fix at all. "
+    text = fine * 3 + "We needs it now. " + fine * 4 + "\n\n" + fine * 2 + "And i agree. " + fine
+    issues = [harper(text, "needs", "need"), harper(text, "i", "I")]
+    fix = strip_fix(text, 0, issues)
+    view = strip_view(fix)
+    assert len(view.text) > COMPACT_CHARS and view.compact
+    assert view.text == apply_edit(text, fix.edit).strip()  # "Use" types the whole text
+    assert (fix.edit.start, fix.edit.end) == (0, len(text))
+    assert "".join(s.text for s in view.segments) == "… We need it now. … And I agree. …"
+    assert [s.text for s in view.segments if s.changed] == ["need", "I"]
+    assert view.summary == "2 fixes across the message" and view.n_fixes == 2
+    assert view.shown == view.segments
+    expanded = StripView(view.segments, 2, expanded=True, full=view.full)
+    assert expanded.shown == fix.segments  # "⋯": the whole corrected text
+
+
+def test_a_long_changed_sentence_is_cut_to_its_change():
+    long = ("and so " * 40) + "we needs it " + ("and so " * 40)
+    fix = strip_fix(long, 0, [harper(long, "needs", "need")])
+    view = strip_view(fix)
+    shown = "".join(s.text for s in view.segments)
+    assert shown.startswith("… ") and shown.endswith(" …") and "we need it" in shown
+    assert len(shown) < 140
+
+
+def test_scroll_height_is_a_share_of_the_monitor():
+    mons = [Rect(0, 0, 1920, 1080), Rect(1920, 0, 1280, 2000)]
+    assert scroll_max_h(mons, 2000, 10) == 800
+    assert scroll_max_h(mons) == 432
 
 
 def test_overlapping_fixes_first_wins():
@@ -69,7 +102,8 @@ def test_overlapping_fixes_first_wins():
               llm(TEXT, "fine", "good")]
     fix = strip_fix(TEXT, 0, issues)
     # by position, then length: "its fine" overlaps "its" and waits; "fine" does not
-    assert fix.n_fixes == 2 and fix.edit.replacement == "it is good"
+    assert fix.n_fixes == 2
+    assert apply_edit(TEXT, fix.edit) == "hey team i think it is good but we needs the tests fixed"
 
 
 def test_never_spans_or_touches_a_protected_entity():
@@ -89,6 +123,6 @@ def test_never_spans_or_touches_a_protected_entity():
 def test_view_properties():
     assert StripView().empty and not StripView().can_use
     v = StripView((Segment("a ", False), Segment("B", True)), 1)
-    assert v.can_use and v.text == "a B" and not v.empty
+    assert v.can_use and v.text == "a B" and not v.empty and not v.compact
     assert not StripView(note="Reads blunt").empty
     assert not StripView(note="Reads blunt").can_use

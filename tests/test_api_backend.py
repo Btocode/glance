@@ -47,7 +47,7 @@ def test_anthropic_analyze_uses_forced_tool():
     b = seen["body"]
     assert b["tool_choice"] == {"type": "tool", "name": "report"}
     assert b["tools"][0]["name"] == "report" and "properties" in b["tools"][0]["input_schema"]
-    assert b["model"] == "claude-haiku-5-5" and b["max_tokens"] == 1024
+    assert b["model"] == "claude-haiku-5-5" and b["max_tokens"] == 4096
     assert "stream" not in b or b["stream"] is False
 
 

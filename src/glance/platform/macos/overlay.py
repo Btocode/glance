@@ -27,6 +27,7 @@ from AppKit import (
     NSMutableAttributedString,
     NSPasteboard,
     NSPasteboardTypeString,
+    NSScrollView,
     NSTextField,
     NSView,
     NSWorkspace,
@@ -50,7 +51,7 @@ from glance.ui.chip_model import ChipView
 from glance.ui.panel_model import PanelView, ToneChip
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
-from glance.ui.strip_model import StripView
+from glance.ui.strip_model import StripView, scroll_max_h
 
 ICON = 22
 ICON_X, ICON_Y = 1, 5
@@ -575,14 +576,21 @@ class MacOverlay:
         rows = _Rows(card, text_w)
         if view.segments:
             s = NSMutableAttributedString.alloc().init()
-            for seg in view.segments:
+            for seg in view.shown:
                 s.appendAttributedString_(_attr(
                     seg.text, color(t["accent"] if seg.changed else t["body"]), seg.changed))
-            lab = _label("", color(t["body"]), text_w, lines=3)
+            scroll = view.expanded and view.compact  # "⋯": the whole corrected text
+            lab = _label("", color(t["body"]), text_w, lines=0 if scroll else 5)
             lab.setAttributedStringValue_(s)
             _fit(lab, text_w)
             lab.setAccessibilityIdentifier_("glance-strip-sentence")
-            rows.full(lab, gap=2)
+            if scroll:
+                rows.full(self._scrolled(lab, text_w), gap=2)
+            else:
+                rows.full(lab, gap=2)
+        for line in (view.summary if view.segments else None, view.meta):
+            if line is not None:
+                rows.full(_label(line, color(t["muted"]), text_w, size=11.5), gap=2)
         if view.guard is not None:
             rows.full(_label(view.guard, color(t["warn_text"]), text_w), gap=2)
         if view.note is not None and not view.segments:
@@ -598,6 +606,20 @@ class MacOverlay:
         card.setFrameSize_((width, h))
         self._strip.setContentView_(card)
         return int(h)
+
+    def _scrolled(self, view: Any, width: float) -> Any:
+        """`view` in a vertical scroller no taller than SCROLL_SHARE of the monitor."""
+        h = view.frame().size.height
+        f = frame_of(self._strip) if self._strip.isVisible() else None
+        max_h = scroll_max_h(self.monitors(), *(f[:2] if f else (None, None)))
+        doc = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, width, h))  # top first
+        view.setFrameOrigin_(NSMakePoint(0, 0))
+        doc.addSubview_(view)
+        scroller = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, width, min(h, max_h)))
+        scroller.setHasVerticalScroller_(True)
+        scroller.setDrawsBackground_(False)
+        scroller.setDocumentView_(doc)
+        return scroller
 
     def _strip_buttons_reset(self) -> None:
         # Tags index into the target's list; the strip and the drawer are rebuilt together

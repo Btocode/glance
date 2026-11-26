@@ -1,10 +1,14 @@
-"""Pure strip model: the one corrected sentence shown under the field. No GTK.
+"""Pure strip model: the corrected text shown under the field. No GTK.
 
-The strip shows the sentence (or short paragraph) around the caret with its corrections
+The strip shows the field's whole text (every sentence and paragraph) with its corrections
 applied (spelling, grammar, punctuation, capitalisation: `grammar.corrections`), in the user's
 own words and tone: never a rewording. Nothing is asked of an AI for it: it is built from
 the issues the controller already has. Protected entities (mentions, links, emoji, embedded
 objects) are never retyped: fixes on either side of one are never merged across it.
+
+A corrected text longer than about four lines is shown compact: only its changed sentences,
+each in its own context, separated by "…", with a line saying how many fixes there are. The
+strip's "⋯" expands it to the whole corrected text (the renderers scroll it).
 """
 from __future__ import annotations
 
@@ -15,9 +19,14 @@ from dataclasses import dataclass
 from glance.grammar.corrections import strip_replacement
 from glance.grammar.issues import Issue, merge_edits
 from glance.privacy.entities import Span, find_protected, overlaps
-from glance.protocol import Edit
+from glance.protocol import Edit, Rect
 
-MAX_UNIT_CHARS = 280  # a longer paragraph is cut down to its sentence around the caret
+COMPACT_CHARS = 320  # a corrected text longer than this (about four lines) is shown compact
+COMPACT_LINES = 4
+EXCERPT_CHARS = 160  # a changed sentence longer than this is cut to its changes
+CONTEXT_CHARS = 40   # ... and this much on either side of them
+ELLIPSIS = "…"
+SCROLL_SHARE = 0.4  # the expanded text scrolls past this share of the monitor's height
 _SENTENCE_END = re.compile(r"[.!?…]+[\"')\]]*\s+")
 _TOKEN = re.compile(r"\w+(?:['’]\w+)*|\s+|[^\w\s]")
 
@@ -32,13 +41,27 @@ class Segment:
 class StripView:
     """What the collapsed strip shows. Empty (no segments, note or guard) means hidden."""
 
-    segments: tuple[Segment, ...] = ()  # the corrected sentence; empty: nothing to use
+    # The corrected text, or its compact view when `full` is set; empty: nothing to use.
+    segments: tuple[Segment, ...] = ()
     n_fixes: int = 0
     note: str | None = None  # e.g. "Reads blunt for team channel — ⋯ for tone options"
     guard: str | None = None  # the send-guard's question, e.g. "Sounds hostile"
     expanded: bool = False  # the drawer is open under it
     menu: bool = True  # offers "⋯" (not for a paused or private field: there is no drawer)
     on_demand: bool = False  # opened by the user (status icon, panel hotkey): Esc closes it
+    full: tuple[Segment, ...] = ()  # compact: the whole corrected text, shown when expanded
+    summary: str | None = None  # compact: "7 fixes across the message"
+    meta: str | None = None  # muted, e.g. "Long text: AI checked 600 of 1,450 words …"
+
+    @property
+    def compact(self) -> bool:
+        return bool(self.full)
+
+    @property
+    def shown(self) -> tuple[Segment, ...]:
+        """What the renderers draw: the whole text once "⋯" expanded a compact view (in a
+        scrollable area), else `segments`."""
+        return self.full if self.expanded and self.full else self.segments
 
     @property
     def can_use(self) -> bool:
@@ -50,7 +73,8 @@ class StripView:
 
     @property
     def text(self) -> str:
-        return "".join(s.text for s in self.segments)
+        """The whole corrected text (what "Use" types), compact or not."""
+        return "".join(s.text for s in (self.full or self.segments))
 
 
 @dataclass(frozen=True)
@@ -62,22 +86,9 @@ class StripFix:
     n_fixes: int
 
 
-def unit_around(text: str, caret: int) -> tuple[int, int]:
-    """[start, end) of the paragraph holding the caret, or of its sentence when the paragraph
-    is longer than MAX_UNIT_CHARS. Leading and trailing whitespace is left out."""
-    caret = max(0, min(caret, len(text)))
-    start = text.rfind("\n", 0, caret) + 1
-    end = text.find("\n", caret)
-    end = len(text) if end < 0 else end
-    if end - start > MAX_UNIT_CHARS:
-        s0, s1 = start, end
-        for m in _SENTENCE_END.finditer(text, start, end):
-            if m.end() <= caret:
-                s0 = m.end()
-            else:
-                s1 = m.end()
-                break
-        start, end = s0, s1
+def text_unit(text: str) -> tuple[int, int]:
+    """[start, end) of the whole text without its leading and trailing whitespace."""
+    start, end = 0, len(text)
     while start < end and text[start].isspace():
         start += 1
     while end > start and text[end - 1].isspace():
@@ -97,20 +108,20 @@ def _groups(edits: list[Edit], protected: list[Span]) -> list[list[Edit]]:
 
 
 def strip_fix(text: str, caret: int, issues: list[Issue] | tuple[Issue, ...]) -> StripFix | None:
-    """The unit around the caret with its fixes applied, or None when it has nothing to fix.
+    """The whole text with its fixes applied, or None when it has nothing to fix.
 
     Uses the corrections only (`corrections.strip_replacement`: safe and confident Harper
-    fixes, AI-analysis issues of a correction kind), never a rewording, that lie whole inside
-    the unit, in position order; one that overlaps an earlier one waits. A fix touching a
+    fixes, AI-analysis issues of a correction kind), never a rewording, in position order; one that overlaps an earlier one waits. A fix touching a
     protected entity is left out, and when entities split the fixes into runs only the run
-    nearest the caret is used: the edit never spans an entity.
+    nearest the caret is used: the edit never spans an entity. Without any entity in the
+    text the edit replaces the whole field (one undo step for the whole message).
 
     What is highlighted, and counted, comes from a word-level diff of the unit against its
     corrected text, not from the issue spans: every changed word is shown changed, and a
     change is one run of changed words within a fix (one fix that splits "likethe" is one
     change; one that fixes two words apart is two).
     """
-    u0, u1 = unit_around(text, caret)
+    u0, u1 = text_unit(text)
     if u1 <= u0:
         return None
     protected = find_protected(text)
@@ -132,6 +143,8 @@ def strip_fix(text: str, caret: int, issues: list[Issue] | tuple[Issue, ...]) ->
     groups = _groups(edits, protected)
     chosen = min(groups, key=lambda g: (_distance(g, caret), g[0].start))
     merged = merge_edits(text, chosen)
+    if not protected:
+        merged = Edit(0, len(text), text[:merged.start] + merged.replacement + text[merged.end:])
     segments, n = _segments(text, u0, u1, chosen)
     if n == 0:
         return None
@@ -226,4 +239,97 @@ def _distance(group: list[Edit], caret: int) -> int:
 
 
 def strip_view(fix: StripFix | None) -> StripView:
-    return StripView() if fix is None else StripView(fix.segments, fix.n_fixes)
+    if fix is None:
+        return StripView()
+    text = "".join(seg.text for seg in fix.segments)
+    if len(text) <= COMPACT_CHARS and text.count("\n") < COMPACT_LINES:
+        return StripView(fix.segments, fix.n_fixes)
+    return StripView(compact_segments(fix.segments), fix.n_fixes, full=fix.segments,
+                     summary=fixes_summary(fix.n_fixes))
+
+
+def fixes_summary(n: int) -> str:
+    return f"{n} fix{'' if n == 1 else 'es'} across the message"
+
+
+def _sentences(text: str) -> list[tuple[int, int]]:
+    """[start, end) of each sentence (a line break ends one too), whitespace left out."""
+    out, pos = [], 0
+    for m in re.finditer(r"[.!?…]+[\"')\]]*(?=\s)|\n", text):
+        out.append((pos, m.end()))
+        pos = m.end()
+    out.append((pos, len(text)))
+    spans = []
+    for a, b in out:
+        while a < b and text[a].isspace():
+            a += 1
+        while b > a and text[b - 1].isspace():
+            b -= 1
+        if b > a:
+            spans.append((a, b))
+    return spans
+
+
+def _slice(segments: tuple[Segment, ...], a: int, b: int) -> list[Segment]:
+    out, pos = [], 0
+    for seg in segments:
+        s0, s1 = pos, pos + len(seg.text)
+        pos = s1
+        lo, hi = max(a, s0), min(b, s1)
+        if lo < hi:
+            out.append(Segment(seg.text[lo - s0:hi - s0], seg.changed))
+    return out
+
+
+def compact_segments(segments: tuple[Segment, ...]) -> tuple[Segment, ...]:
+    """Only the changed sentences of the corrected text, each with a little context (a long
+    one cut to its changes), separated by "…"; at most about COMPACT_CHARS long."""
+    text = "".join(seg.text for seg in segments)
+    changes, pos = [], 0
+    for seg in segments:
+        if seg.changed:
+            changes.append((pos, pos + len(seg.text)))
+        pos += len(seg.text)
+    excerpts: list[tuple[int, int]] = []
+    for a, b in _sentences(text):
+        inside = [(c0, c1) for c0, c1 in changes if c0 < b and a < c1]
+        if not inside:
+            continue
+        if b - a > EXCERPT_CHARS:
+            a2 = max(a, inside[0][0] - CONTEXT_CHARS)
+            b2 = min(b, inside[-1][1] + CONTEXT_CHARS)
+            while a2 > a and not text[a2 - 1].isspace():  # whole words only
+                a2 -= 1
+            while b2 < b and not text[b2].isspace():
+                b2 += 1
+            a, b = a2, b2
+        if excerpts and a <= excerpts[-1][1]:
+            excerpts[-1] = (excerpts[-1][0], max(b, excerpts[-1][1]))
+        else:
+            excerpts.append((a, b))
+    out: list[Segment] = []
+    length = 0
+    for k, (a, b) in enumerate(excerpts):
+        if k and length + (b - a) > COMPACT_CHARS:
+            out.append(Segment(f" {ELLIPSIS}", False))
+            break
+        gap = text[excerpts[k - 1][1]:a] if k else text[:a]
+        if gap.strip():
+            out.append(Segment(f"{ELLIPSIS} " if not k else f" {ELLIPSIS} ", False))
+        elif k:
+            out.append(Segment(" ", False))
+        out += _slice(segments, a, b)
+        length += b - a
+    else:
+        if excerpts and text[excerpts[-1][1]:].strip():
+            out.append(Segment(f" {ELLIPSIS}", False))
+    return _joined(out)
+
+
+def scroll_max_h(monitors: list[Rect], x: int | None = None, y: int | None = None) -> int:
+    """The tallest the expanded corrected text may be before it scrolls: SCROLL_SHARE of the
+    height of the monitor holding (x, y) (the first one otherwise)."""
+    mon = next((m for m in monitors if x is not None and y is not None
+                and m.x <= x < m.x + m.w and m.y <= y < m.y + m.h),
+               monitors[0] if monitors else None)
+    return max(120, int((mon.h if mon is not None else 1080) * SCROLL_SHARE))

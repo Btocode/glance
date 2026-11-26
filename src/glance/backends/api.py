@@ -20,7 +20,7 @@ from glance.log import log_event
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_URL = "https://api.anthropic.com"
 OPENAI_URL = "https://api.openai.com/v1"
-MAX_TOKENS = 1024
+MAX_TOKENS = 4096  # a whole message of `[ai] max_words` (600) words, rewritten, fits
 
 
 def _status_error(status: int) -> BackendError:

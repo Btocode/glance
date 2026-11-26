@@ -42,6 +42,7 @@ from glance.ui.ports import (
     SelectionPort,
     WindowInfo,
 )
+from glance.wordlimit import word_window
 from glance.writeback.engine import PASTE_ID
 
 T = TypeVar("T")
@@ -56,6 +57,7 @@ BACK_TO_WINDOW = "Go back to the window with the selection, or use Copy rewrite.
 NOT_PASTABLE = "This rewrite cannot be pasted safely. Use Copy rewrite instead."
 TERMINAL_COPY_ONLY = "Terminals get Copy only."
 BUSY = "Glance is busy with another change. Try again."
+SELECTION_START = "at the start of your selection"  # where a long selection is rewritten
 
 # A gate verdict that does not apply to an explicit action on a selection: terminals are
 # allowed (the spec lets the user ask for a rewrite there) and "capture off" is about what
@@ -279,10 +281,13 @@ class SelectAnything:
         self._render()
         ctx = self._resolver.ctx(_blank_view(s.window), s.resolved)
         text, rich = s.text, s.rich
+        # Over `[ai] max_words`: only its first max_words words (to a sentence end) are sent.
+        window = word_window(text, 0, self._cfg().ai.max_words)
 
         def work() -> RewriteOutcome:
             try:
-                return rewrite_text(self._supervisor, text, tone, ctx, custom, rich=rich)
+                return rewrite_text(self._supervisor, text, tone, ctx, custom, rich=rich,
+                                    window=window)
             except Exception as e:  # noqa: BLE001 - the panel must always leave "loading"
                 log_event("rewrite_error", kind=type(e).__name__)
                 return RewriteOutcome(None, False, "failed")
@@ -372,7 +377,7 @@ class SelectAnything:
         rw.state = "ready" if outcome.text is not None or outcome.reason == "no_change" \
             else "failed"
         s.banner = BANNERS.get(outcome.reason or "", BANNERS["failed"]) if outcome.reason \
-            else None
+            else outcome.notice(SELECTION_START)
         pending, s.pending = s.pending, None
         self._render()
         if pending is not None:

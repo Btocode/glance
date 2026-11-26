@@ -201,7 +201,8 @@ def build_ai(controller: Any, clock: Any, cfg: Callable[[], Any],
         controller, supervisor, AudienceResolver(profiles, DEFAULT_RULES, overrides),
         LruCache(), clock, run_bg, language=detector.is_mixed, overlay=overlay,
         rich=lambda s: is_rich_editor(s.wm_class, cfg()),
-        writeback=lambda s: cfg().app(s.wm_class).writeback)
+        writeback=lambda s: cfg().app(s.wm_class).writeback,
+        max_words=lambda: cfg().ai.max_words)
     holder.append(ai)
     ai.attach()
     return ai, supervisor

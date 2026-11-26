@@ -26,7 +26,7 @@ from glance.ui.chip_model import ChipView
 from glance.ui.panel_model import PanelView
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
-from glance.ui.strip_model import StripView
+from glance.ui.strip_model import StripView, scroll_max_h
 
 ICON = 22
 ICON_X, ICON_Y = 1, 5
@@ -281,7 +281,8 @@ class ShellOverlay:
                         strip_y, card_y = p.y, p.y + strip_h + gap
                     if self._strip is not None:
                         strip = sc.strip_piece(self._strip, p.x, strip_y, p.w, tokens,
-                                               self._use_key())
+                                               self._use_key(),
+                                               scroll_max_h(mons, p.x, strip_y))
                         placed["strip"] = (p.x, strip_y, p.w, strip_h)
                     if field_drawer:
                         assert self._panel is not None

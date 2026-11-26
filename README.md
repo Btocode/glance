@@ -35,7 +35,7 @@ Offline grammar fixes, in place, in any app. No AI required.
 
 Most writing assistants live inside one browser tab or one editor. Glance lives in your desktop:
 it follows the text field you are typing in (a chat app, a mail client in the browser, a GTK
-editor, Claude Code in a terminal) and quietly shows the corrected sentence right under it.
+editor, Claude Code in a terminal) and quietly shows the corrected text right under it.
 
 - **Local first.** Grammar runs on your computer through [Harper](https://github.com/Automattic/harper)
   (`harper-ls`). Text goes to an AI only if you connect one.
@@ -52,8 +52,8 @@ editor, Claude Code in a terminal) and quietly shows the corrected sentence righ
 <td width="50%" valign="top">
 
 **Inline fixes**<br>
-When a sentence you are typing has fixes, a quiet strip under the field shows it corrected.
-<kbd>Alt</kbd>+<kbd>Enter</kbd> (or its **Use** button) puts the corrected sentence in.
+When what you are typing has fixes, a quiet strip under the field shows the whole message
+corrected. <kbd>Alt</kbd>+<kbd>Enter</kbd> (or its **Use** button) puts the corrected text in.
 
 </td>
 <td width="50%">
@@ -349,7 +349,7 @@ call, so both are marked experimental in `glance doctor`.
 
 Glance runs as a systemd user service. Type in any text field: a small Glance icon at the end of
 the line shows that it is watching, checking, or has fixes ready (with a count). Click the icon
-to open the suggestion strip with the corrected sentence (see
+to open the suggestion strip with the corrected text (see
 [Status icon and when suggestions appear](#status-icon-and-when-suggestions-appear) to make it
 appear by itself instead).
 
@@ -367,7 +367,7 @@ appear by itself instead).
 
 | Key | Action |
 | --- | --- |
-| <kbd>Alt</kbd>+<kbd>Enter</kbd> | put the corrected sentence in, as one <kbd>Ctrl</kbd>+<kbd>Z</kbd> step (only grabbed while the strip shows a fix) |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd> | put the corrected text in, as one <kbd>Ctrl</kbd>+<kbd>Z</kbd> step (only grabbed while the strip shows a fix) |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | open the panel: tone rewrites, "Rewrite as…", the list of fixes |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> | fix all safe grammar |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> | revert the last change |
@@ -451,7 +451,10 @@ panel = "Super+Alt+space"
 fix_all = "Super+Alt+f"
 
 [ui]
-use_key = "Alt+Return"          # the key that puts the strip's sentence in
+use_key = "Alt+Return"          # the key that puts the strip's corrected text in
+
+[ai]
+max_words = 600                 # the most words the AI reads at once (50-5000)
 
 [backend]
 warm = false                    # no idle claude process
@@ -466,6 +469,12 @@ capture = false                 # stop automatic field capture in this app
 A shortcut that another program or GNOME itself already uses is left alone and reported in a
 notification and in `glance status`.
 
+`[ai] max_words` caps how much of one text goes to the AI (analysis, rewrites and
+select-anything). A longer text is still spell- and grammar-checked locally as a whole (up to
+5,000 words), but the AI only gets the `max_words` words around your cursor, cut at sentence
+or paragraph boundaries, and the strip says so ("Long text: AI checked 600 of 1,450 words
+around your cursor"). A value outside 50-5000 is ignored with a warning in the log.
+
 ### Status icon and when suggestions appear
 
 While you write in a text field, a small round Glance icon sits at the end of the line you are typing and shows what Glance is doing:
@@ -477,12 +486,18 @@ While you write in a text field, a small round Glance icon sits at the end of th
 | Filled, with a number | That many fixes are ready (a dot instead of a number: a tone note) |
 | Grey | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
 
-Click the icon to see the corrected sentence; click again or press <kbd>Esc</kbd> to close it. <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens it with the rewrite options. To have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
+Click the icon to see the corrected text; click again or press <kbd>Esc</kbd> to close it. <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens it with the rewrite options. To have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
 
 ```toml
 [ui]
 suggestions = "auto"   # default "on_click": only after a click on the Glance icon
 ```
+
+The suggestion covers the whole field, every sentence and paragraph, not just the one with the
+cursor: it fixes spelling, grammar, punctuation and capitalisation in your own words (never a
+rewording), the badge counts every fix, and **Use** replaces the whole text in one undo step.
+A long message is shown compact, only the sentences with fixes separated by "…" and a line
+like "7 fixes across the message"; **⋯** expands it to the whole corrected text.
 
 
 ## How it works

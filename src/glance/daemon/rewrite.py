@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from glance.backends.base import BackendError, Ctx
 from glance.backends.prompts import clean_rewrite
 from glance.backends.supervisor import AiUnavailable, BackendSupervisor
 from glance.config import Config
 from glance.privacy.redact import Shielded, can_apply_rewrite, find_secrets, shield, unshield
+from glance.protocol import Edit
+from glance.wordlimit import count_words, limit_notice
 
 # Editors where mentions, emoji and links are objects, not characters (findings S2.5).
 RICH_WM_CLASSES = frozenset({"slack", "discord"})
@@ -33,6 +35,25 @@ class RewriteOutcome:
     text: str | None
     applicable: bool
     reason: str | None
+    # Only this [start, end) of a text longer than `[ai] max_words` was rewritten (`text` is
+    # still the whole text, the rest unchanged), and (words rewritten, words in all).
+    window: tuple[int, int] | None = None
+    words: tuple[int, int] | None = None
+
+    def notice(self, where: str = "around your cursor") -> str | None:
+        """"Long text: AI rewrote 600 of 1,450 words around your cursor", or None."""
+        return None if self.words is None else limit_notice(*self.words, verb="rewrote",
+                                                            where=where)
+
+    def edit(self, original: str) -> Edit | None:
+        """What applying it types: the rewritten window only (what lies outside it, with any
+        mention or link there, is never retyped), else the whole text."""
+        if self.text is None:
+            return None
+        if self.window is None:
+            return Edit(0, len(original), self.text)
+        w0, w1 = self.window
+        return Edit(w0, w1, self.text[w0:len(self.text) - (len(original) - w1)])
 
 
 def is_rich_editor(wm_class: str, cfg: Config) -> bool:
@@ -96,13 +117,24 @@ def _safe_instruction(custom: str | None) -> str | None:
 def rewrite_text(supervisor: BackendSupervisor, text: str, tone: str, ctx: Ctx,
                  custom: str | None = None,
                  on_delta: Callable[[str], None] | None = None, *,
-                 rich: bool = False, speculative: bool = False) -> RewriteOutcome:
+                 rich: bool = False, speculative: bool = False,
+                 window: tuple[int, int] | None = None) -> RewriteOutcome:
     """Rewrite `text` in `tone`. Blocks until the backend is done: call it off the UI thread.
 
     The backend only ever sees the shielded text. `on_delta` gets the raw deltas as they
     arrive (they still carry placeholders: see `partial_text`). `rich` says the text will be
     typed back into a rich editor; `speculative` uses the supervisor's second lane.
+    `window` (see `wordlimit.word_window`): only that part of `text` is sent and rewritten;
+    the outcome is still the whole text, with its `window` and `words` set.
     """
+    if window is not None and window != (0, len(text)):
+        w0, w1 = window
+        part = text[w0:w1]
+        o = rewrite_text(supervisor, part, tone, ctx, custom, on_delta, rich=rich,
+                         speculative=speculative)
+        whole = None if o.text is None else text[:w0] + o.text + text[w1:]
+        return replace(o, text=whole, window=(w0, w1),
+                       words=(count_words(part), count_words(text)))
     shielded = shield(text)
     parts: list[str] = []
     kwargs = {"speculative": True} if speculative else {}

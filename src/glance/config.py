@@ -18,6 +18,7 @@ from tomlkit.exceptions import TOMLKitError
 
 from glance.clock import Clock, Handle
 from glance.log import log_event
+from glance.wordlimit import DEFAULT_MAX_WORDS, MAX_MAX_WORDS, MIN_MAX_WORDS
 
 SUGGESTIONS_MODES = ("on_click", "auto")  # `[ui] suggestions`
 
@@ -185,6 +186,9 @@ class AiCfg:
     # many US dollars (local grammar keeps working). None: no limit. Only a cost a backend
     # reported counts (claude does; the others report none, so they are never stopped by it).
     monthly_cost_limit_usd: float | None = None
+    # The most words of one text the AI is sent (analysis, rewrites, select-anything): a
+    # longer text is analysed in a window of this many words around the caret. 50-5000.
+    max_words: int = DEFAULT_MAX_WORDS
 
 
 @dataclass(frozen=True)
@@ -271,7 +275,15 @@ def _parse(data: dict[str, Any]) -> Config:
     for name in ("per_minute", "per_day"):
         if getattr(backend, name) < 0:
             raise ConfigError(f"backend.{name}", "expected zero or more")
-    ai = _build(AiCfg, data.get("ai", {}), "ai")
+    ai_raw = data.get("ai", {})
+    if isinstance(ai_raw, dict) and "max_words" in ai_raw:
+        n = ai_raw["max_words"]
+        if isinstance(n, bool) or not isinstance(n, int) or not \
+                MIN_MAX_WORDS <= n <= MAX_MAX_WORDS:
+            # Out of range or not a number: the default, and a line naming the key only.
+            log_event("config_value_ignored", key="ai.max_words")
+            ai_raw = {k: v for k, v in ai_raw.items() if k != "max_words"}
+    ai = _build(AiCfg, ai_raw, "ai")
     if ai.monthly_cost_limit_usd is not None and ai.monthly_cost_limit_usd < 0:
         raise ConfigError("ai.monthly_cost_limit_usd", "expected zero or more")
     ui = _build(UiCfg, data.get("ui", {}), "ui")

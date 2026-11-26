@@ -11,6 +11,7 @@ from glance.grammar.corrections import CORRECTION_KINDS, SUGGESTION_KINDS
 # drawer's list only).
 KINDS = (*sorted(CORRECTION_KINDS), *SUGGESTION_KINDS)
 FLAGS = ("hostile", "missing_attachment", "missing_link")
+MAX_ISSUES = 40  # the whole message is reviewed, not one sentence
 
 ANALYZE_SCHEMA: dict = {
     "type": "object",
@@ -22,7 +23,7 @@ ANALYZE_SCHEMA: dict = {
         "reason": {"type": ["string", "null"]},
         "issues": {
             "type": "array",
-            "maxItems": 12,
+            "maxItems": MAX_ISSUES,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -98,10 +99,14 @@ def _context_line(ctx: Ctx) -> str:
 
 def analyze_system(ctx: Ctx) -> str:
     return (
-        "You are a writing assistant that reviews a short draft message. "
+        "You are a writing assistant that reviews a draft message. "
         + _context_line(ctx)
-        + " Judge the tone of the draft and whether it mismatches the target tone (give a short "
-        "reason only when it does, else null). List at most 12 concrete issues; each quotes the "
+        + " <glance_text> holds the whole draft (or, for a very long one, the part around the "
+        "writer's cursor): read all of it for context and review every sentence and paragraph "
+        "in it, not only the last one. "
+        "Judge the tone of the draft and whether it mismatches the target tone (give a short "
+        f"reason only when it does, else null). List at most {MAX_ISSUES} concrete issues, in "
+        "the order they appear; each quotes the "
         "exact problematic substring from the draft (as short as possible), its 1-based "
         "occurrence among identical substrings, a short message, a replacement (or null) and its "
         "kind. Corrections come first, of kind spelling, grammar, punctuation, capitalization, "
@@ -232,6 +237,6 @@ def parse_analysis(obj: dict) -> Analysis:
         tone=tone[:24],
         mismatch=mismatch,
         reason=reason,
-        issues=tuple(_parse_issue(i) for i in issues[:12]),
+        issues=tuple(_parse_issue(i) for i in issues[:MAX_ISSUES]),
         flags=tuple(dict.fromkeys(f for f in flags if f in FLAGS)),
     )
