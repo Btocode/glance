@@ -34,7 +34,6 @@ from AppKit import (
     NSMutableAttributedString,
     NSPasteboard,
     NSPasteboardTypeString,
-    NSProgressIndicator,
     NSRectFillUsingOperation,
     NSScrollView,
     NSTextField,
@@ -304,22 +303,17 @@ class _Icon(_Flipped):
             soft.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
                 NSMakeRect(cx - side / 2, cy - side / 2, side, side), NSZeroRect,
                 _SOURCE_OVER, alpha, True, None)
-        if lk.arc is not None:  # working: a thin arc turning around the mark
-            deg = 57.29578
-            arc = NSBezierPath.bezierPath()
-            arc.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
-                NSMakePoint(cx, cy), look.ARC_RADIUS, lk.arc * deg,
-                (lk.arc + look.ARC_SWEEP) * deg, False)
-            arc.setLineWidth_(look.ARC_WIDTH)
-            arc.setLineCapStyle_(1)  # round
-            color(t["accent_fill"]).setStroke()
-            arc.stroke()
         mark = mark_image(MARK_PX)
         if lk.grey:
             mark = tinted(mark, t["dot_quiet"])
         mark.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
             NSMakeRect(cx - MARK_PX / 2, cy - MARK_PX / 2, MARK_PX, MARK_PX), NSZeroRect,
             _SOURCE_OVER, lk.mark_alpha, True, None)
+        if lk.shine > 0:  # working: the mark itself lights up and settles again
+            white = tinted(mark_image(MARK_PX), "#ffffff")
+            white.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
+                NSMakeRect(cx - MARK_PX / 2, cy - MARK_PX / 2, MARK_PX, MARK_PX), NSZeroRect,
+                _SOURCE_OVER, lk.shine, True, None)
         badge = view.badge
         if badge is not None:
             dot = badge == "•"
@@ -421,15 +415,24 @@ def _skeleton(t: dict[str, str], width: float) -> Any:
 
 
 def _loader(text: str, t: dict[str, str], width: float) -> list[Any]:
-    """A small native spinner and "Checking with Claude…", muted (for `_Rows.run`)."""
-    spin = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(0, 0, 12, 12))
-    spin.setStyle_(1)  # spinning
-    spin.setControlSize_(2)  # mini
-    spin.setDisplayedWhenStopped_(False)
-    spin.startAnimation_(None)
-    lab = _label(text, color(t["muted"]), width - 18, lines=1, size=12)
+    """The small brand mark breathing (`look.LOADER_ALPHA`'s range, one `look.FRAMES` cycle,
+    a Core Animation opacity loop: no timer of ours) and "Checking with Claude…", muted.
+    No spinner: the logo is the loader, as on the status icon."""
+    from Quartz import CABasicAnimation
+
+    px = look.LOADER_PX
+    mark = _mark_view(px)
+    mark.setWantsLayer_(True)
+    pulse = CABasicAnimation.animationWithKeyPath_("opacity")
+    pulse.setFromValue_(min(look.LOADER_ALPHA))
+    pulse.setToValue_(max(look.LOADER_ALPHA))
+    pulse.setDuration_(look.FRAMES * look.FRAME_MS / 2000)
+    pulse.setAutoreverses_(True)
+    pulse.setRepeatCount_(1e9)
+    mark.layer().addAnimation_forKey_(pulse, "glance-breathe")
+    lab = _label(text, color(t["muted"]), width - px - 6, lines=1, size=12)
     lab.sizeToFit()
-    return [spin, lab]
+    return [mark, lab]
 
 
 def _glyph(name: str, fg: Any, px: float = 14.0) -> Any:

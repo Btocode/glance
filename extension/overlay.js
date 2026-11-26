@@ -585,15 +585,6 @@ export class Overlay {
                 cr.restore();
             }
         }
-        if (lk.arc && lk.pulse) {  // working: a thin arc turning around the mark
-            const arc = this._look?.arc ?? {sweep: 1.9, radius: 10.5, width: 1.6};
-            const start = 2 * Math.PI * (this._phase % frames) / frames;
-            cr.setLineWidth(arc.width);
-            cr.setLineCap(Cairo.LineCap.ROUND);
-            cr.setSourceRGB(...rgb(t.accent_fill));
-            cr.arc(cx, cy, arc.radius, start, start + arc.sweep);
-            cr.stroke();
-        }
         if (mark) {
             const k = MARK_PX / mark.getWidth();
             cr.save();
@@ -605,6 +596,12 @@ export class Overlay {
             } else {
                 cr.setSourceSurface(mark, 0, 0);
                 cr.paintWithAlpha(lk.mark_alpha);
+                // working: the mark itself lights up and settles again (look.shine)
+                const shine = lk.pulse ? (this._look?.shine?.[this._phase % frames] ?? 0) : 0;
+                if (shine > 0) {
+                    cr.setSourceRGBA(1, 1, 1, shine);
+                    cr.maskSurface(mark, 0, 0);
+                }
             }
             cr.restore();
         }
@@ -777,25 +774,30 @@ export class Overlay {
             style: `background-color: ${this._t.skeleton}; border-radius: 5px;`});
     }
 
-    // A small turning arc and "Checking with Claude…", muted. Its timer runs while it is
-    // on the stage only.
+    // The loader: the brand mark, small, breathing and brightening in step (look.loader,
+    // look.shine), as the working icon does; then "Checking with Claude…", muted. Its timer
+    // runs while it is on the stage only.
     _loader(text) {
         const row = hbox({style: 'spacing: 6px;'});
-        const area = new St.DrawingArea({width: 12, height: 12, y_align: Clutter.ActorAlign.CENTER});
+        const px = this._look?.loader?.px ?? 14;
+        const area = new St.DrawingArea({width: px, height: px, y_align: Clutter.ActorAlign.CENTER});
         let phase = 0, src = 0;
         const frames = this._look?.frames ?? 24;
         area.connect('repaint', a => {
             const cr = a.get_context();
-            const [r, g, b] = rgb(this._t.accent);
-            const start = 2 * Math.PI * phase / frames;
-            cr.setLineWidth(1.6);
-            cr.setLineCap(Cairo.LineCap.ROUND);
-            cr.setSourceRGBA(r, g, b, 0.25);
-            cr.arc(6, 6, 4.6, 0, 2 * Math.PI);
-            cr.stroke();
-            cr.setSourceRGB(r, g, b);
-            cr.arc(6, 6, 4.6, start, start + (this._look?.arc?.sweep ?? 1.9));
-            cr.stroke();
+            const mark = this._markSurface(px);
+            if (mark) {
+                const alpha = this._look?.loader?.alpha?.[phase % frames] ?? 1;
+                const shine = this._look?.shine?.[phase % frames] ?? 0;
+                const k = px / mark.getWidth();
+                cr.scale(k, k);
+                cr.setSourceSurface(mark, 0, 0);
+                cr.paintWithAlpha(alpha);
+                if (shine > 0) {
+                    cr.setSourceRGBA(1, 1, 1, shine);
+                    cr.maskSurface(mark, 0, 0);
+                }
+            }
             cr.$dispose();
         });
         const stop = () => {

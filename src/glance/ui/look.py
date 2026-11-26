@@ -39,9 +39,9 @@ class IconLook:
     grey: bool  # the mark as a flat grey silhouette (muted)
     pulse: bool  # the glow breathes (PULSE, one step per frame)
     glow_token: str = "icon_glow"  # the theme token the glow is drawn in
-    # Working, animated: a thin arc around the mark starts at this angle (radians, 0 at
-    # three o'clock, clockwise) and sweeps ARC_SWEEP. None: no arc (never a ring at rest).
-    arc: float | None = None
+    # Working, animated: the mark itself lights up, white laid over its shape at this
+    # strength (0 none). No spinner, no ring: the logo is the loader.
+    shine: float = 0.0
 
 
 ICON_LOOKS = {
@@ -51,28 +51,32 @@ ICON_LOOKS = {
     "muted": IconLook(0.55, 0.0, True, False),
 }
 
-# The working state's animation: FRAMES frames FRAME_MS apart (a 1.2 s cycle). The glow
-# breathes between 0.35 and 0.75 opacity (`icon_working` is opaque, so these are its
-# alpha) and the arc goes round once a cycle. Only while the icon spins: never while keys
-# arrive (a still glow, no arc, costs nothing per keystroke).
+# The working state's animation: FRAMES frames FRAME_MS apart (a 1.2 s cycle). The logo
+# breathes: its glow between 0.3 and 0.9 opacity (`icon_working` is opaque, so these are its
+# alpha) and, in step, the mark brightens (SHINE: white over its shape, 0 to 0.45) and
+# settles again. Only while the icon spins: never while keys arrive (a still glow costs
+# nothing per keystroke). The loaders beside "Checking with Claude…" are the same small
+# breathing mark, never a spinner.
 FRAMES = 24
 FRAME_MS = 50
-PULSE = tuple(round(0.55 - 0.2 * math.cos(2 * math.pi * i / FRAMES), 3) for i in range(FRAMES))
+PULSE = tuple(round(0.6 - 0.3 * math.cos(2 * math.pi * i / FRAMES), 3) for i in range(FRAMES))
+SHINE = tuple(round(0.225 - 0.225 * math.cos(2 * math.pi * i / FRAMES), 3)
+              for i in range(FRAMES))
+LOADER_ALPHA = tuple(round(0.7 - 0.3 * math.cos(2 * math.pi * i / FRAMES), 3)
+                     for i in range(FRAMES))  # the loader's small mark: 0.4 to 1.0
+LOADER_PX = 14
 STILL_GLOW = 0.55
-ARC_SWEEP = 1.9  # radians: about a third of the circle
-ARC_RADIUS = 10.5  # px from the mark's centre (the mark is 18 px)
-ARC_WIDTH = 1.6
 
 
 def icon_look(state: str, spin: bool = False, phase: int = 0) -> IconLook:
-    """How the icon is drawn in `state` (StatusState's value). Working breathes and its arc
-    turns only while `spin` (not while keys arrive); `phase` is the animation frame."""
+    """How the icon is drawn in `state` (StatusState's value). Working breathes and
+    brightens only while `spin` (not while keys arrive); `phase` is the animation frame."""
     base = ICON_LOOKS.get(state, ICON_LOOKS["idle"])
     if state == "working":
         if not spin:
             return replace(base, glow=STILL_GLOW, pulse=False)
         i = phase % FRAMES
-        return replace(base, glow=PULSE[i], pulse=True, arc=2 * math.pi * i / FRAMES)
+        return replace(base, glow=PULSE[i], pulse=True, shine=SHINE[i])
     return base
 
 

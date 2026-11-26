@@ -150,11 +150,13 @@ def test_status_piece_says_how_the_mark_is_drawn():
     work = sc.status_piece(StatusView(StatusState.WORKING, spin=True), 0, 0)["look"]
     assert work["pulse"] and 0 < work["glow"] <= 1
     still = sc.status_piece(StatusView(StatusState.WORKING, spin=False), 0, 0)["look"]
-    assert not still["pulse"] and not still["arc"]  # keys still arriving: no animation
-    assert work["arc"] and work["glow_token"] == "icon_working"
-    # a clearly visible breath: 0.35 -> 0.75 opacity over a 1.2 s cycle
+    assert not still["pulse"] and not still["shine"]  # keys still arriving: no animation
+    assert work["glow_token"] == "icon_working" and "arc" not in work  # no ring, no spinner
+    # a clearly visible breath: 0.3 -> 0.9 opacity over a 1.2 s cycle, the mark brightening
     assert len(sc.LOOK["pulse"]) == sc.LOOK["frames"] == 24 and sc.LOOK["frame_ms"] == 50
-    assert min(sc.LOOK["pulse"]) == 0.35 and max(sc.LOOK["pulse"]) == 0.75
+    assert min(sc.LOOK["pulse"]) == 0.3 and max(sc.LOOK["pulse"]) == 0.9
+    assert min(sc.LOOK["shine"]) == 0 and max(sc.LOOK["shine"]) == 0.45
+    assert sc.LOOK["loader"]["px"] == 14 and min(sc.LOOK["loader"]["alpha"]) == 0.4
     assert sc.LOOK["glow_pad"] == 0.25
 
 
@@ -550,4 +552,4 @@ def test_loading_pieces_carry_the_loader_and_skeletons():
     panel = sc.panel_piece(view, 0, 0, 520, True, sugg)
     assert panel["suggested"]["loading"] and panel["view"]["loading"]
     assert [c["skeleton"] for c in panel["view"]["tone_chips"]] == [True, False]
-    assert sc.LOOK["skeleton"]["suggested"] and sc.LOOK["arc"]["sweep"] > 0
+    assert sc.LOOK["skeleton"]["suggested"] and "arc" not in sc.LOOK

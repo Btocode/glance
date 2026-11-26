@@ -56,7 +56,7 @@ def status_piece(view: StatusView, x: int, y: int) -> dict[str, Any]:
             "message": view.message, "x": x, "y": y,
             "look": {"mark_alpha": lk.mark_alpha, "glow": lk.glow, "grey": lk.grey,
                      "pulse": lk.pulse, "glow_token": lk.glow_token,
-                     "arc": lk.arc is not None}}
+                     "shine": lk.shine}}
 
 
 def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
@@ -144,8 +144,8 @@ def scene(tokens: dict[str, str], window: dict[str, Any] | None, *,
 LOOK: dict[str, Any] = {
     "mark_dir": str(ASSETS), "mark_sizes": list(MARK_SIZES), "glow_pad": GLOW_PAD,
     "pulse": list(look.PULSE), "frames": look.FRAMES, "frame_ms": look.FRAME_MS,
-    "still_glow": look.STILL_GLOW,
-    "arc": {"sweep": look.ARC_SWEEP, "radius": look.ARC_RADIUS, "width": look.ARC_WIDTH},
+    "still_glow": look.STILL_GLOW, "shine": list(look.SHINE),
+    "loader": {"alpha": list(look.LOADER_ALPHA), "px": look.LOADER_PX},
     "skeleton": {"suggested": list(look.SKELETON_SUGGESTED), "card": list(look.SKELETON_CARD),
                  "bar_h": look.SKELETON_BAR_H, "gap": look.SKELETON_GAP},
     "glyphs": {name: [list(c) for c in path] for name, path in look.GLYPHS.items()},

@@ -15,7 +15,6 @@ needs it. It gives the focus back to the window that had it before it reports th
 """
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from typing import Any
 
@@ -196,16 +195,16 @@ def _skeleton(width: int) -> Gtk.Widget:
     return bar
 
 
-class _Spinner(Gtk.DrawingArea):
-    """The loader's spinner: the working icon's arc (`look.ARC_*`), 12 px, turning once a
-    cycle. Its timer runs only while it is on screen."""
+class _BreathingMark(Gtk.DrawingArea):
+    """The loader: the brand mark, `look.LOADER_PX`, breathing (`look.LOADER_ALPHA`) and
+    brightening in step (`look.SHINE`), as the working icon does. Its timer runs only while
+    it is on screen."""
 
-    def __init__(self, colour: Callable[[], tuple[float, float, float]]) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._colour = colour
         self._phase = 0
         self._src: int | None = None
-        self.set_size_request(12, 12)
+        self.set_size_request(look.LOADER_PX, look.LOADER_PX)
         self.set_valign(Gtk.Align.CENTER)
         self.connect("draw", self._draw)
         self.connect("map", lambda *_a: self._run(True))
@@ -223,24 +222,17 @@ class _Spinner(Gtk.DrawingArea):
         self.queue_draw()
         return GLib.SOURCE_CONTINUE
 
-    def _draw(self, _w: Gtk.Widget, cr: Any) -> bool:
-        a = 2 * math.pi * self._phase / look.FRAMES
-        cr.set_line_width(1.6)
-        cr.set_line_cap(cairo.LINE_CAP_ROUND)
-        cr.set_source_rgba(*self._colour(), 0.25)
-        cr.arc(6, 6, 4.6, 0, 2 * math.pi)
-        cr.stroke()
-        cr.set_source_rgb(*self._colour())
-        cr.arc(6, 6, 4.6, a, a + look.ARC_SWEEP)
-        cr.stroke()
+    def _draw(self, widget: Gtk.Widget, cr: Any) -> bool:
+        i = self._phase % look.FRAMES
+        paint_mark(cr, widget, 0, 0, look.LOADER_PX, look.LOADER_ALPHA[i])
+        paint_mark(cr, widget, 0, 0, look.LOADER_PX, look.SHINE[i], tint="#ffffff")
         return False
 
 
-def _loader(text: str, colour: Callable[[], tuple[float, float, float]]) -> Gtk.Widget:
-    """A small spinner and "Checking with Claude…", muted."""
+def _loader(text: str) -> Gtk.Widget:
+    """The small breathing mark and "Checking with Claude…", muted."""
     row = Gtk.Box(spacing=6)
-    spinner = _Spinner(colour)
-    row.pack_start(spinner, False, False, 0)
+    row.pack_start(_BreathingMark(), False, False, 0)
     row.pack_start(_label(text, "glance-meta", wrap=False), False, False, 0)
     row.set_name("loader")
     return row
@@ -313,21 +305,6 @@ def mark_region(widget: Gtk.Widget, x: int, y: int, px: int) -> cairo.Region:
             elif not on and run is not None:
                 region.union(cairo.RectangleInt(x + run, y + row, col - run, 1))
                 run = None
-    return region
-
-
-def arc_region(cx: float, cy: float, start: float) -> cairo.Region:
-    """Where the working arc (`look.ARC_*`) starting at `start` is drawn, as a region: part
-    of the icon's outline where there is no compositor."""
-    region = cairo.Region()
-    steps = 24
-    half = look.ARC_WIDTH / 2 + 0.6
-    for k in range(steps + 1):
-        t = start + look.ARC_SWEEP * k / steps
-        x = cx + look.ARC_RADIUS * math.cos(t)
-        y = cy + look.ARC_RADIUS * math.sin(t)
-        region.union(cairo.RectangleInt(int(x - half), int(y - half),
-                                        int(2 * half + 1), int(2 * half + 1)))
     return region
 
 
@@ -760,10 +737,6 @@ class GtkOverlay:
             m = (ICON - MARK_PX) // 2
             seen = mark_region(self._icon, ICON_X + m, ICON_Y + m, MARK_PX)
             seen.union(badge)
-            lk = None if view is None else look.icon_look(view.state.value, view.spin,
-                                                          self._phase)
-            if lk is not None and lk.arc is not None:  # the working arc shows too
-                seen.union(arc_region(ICON_X + ICON / 2, ICON_Y + ICON / 2, lk.arc))
             gdk_window.shape_combine_region(seen, 0, 0)
 
     def _animate(self) -> None:
@@ -784,8 +757,6 @@ class GtkOverlay:
             self._spin = None
             return GLib.SOURCE_REMOVE
         self._phase = (self._phase + 1) % look.FRAMES
-        if not self._composited:
-            self._icon_shape()  # the arc moved: so does the window's outline
         self._icon.queue_draw()
         return GLib.SOURCE_CONTINUE
 
@@ -1192,9 +1163,6 @@ class GtkOverlay:
 
     # ------------------------------------------------------------------ drawing
 
-    def _accent(self) -> tuple[float, float, float]:
-        return rgb(self._theme.tokens, "accent")
-
     def _restyle(self) -> None:
         """The desktop switched light/dark: the CSS is swapped; redraw what cairo draws."""
         self._icon.queue_draw()
@@ -1226,16 +1194,12 @@ class GtkOverlay:
         x0, y0 = cx - MARK_PX / 2, cy - MARK_PX / 2
         if lk.glow > 0:
             paint_glow(cr, widget, x0, y0, MARK_PX, t[lk.glow_token], lk.glow)
-        if lk.arc is not None:  # working: a thin arc turning around the mark
-            cr.set_line_width(look.ARC_WIDTH)
-            cr.set_line_cap(cairo.LINE_CAP_ROUND)
-            cr.set_source_rgb(*rgb(t, "accent_fill"))
-            cr.arc(cx, cy, look.ARC_RADIUS, lk.arc, lk.arc + look.ARC_SWEEP)
-            cr.stroke()
         if lk.grey:
             paint_mark(cr, widget, x0, y0, MARK_PX, lk.mark_alpha, tint=t["dot_quiet"])
         else:
             paint_mark(cr, widget, x0, y0, MARK_PX, lk.mark_alpha)
+        if lk.shine > 0:  # working: the mark itself lights up and settles again
+            paint_mark(cr, widget, x0, y0, MARK_PX, lk.shine, tint="#ffffff")
         badge = view.badge
         if badge is not None:
             bx, by = BADGE_C
@@ -1424,7 +1388,7 @@ class GtkOverlay:
             else:
                 text.pack_start(sentence, False, False, 0)
         if view.loading is not None:  # "Checking with Claude…": the AI's text is coming
-            text.pack_start(_loader(view.loading, self._accent), False, False, 0)
+            text.pack_start(_loader(view.loading), False, False, 0)
         for line in (view.summary if view.segments else None, view.meta):
             if line is not None:
                 text.pack_start(_label(line, "glance-note"), False, False, 0)
@@ -1559,7 +1523,7 @@ class GtkOverlay:
             head.pack_end(_label(look.card_line(None, "loading"), "glance-meta", wrap=False),
                           False, False, 0)
         if s.loading is not None:
-            head.pack_end(_loader(s.loading, self._accent), False, False, 0)
+            head.pack_end(_loader(s.loading), False, False, 0)
         box.pack_start(head, False, False, 0)
         if s.loading is not None:  # skeleton lines until the AI's corrected text is back
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=look.SKELETON_GAP)
@@ -1803,7 +1767,7 @@ class GtkOverlay:
         head = Gtk.Box(spacing=8)
         head.pack_start(_label(r.title, "glance-tone-tag", wrap=False), False, False, 0)
         if r.state == "loading":  # the loader, as a requested check shows it
-            head.pack_end(_loader(r.working, self._accent), False, False, 0)
+            head.pack_end(_loader(r.working), False, False, 0)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.pack_start(head, False, False, 0)
         if r.source:
