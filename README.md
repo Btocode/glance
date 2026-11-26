@@ -5,130 +5,31 @@
   <img alt="Glance — writing assistant" src="docs/assets/brand/glance-logo-on-light.png" width="360">
 </picture>
 
-**A system-wide writing assistant for Linux: X11, and GNOME on Wayland.**<br>
-Offline grammar fixes, in place, in any app. No AI required.
+**A writing assistant for your whole desktop: Linux (X11 and GNOME Wayland) and macOS.**<br>
+Fix spelling and grammar in any app. Offline, no AI needed.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-0B7A52)](LICENSE)
-[![Platform: Linux X11 and GNOME Wayland](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11%20%C2%B7%20GNOME%20Wayland-0B7A52?logo=linux&logoColor=white)](#requirements)
+[![Platform: Linux and macOS](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS-0B7A52?logo=linux&logoColor=white)](#install)
 [![Python 3.10 to 3.14](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-0B7A52?logo=python&logoColor=white)](pyproject.toml)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-d9822b)](#status-and-known-limits)
-
-[Install](#install) ·
-[macOS](#macos) ·
-[Connect an AI](#connect-an-ai) ·
-[Usage](#usage) ·
-[Settings](#settings) ·
-[How it works](#how-it-works) ·
-[Privacy](#privacy) ·
-[Contributing](CONTRIBUTING.md)
 
 <br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
-  <img alt="The Glance Assistant panel under a typed message with the Friendlier tone chip picked: its rewrite under Suggested · Friendlier with each change tinted green and an Apply (Alt+Enter) button, four tone chips (Friendlier, More direct, Shorter, Professional) with their number keys, a Rewrite as… box, and the line of fixes with Fix All." src="docs/assets/screenshots/panel-light.png" width="708">
+  <img alt="The Glance Assistant panel under a typed message with the Friendlier tone chip picked: its rewrite under Suggested with each change tinted green and an Apply (Alt+Enter) button, four tone chips, a Rewrite as… box, and the list of fixes." src="docs/assets/screenshots/panel-light.png" width="708">
 </picture>
 
 </div>
 
-## Why Glance
+## What it does
 
-Most writing assistants live inside one browser tab or one editor. Glance lives in your desktop:
-it follows the text field you are typing in (a chat app, a mail client in the browser, a GTK
-editor, Claude Code in a terminal) and quietly shows the corrected text right under it.
-
-- **Local first.** Grammar runs on your computer through [Harper](https://github.com/Automattic/harper)
-  (`harper-ls`). Text goes to an AI only if you connect one.
-- **Never in the way.** A quiet strip, not a popup. Plain <kbd>Enter</kbd> is never taken, so chat
-  apps still send.
-- **Bring your own AI.** Tone hints and rewrites use the `claude`, `codex`, `gemini` or `opencode`
-  CLI you already signed in to, or an API key kept in the system keyring.
-- **Undoable.** An accepted fix goes in as one <kbd>Ctrl</kbd>+<kbd>Z</kbd> step.
-
-## Features
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**Check on a shortcut**<br>
-Glance stays quiet while you type. Press <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a
-Mac) or click the Glance icon: a strip under the field shows the whole message corrected.
-<kbd>Alt</kbd>+<kbd>Enter</kbd> (or a click on that chip in the strip) puts the corrected text in. Prefer
-checks as you type? Switch to **Check: while typing** in the tray menu.
-
-</td>
-<td width="50%">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-dark.png">
-  <img alt="The suggestion strip under the field: the Glance mark, the corrected sentence with the fixes in green, an Alt+Enter chip and a ⋯ button; the Glance icon with a 6 badge at the end of the line." src="docs/assets/screenshots/strip-light.png">
-</picture>
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Tone and rewrites**<br>
-"⋯" (or <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>) opens the Glance Assistant panel:
-the corrected text with every change tinted, the tone chips (<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd>),
-"Rewrite as…" and the list of fixes. Click a tone chip (or press its number key) to pick it:
-its rewrite is made once and shown under **Suggested** with the changes tinted, and
-**Apply** (<kbd>Alt</kbd>+<kbd>Enter</kbd>) puts that version in. Click the chip again to go
-back to the plain corrected text. Nothing is asked of the AI while the pointer only rests on
-a chip. The tone chips follow the audience profile of the field you are in. Tones need a
-connected AI.
-
-</td>
-<td>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
-  <img alt="The Glance Assistant panel with the Friendlier chip picked: its rewrite under Suggested with the changes tinted, Apply (Alt+Enter), four tone chips with number keys, Rewrite as… and the fixes with Fix All." src="docs/assets/screenshots/panel-light.png">
-</picture>
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Select anything**<br>
-<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> rewrites the text you have selected in any app.
-Copy is the default; "Paste over selection" is optional and absent in terminals.
-
-</td>
-<td>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/selection-dark.png">
-  <img alt="The select-anything panel: Glance Assistant for the selected text, four tone chips, Rewrite as…, a note to copy the rewrite, the text's grammar issues, and Paste over selection / Copy rewrite buttons." src="docs/assets/screenshots/selection-light.png">
-</picture>
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Ghost-text autocomplete**<br>
-<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> asks for a completion; it appears after the
-caret in green italics, and <kbd>Tab</kbd> takes it.
-
-</td>
-<td>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/ghost-dark.png">
-  <img alt="A completion after the caret in green italics, with a small Tab key hint after it." src="docs/assets/screenshots/ghost-light.png">
-</picture>
-
-</td>
-</tr>
-</table>
-
-Also: a Ctrl+G editor window for [Claude Code](#claude-code-ctrlg), a tray icon (its
-**Keyboard shortcuts…** lists every chord), and `glance doctor`, which checks everything and
-fixes what Glance owns.
+- **Fixes spelling and grammar in any app.** Chat, mail in the browser, editors, terminals. Grammar runs on your computer.
+- **Changes the tone.** Friendlier, more direct, shorter, more professional, or "Rewrite as…" (needs an AI).
+- **Works on selected text.** Select text anywhere, then Explain, Summarize, Translate, Reply or Rewrite it.
+- **Glance Shot.** Pick a screen region, then copy it, save it, pull the text out of it, or ask the AI to explain it.
+- **Your AI, or none.** Use the `claude`, `codex`, `gemini` or `opencode` you already signed in to, or an API key. Grammar works offline without any.
+- **Private by design.** Text goes to an AI only if you connect one, and secrets are removed first.
 
 ## Install
 
@@ -136,453 +37,169 @@ fixes what Glance owns.
 curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash
 ```
 
-Afterwards run `glance doctor`, and [connect an AI](#connect-an-ai) if you want rewrites and tone
-help. Grammar fixes work without one.
+Works on Linux (x86_64) and macOS 13 or later (Apple silicon and Intel). On Linux you need X11, or GNOME Shell 46 to 50 on Wayland. KDE, Sway and other Wayland desktops are not supported yet.
 
-### Requirements
+**One-time setup after installing:**
 
-- On **x86_64**, either an X11 session ("Ubuntu on Xorg"), or **GNOME Shell 46 to 50 on
-  Wayland** (Ubuntu's default session). KDE Plasma, Sway and other Wayland desktops are not
-  supported yet; the installer says so and stops.
-- A running systemd user manager.
-- The system Python (`/usr/bin/python3`, 3.10 to 3.14) with GTK 3, AT-SPI and Wnck.
-
-If a system package is missing the installer prints the exact `sudo apt install …` line and
-stops; it never runs `sudo` itself unless you pass `--with-apt`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash -s -- --with-apt
-```
-
-`--with-apt` runs one `sudo apt-get install -y` with a fixed list: the missing packages it just
-listed plus the tray icon library. It echoes the command first and does not run `apt-get
-update`. On a system without `apt-get` it stops and names the packages to install another way.
-
-For the tray icon install `sudo apt install gir1.2-ayatanaappindicator3-0.1`; without it Glance
-runs the same, with no icon.
-
-<details>
-<summary><b>What the installer does</b></summary>
-
-<br>
-
-1. Clones Glance into `~/.local/share/glance-src` (a re-run updates it with `git pull --ff-only`)
-   and builds a venv there.
-2. Downloads the grammar engine `harper-ls` (SHA-256 pinned).
-3. Links `glance`, `glanced`, `glance-capture` and `glance-edit` into `~/.local/bin`. Existing
-   files there that are not Glance's are never overwritten.
-4. Installs and starts the systemd user unit `glance.service`.
-5. Runs `glance doctor --fix` and prints the result. If `glance doctor --fix` crashes the
-   installer stops with its error; if some checks are only still red it finishes and tells you
-   to run `glance doctor`.
-6. When the `claude` CLI is installed and your login shell is zsh, it asks before adding the
-   `claude` Ctrl+G wrapper to `.zshrc` (no terminal means no). It never changes `$EDITOR`.
-
-On GNOME Wayland it also installs Glance's GNOME Shell extension (see
-[GNOME on Wayland](#gnome-on-wayland)) and asks you to log out and in once.
-
-Running it again is safe.
-
-</details>
-
-<details>
-<summary><b>Installer options</b></summary>
-
-<br>
-
-| Option | Effect |
+| Your system | What to do |
 | --- | --- |
-| `--with-apt` | install missing system packages with one `sudo apt-get install -y` |
-| `--yes` | accept the Claude Code wrapper |
-| `--no-wrapper` | do not add the Claude Code wrapper |
-| `--no-desktop-overrides` | leave the Chrome/Brave/Slack/Discord launchers alone |
-| `--no-start` | do not start the service |
-| `--from-local` | install from a checkout: `./install.sh --from-local` |
+| Linux, X11 | Nothing. If `glance doctor` asks you to restart Chrome, Slack or similar, do it. |
+| Linux, GNOME Wayland | Log out and back in once, so GNOME loads Glance's extension. |
+| macOS | When macOS asks, switch on Accessibility for `python3.12` (System Settings → Privacy & Security → Accessibility). Screen Recording is needed only for Glance Shot. |
 
-</details>
+### Connect an AI
 
-### Updating
+Optional. Grammar fixes work without it. Tones, rewrites, Explain and Translate need one.
 
-Re-run the install line above, or run `glance update` (it runs that same installer). Your config,
-dictionary, API keys and the Ctrl+G wrapper are kept. `glance update --check` only says whether a
-newer version exists (exit 10 if so). Glance also checks once a day and, when an update is
-available, adds "Update available — Update now" to the tray menu.
+1. Log in with the tool you like: `claude`, `codex login`, `gemini`, or `opencode auth login`. Or store an API key with `glance backend set-key`.
+2. Glance picks a connected one automatically. Check with `glance backend list`, switch with `glance backend use NAME`, try with `glance backend test`.
 
-### Doctor
+Claude is the best tested. Codex, Gemini and OpenCode are experimental.
 
-`glance doctor` checks the session, system packages, grammar engine, daemon, hotkeys, app
-launcher flags, AI backend, Ctrl+G wrapper and autostart, and says what to do about each
-problem.
+## How to use
 
-| Command | Does |
-| --- | --- |
-| `glance doctor` | runs the checks, each with what to do next |
-| `glance doctor --fix` | repairs what Glance owns |
-| `glance doctor --fix --skip ID` | leaves one check alone |
-| `glance doctor --fix --app ID` | opts another Chromium/Electron app in |
-| `glance doctor --undo` | takes those changes out again |
+1. Type in any text field. A small Glance icon appears at the end of the line.
+2. Press <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a Mac) to check. The corrected text shows in a strip under the field.
+3. Press <kbd>Alt</kbd>+<kbd>Enter</kbd> to put it in. One <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes it. Plain <kbd>Enter</kbd> is never taken.
+4. Rest the pointer on the icon, or right-click it, for tones (Friendlier, Direct, Shorter, Professional) and "Rewrite…".
+5. Select text in any app and click the Glance mark that appears: Explain, Translate and more.
+6. Press <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> (⌃⌥C) for Glance Shot.
+7. Tray or menu bar icon → **Features** switches things on and off, including checking as you type.
 
-### Uninstall
-
-```sh
-~/.local/share/glance-src/uninstall.sh          # or ./uninstall.sh in your checkout
-```
-
-Stops and removes the unit, undoes what `glance doctor --fix` set up for launchers and the
-`claude` block in `.zshrc` (byte for byte), removes Glance's symlinks, its data in
-`~/.local/share/glance` and the source it cloned. `--keep-data` keeps your personal dictionary
-and ignored rules. `~/.config/glance/config.toml` is always kept. It is safe to run twice.
-
-> [!NOTE]
-> Uninstall leaves GNOME's toolkit-accessibility setting on (`glance doctor --fix` turned it on).
-> Turn it off yourself with
-> `gsettings set org.gnome.desktop.interface toolkit-accessibility false`.
-
-<details>
-<summary><b>If the uninstaller cannot undo everything</b></summary>
-
-<br>
-
-If the undo cannot run (Glance's environment is broken, even through the system Python), it
-keeps `~/.local/share/glance/desktop-overrides.json`, the install record and the source, lists
-the launcher files and `.zshrc` block still in place, and exits non-zero: re-run the installer
-and then the uninstaller, or remove the listed files by hand.
-
-</details>
-
-## macOS
-
-Glance also runs on **macOS 13 or later** (Apple silicon and Intel). The same install line
-works: on a Mac `install.sh` hands off to `scripts/install-macos.sh`.
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash
-```
-
-It needs no `sudo`, no Homebrew and no Xcode, and changes no shell file. It installs
-[uv](https://docs.astral.sh/uv/) under `~/.local/share/glance/uv` when uv is not already on
-your `PATH`, a uv-managed CPython 3.12 under `~/.local/share/glance/python` (never Apple's 3.9
-or Homebrew's), a venv with PyObjC, the pinned `harper-ls` for your CPU, links the commands into
-`~/.local/bin`, and a LaunchAgent (`~/Library/LaunchAgents/io.github.btocode.glance.plist`)
-that starts Glance at login and restarts it after a crash. Logs go to
-`~/Library/Logs/Glance/glanced.log`. Settings and data use the same paths as on Linux
-(`~/.config/glance/config.toml`, `~/.local/share/glance`); API keys go in your login Keychain.
-
-**The one-time Accessibility grant.** Glance reads and writes text fields through the macOS
-Accessibility API, which needs your permission once. The installer and `glance doctor` print the
-exact file to allow, for example
-`~/.local/share/glance/python/cpython-3.12.…-macos-aarch64-none/bin/python3.12`:
-
-1. System Settings → Privacy & Security → Accessibility → **+**.
-2. Press ⌘⇧G, paste the path, choose the file, and switch it on.
-3. Restart Glance: `launchctl kickstart -k gui/$(id -u)/io.github.btocode.glance`.
-
-`glance doctor --fix` opens that pane and shows macOS's own prompt. Input Monitoring is not
-needed. Glance lives in the menu bar (the Glance mark) with the same menu as the Linux tray.
-
-**Hotkeys on a Mac.** `Super` in `config.toml` means ⌘, `Alt` ⌥, `Ctrl` ⌃. Because ⌘⌥
-chords clash with app shortcuts, the defaults on macOS are ⌃⌥ chords:
-
-| Action | macOS |
-| --- | --- |
-| Check the field now (opens the strip) | ⌃⌥G |
-| Open the strip and drawer | ⌃⌥O |
-| Use the suggestion (while the strip shows) | ⌥⏎ |
-| Fix all | ⌃⌥F |
-| Undo the last fix | ⌃⌥Z |
-| Pause / resume | ⌃⌥P |
-| Pick tone 1–4 (then ⌥⏎ applies it) | ⌃⌥1 … ⌃⌥4 |
-| Complete (autocomplete) | ⌃⌥⏎ |
-| Select-anything | ⌃⌥A |
-
-A chord you changed in `[general.hotkeys]` is used as you wrote it. Shortcuts macOS itself
-owns are left alone and reported. The panel moved from ⌃⌥G to ⌃⌥O in this release so that
-⌃⌥G checks, as <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> does on Linux. VoiceOver takes every
-⌃⌥ chord while it runs; see [docs/shortcuts.md](docs/shortcuts.md).
-
-**Uninstall** with `~/.local/share/glance-src/uninstall.sh` (or `./uninstall.sh` in a checkout):
-it stops and removes the LaunchAgent, the links, the environment, the grammar engine, the logs
-and the source it downloaded, exactly as recorded at install. Remove the Accessibility entry
-yourself in System Settings.
-
-**Limits on macOS (first release):**
-
-- Developed on macOS 15.6 (Apple silicon) against a native AppKit test app; Safari, Chrome, Arc and
-  Electron apps are expected to work (their trees are switched on) but are not yet tested.
-- Safari's private windows carry no marker Glance can see: Safari is gated by URL and the deny
-  lists only. Chrome, Brave and Arc incognito windows are recognised by their title.
-- macOS cannot offer a paste to one app only; Glance's clipboard writes are marked concealed
-  and transient so clipboard managers skip them, and the clipboard is restored afterwards.
-- The Ctrl+G editor window and the "Connect an AI" window are not ported yet: use
-  `glance backend …` in Terminal or the menu bar's AI backend menu.
-- The Accessibility grant is on the Python interpreter (there is no signed app bundle yet);
-  a Python update by the installer may ask for the grant again.
-
-## Connect an AI
-
-Grammar checks run on your computer. Tone hints and rewrites need one AI that **you** choose;
-until one is connected the chip, the tray and `glance doctor` all say "Connect an AI" and the
-grammar checks keep working. Sign in with the vendor's own tool, then choose it:
-
-| AI | Connect | Default model |
-| --- | --- | --- |
-| Claude | run `claude` and log in | `haiku` |
-| Codex *(experimental)* | `codex login` | `gpt-6-luna` |
-| Gemini *(experimental)* | run `gemini` to authenticate (or use an API key) | `flash-lite` |
-| OpenCode *(experimental)* | `opencode auth login` | OpenCode's own default |
-| API key | `glance backend set-key` (stored in the system keyring only) | Anthropic: `claude-haiku-5-5`; OpenAI-compatible: whatever you set |
-
-```sh
-glance backend list            # what is connected, the model each uses, the command for the rest
-glance backend use NAME        # choose one (exit 2, with its sign-in command, when not connected)
-glance backend test [NAME]     # one real call with a short sample sentence
-```
-
-The onboarding window (tray menu: **AI backend, Set up...**) does the same with buttons: Copy
-the command, Test, Use this, and API provider, model, base URL and key.
-
-<details>
-<summary><b>Models and speed</b></summary>
-
-<br>
-
-Glance only does short, basic text work, so each backend defaults to its fastest, cheapest
-model (see the table). Change it with `glance backend model NAME MODEL` (e.g.
-`glance backend model codex gpt-6-luna`; for `api` it sets `backend.api_model`) and go back with
-`glance backend model NAME --default`; the same lives in `[backend.models]` of the config. A
-model the tool rejects is retried once with the tool's own default.
-
-</details>
-
-<details>
-<summary><b>Warm claude</b></summary>
-
-<br>
-
-With claude chosen, Glance keeps a claude process started and idle, so a call skips ~0.9 s of
-start-up. It costs about 195 MB of memory per idle process (one for checks, one for rewrites:
-up to ~390 MB). Set `warm = false` under `[backend]` in the config to turn it off (`true` or
-leaving it out: on). It is never on for another backend, and it is shut down when you switch
-away from claude, change claude's model or set `warm = false`.
-
-</details>
-
-> [!IMPORTANT]
-> The provider processes your text under its own terms; the onboarding window says what each
-> tool may keep despite Glance's no-session flags. Text sent to any backend is redacted first
-> (keys, tokens, cards, private keys).
-
-Codex and OpenCode run with their shell, file and web tools switched off through flags and a
-deny-all permission config, but that lock-down could not be confirmed without a billed model
-call, so both are marked experimental in `glance doctor`.
-
-## Usage
-
-Glance runs as a systemd user service. Type in any text field: a small Glance icon at the end of
-the line shows that Glance is ready. When you want your text checked, press
-<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a Mac) or click the icon. The icon shows the
-check working, then the suggestion strip opens with the corrected text. Rest the pointer on the
-icon (or right-click it) for its toolbar: check, a tone (friendlier, more direct, shorter, more
-professional: previewed in the strip, <kbd>Alt</kbd>+<kbd>Enter</kbd> uses it), rewrite your
-own way, or ⋯ for the Glance Assistant panel.
-
-**Two ways to check**, set from the tray menu (**Check: on shortcut / while typing**) or in
-`config.toml`:
-
-```toml
-[general]
-check = "shortcut"   # default: nothing is checked or sent to an AI until you press the
-                     # check shortcut or click the icon
-# check = "typing"   # check as you type; the icon shows the fixes it found as you go
-```
-
-In the default **shortcut** mode, Glance runs no grammar checks, AI analysis or speculative AI
-calls while you type. The capture helper still reads the focused field (to place the icon and
-to verify a fix it types in), but nothing is checked until you ask. If you edit the text after
-a check, the strip closes and the icon goes back to "ready". Press the shortcut again to check
-the new text. Pressing it while the strip is open checks again. <kbd>Esc</kbd> or moving to
-another field closes the strip. **Typing** mode is how Glance worked before: it checks after each pause
-(see [Status icon and when suggestions appear](#status-icon-and-when-suggestions-appear)).
-
-<p align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/status-ready-dark.png">
-  <img alt="The Glance icon at the end of a typed line: the Glance mark with a soft emerald glow and a 6 badge at its top right, six fixes ready." src="docs/assets/screenshots/status-ready-light.png">
-</picture>
-&nbsp;&nbsp;
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-dark.png">
-  <img alt="After clicking the icon: the suggestion strip under the field with the corrected sentence, an Alt+Enter chip and a ⋯ button." src="docs/assets/screenshots/strip-light.png" width="600">
+  <img alt="The suggestion strip under the field: the Glance mark, the corrected sentence with the fixes in green, an Alt+Enter chip and a ⋯ button." src="docs/assets/screenshots/strip-light.png" width="600">
 </picture>
-</p>
 
-None of these is a GNOME, Ubuntu, KDE, Xfce or macOS system shortcut;
-[docs/shortcuts.md](docs/shortcuts.md) lists what was checked.
+### Shortcuts
 
-| Linux | macOS | Action |
+| Linux | macOS | What it does |
 | --- | --- | --- |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | ⌃⌥G | check the field now and open the strip (again: check again) |
-| <kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌥⏎ | put the suggestion in: the corrected text, or the tone you picked in the panel (only grabbed while there is one) |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | ⌃⌥O | open the panel: tone rewrites, "Rewrite as…", the list of fixes |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> | ⌃⌥F | fix all safe grammar |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> | ⌃⌥Z | revert the last change |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | ⌃⌥P | pause |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd> | ⌃⌥1 … ⌃⌥4 | pick the Nth tone chip of the field's audience: the panel opens with its rewrite under Suggested; <kbd>Alt</kbd>+<kbd>Enter</kbd> applies it |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌃⌥⏎ | ask for a completion (ghost text) |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | ⌃⌥A | rewrite the selected text in any app |
-| <kbd>Esc</kbd> | Esc | close the strip and the panel |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | ⌃⌥G | Check the field now |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌥⏎ | Use the suggestion (or the tone you picked) |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | ⌃⌥O | Open the panel: tones, "Rewrite as…", list of fixes |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd> | ⌃⌥1 … ⌃⌥4 | Pick tone 1 to 4 |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> | ⌃⌥F | Fix all safe grammar |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> | ⌃⌥Z | Undo the last Glance change |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | ⌃⌥A | Act on the selected text |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> | ⌃⌥C | Glance Shot (in the picker: Enter is the whole screen, Space the window, Esc cancels) |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌃⌥⏎ | Ask for a completion (shown as ghost text, <kbd>Tab</kbd> takes it) |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | ⌃⌥P | Pause or resume |
+| <kbd>Esc</kbd> | Esc | Close the strip and the panel |
 
-Plain <kbd>Enter</kbd> is never taken, so it still sends in chat apps. The tray's
-**Keyboard shortcuts…** shows the chords as they are set on this computer:
+The tray's **Keyboard shortcuts…** shows them as set on your computer. Change any in `[general.hotkeys]`. None clashes with a desktop shortcut; see [docs/shortcuts.md](docs/shortcuts.md).
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/shortcuts-dark.png">
-  <img alt="The Keyboard shortcuts window: each of Glance's chords as keycaps (Alt + Enter, Super + Alt + G, Super + Alt + Space and so on) next to what it does." src="docs/assets/screenshots/shortcuts-light.png" width="640">
-</picture>
-
-### Command line
+## Update and uninstall
 
 ```sh
-glance status                    # what it is doing (never any text); --json for scripts
-glance pause [30m|2h|45s]        # switch checking off (no duration: until resumed)
-glance resume                    # and on again
-glance rewrite --tone friendlier < draft.txt   # stdin to stdout through the chosen AI
-glance profile [show|set NAME|clear]           # the audience profile of the field you are in
-glance update [--check]          # update Glance; --check only compares versions
+glance update                                  # same installer; keeps your config, keys and dictionary
+~/.local/share/glance-src/uninstall.sh         # remove Glance (--keep-data keeps your dictionary)
 ```
 
-`status`, `pause` and `resume` print `glanced is not running` and exit 3 when the daemon is
-down. `glance rewrite` exits 4 when no AI is connected.
+`glance update --check` only says whether a newer version exists. Glance also checks once a day and adds "Update now" to the tray menu.
 
-### Claude Code Ctrl+G
+Uninstall keeps `~/.config/glance/config.toml`. It leaves the accessibility setting on: on GNOME turn it off with `gsettings set org.gnome.desktop.interface toolkit-accessibility false`, on macOS remove the Accessibility entry in System Settings.
 
-`glance wrapper install` adds a marked `claude()` function to `${ZDOTDIR:-$HOME}/.zshrc`. It sets
-`EDITOR`/`VISUAL=glance-edit` for the `claude` process only (the previous editor is kept in
-`GLANCE_REAL_EDITOR`); your shell's own `$EDITOR` never changes. <kbd>Ctrl</kbd>+<kbd>G</kbd> in
-Claude Code then opens your prompt in Glance's editor window.
+## Troubleshooting
 
-- `glance wrapper uninstall` removes the block exactly.
-- `glance wrapper status` prints `installed`, `absent` or `conflict`.
-- `glance-edit` must be on the PATH of new shells (for example `~/.local/bin`).
+Start with `glance doctor`. It checks everything and says what to do. `glance doctor --fix` repairs what Glance owns. `glance status` shows what Glance is doing (never your text).
 
-## AI usage
+| Problem | Fix |
+| --- | --- |
+| Nothing happens | Run `glance doctor --fix`. |
+| "Connect an AI" | Log in to `claude` (or another AI, see above). Grammar still works. |
+| No icon on GNOME Wayland | Log out and back in once. |
+| macOS: no icon or suggestions | Switch on Accessibility for `python3.12`, then `launchctl kickstart -k gui/$(id -u)/io.github.btocode.glance`. |
+| The first check is slow | The AI is starting up. Later checks are faster. |
+| A shortcut does nothing | Another program may own it. `glance doctor` reports clashes. Change it in `[general.hotkeys]`. |
 
-Glance keeps a count of its own AI calls so you can see what it uses. After every call it adds
-to one entry per day, backend and model: calls, failed calls, input and output tokens, and
-what each call was for (analyze, rewrite, complete, sharpen). **No text is stored**: no
-prompts, no replies, no field contents, only numbers. The ledger is
-`~/.local/share/glance/usage-ledger.json` (mode 0600, the last 90 days).
+Logs (they never contain your text): Linux `journalctl --user -u glance`, macOS `~/Library/Logs/Glance/glanced.log`.
 
-Tokens and cost are recorded only where the backend reports them: claude reports both
-(cost as `total_cost_usd`), the `api` backend and codex report tokens, gemini and opencode
-report neither. Glance has no price list and never estimates, so a missing figure shows as
-`n/a`. On a subscription (a CLI you signed in to) the cost is the API-equivalent figure the
-CLI reports; you are not billed per call.
+## More
 
-Where to see it:
+<details>
+<summary><b>Settings</b></summary>
 
-- `glance usage` prints Today, Last 7 days and This month per backend and model, plus today's
-  calls against your daily and per-minute limits. `--days N` shows the last N days;
-  `--json` prints the numbers.
-- `glance status` has a short `usage_today` (calls, tokens, cost, calls left today).
-- The tray has an "AI usage" submenu (Today, This month) and "Details..." for the full table.
+<br>
 
-To stop AI calls once a month's reported cost reaches a number of US dollars, set it in
-`~/.config/glance/config.toml`:
-
-```toml
-[ai]
-monthly_cost_limit_usd = 5.00   # default: no limit
-```
-
-When the limit is reached Glance refuses new AI calls (the chip and tray say "Monthly AI cost
-limit reached") and the local grammar and spelling checks keep working. It starts again on
-the 1st of the next month, or when you raise or remove the setting. Only a cost a backend
-reported counts, so it limits claude (and any backend that reports a cost), not the others.
-
-## Settings
-
-Settings live in `~/.config/glance/config.toml`; Glance picks up changes while it runs.
+Settings live in `~/.config/glance/config.toml`. Glance reads changes while it runs.
 
 ```toml
 [general]
-check_updates = true             # false: never look for a newer version
-check = "shortcut"               # or "typing": when the text is checked (see Usage)
+check = "shortcut"            # or "typing": check as you type
+check_updates = true          # false: never look for a newer version
 
-[general.hotkeys]               # only the keys you set change; the rest keep their defaults
+[general.hotkeys]             # only the keys you set change
 check = "Super+Alt+g"
-panel = "Super+Alt+space"
-fix_all = "Super+Alt+f"
 
 [ui]
-use_key = "Alt+Return"          # the key that puts the strip's corrected text in
+suggestions = "on_click"      # or "auto" (typing mode): show suggestions by themselves
+use_key = "Alt+Return"        # the key that puts the suggestion in
 
 [ai]
-max_words = 600                 # the most words the AI reads at once (50-5000)
+max_words = 600               # most words the AI reads at once (50-5000)
+monthly_cost_limit_usd = 5.00 # stop AI calls at this reported cost (default: no limit)
+
+[selection]
+enabled = true                # the floating mark beside selected text
+translate_to = "English"
+
+[shot]
+enabled = true
+save_dir = "~/Pictures/Glance"
+ocr = "auto"                  # auto, ocrs, tesseract or off
+ai_images = "ask"             # ask, allow or never (Explain / Ask send the image to the AI)
 
 [backend]
-warm = false                    # no idle claude process
+warm = false                  # no idle claude process (default on, about 195 MB each)
 
-[backend.models]
-claude = "haiku"
-
-[apps.slack]                    # per app, by window class
-capture = false                 # stop automatic field capture in this app
+[apps.slack]                  # per app, by window class
+capture = false               # stop automatic field capture in this app
 ```
 
-A shortcut that another program or GNOME itself already uses is left alone and reported in a
-notification, in `glance status` and in `glance doctor` (which also reads GNOME's own shortcuts,
-so it reports a clash even while glanced is not running). The defaults and the desktop shortcuts
-they were checked against are in [docs/shortcuts.md](docs/shortcuts.md).
+Change a model with `glance backend model NAME MODEL`. Defaults are each tool's fastest, cheapest model. To make Glance never read an app, add its window class to `privacy.app_denylist` (this replaces the built-in list of password managers and remote-desktop tools).
 
-`[ai] max_words` caps how much of one text goes to the AI (analysis, rewrites and
-select-anything). A longer text is still spell- and grammar-checked locally as a whole (up to
-5,000 words), but the AI only gets the `max_words` words around your cursor, cut at sentence
-or paragraph boundaries, and the strip says so ("Long text: AI checked 600 of 1,450 words
-around your cursor"). A value outside 50-5000 is ignored with a warning in the log.
+**Other commands:** `glance pause [30m|2h]`, `glance resume`, `glance profile`, `glance features`, `glance rewrite --tone friendlier < draft.txt`, `glance usage`.
 
-### Status icon and when suggestions appear
+**Claude Code Ctrl+G (Linux):** `glance wrapper install` adds a `claude()` function to `.zshrc` so Ctrl+G opens your prompt in Glance's editor. `glance wrapper uninstall` removes it.
 
-While you write in a text field, the Glance mark sits at the end of the line you are typing and shows what Glance is doing:
+**Installer options:** add them after `bash -s --`. `--with-apt` installs missing system packages with one `sudo apt-get install -y` (never run otherwise), `--yes` / `--no-wrapper` answer the Claude Code wrapper question, `--no-desktop-overrides` leaves Chrome, Brave, Slack and Discord launchers alone, `--no-start` does not start the service, `--from-local` installs from a checkout. For the Linux tray icon install `gir1.2-ayatanaappindicator3-0.1`; without it Glance works with no icon.
 
-| Icon | Meaning |
-|---|---|
-| The Glance mark, softened | Watching this field, nothing to suggest (in shortcut mode: ready to check) |
-| The mark with a soft glow that breathes (during an AI call) | Checking |
-| The mark in full colour, gently glowing, with an emerald number | That many fixes are ready (an amber dot instead of a number: a tone note) |
-| A grey mark | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
+</details>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/toolbar-dark.png">
-  <img alt="The icon's toolbar, one slim row under the typed line: the Glance mark, Check with Super+Alt+G muted beside it, Friendlier, Direct, Shorter, Professional, Rewrite… and ⋯, each with a small line icon." src="docs/assets/screenshots/toolbar-light.png" width="720">
-</picture>
+<details>
+<summary><b>Privacy</b></summary>
 
-Click the icon to see the corrected text (in shortcut mode the click checks first); click
-again or press <kbd>Esc</kbd> to close it. Resting the pointer on the icon (not while you are
-typing), or a right-click on it, opens its toolbar: one slim row under the line, in the same
-look as the selection toolbar: **Check** (with the check shortcut beside it), the tones of the
-field's audience (by default **Friendlier**, **Direct**, **Shorter**, **Professional**),
-**Rewrite…** and **⋯**. A tone runs that one rewrite and shows it in the strip with the changes
-highlighted and the tone's name above it: <kbd>Alt</kbd>+<kbd>Enter</kbd> uses it,
-<kbd>Esc</kbd> closes it; nothing is typed before you choose. The large Glance Assistant panel
-opens only from **⋯**, or **Rewrite…** (which opens it with its "Rewrite as…" input). When
-Glance is paused, the field is private or no AI is connected, the toolbar is one line saying
-why, with the one thing to do about it (**Resume**, **Connect an AI…**).
-<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens the panel with the rewrite options. In typing mode, to have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
+<br>
 
-```toml
-[ui]
-suggestions = "auto"   # default "on_click": only after a click on the Glance icon
-```
+- Grammar checks run on your computer ([Harper](https://github.com/Automattic/harper)). Nothing is sent to an AI until you connect one.
+- Text sent to any backend is redacted first (keys, tokens, cards, private keys).
+- An API key lives in the system keyring (Keychain on macOS) only, never in the config or logs.
+- `glance status` and the logs never contain your text.
+- Once a day Glance asks github.com for the latest version; nothing else is sent. Turn it off with `check_updates = false`.
+- A Glance Shot image stays in memory. It is written to disk only if you click Save, and sent to an AI only by Explain or Ask, after a notice.
+- Private browser windows, password managers and banking or SSO pages are never read.
+- On GNOME Wayland, Glance's shell extension can type into the focused window and read the clipboard. It serves only Glance's own processes.
 
-The suggestion covers the whole field, every sentence and paragraph, not just the one with the
-cursor: it fixes spelling, grammar, punctuation and capitalisation in your own words (never a
-rewording), the badge counts every fix, and **Use** replaces the whole text in one undo step.
-A long message is shown compact, only the sentences with fixes separated by "…" and a line
-like "7 fixes across the message"; **⋯** expands it to the whole corrected text.
+Found a privacy leak? Report it privately: see [SECURITY.md](SECURITY.md).
 
+</details>
 
-## How it works
+<details>
+<summary><b>AI usage tracking</b></summary>
+
+<br>
+
+Glance counts its own AI calls per day, backend and model: calls, failures, tokens and what each was for. No text is stored, only numbers, in `~/.local/share/glance/usage-ledger.json` (last 90 days). Figures appear only where the backend reports them; Glance never estimates, so a missing figure shows as `n/a`.
+
+See it with `glance usage` (`--days N`, `--json`), `glance status`, or the tray's "AI usage" menu. With `monthly_cost_limit_usd` set, Glance refuses new AI calls once the reported cost reaches it (local grammar keeps working) and starts again on the 1st. Only backends that report a cost, such as claude, are limited.
+
+</details>
+
+<details>
+<summary><b>How it works</b></summary>
+
+<br>
 
 ```mermaid
 flowchart LR
@@ -596,96 +213,33 @@ flowchart LR
     cap -->|XTEST write-back| app
 ```
 
-- **`glance-capture`** follows the focused field over AT-SPI. A hard privacy gate decides from
-  the field's metadata alone (app, window class and title, URL, role and states), never its
-  text, whether that text may leave capture.
-- **`glanced`** is the daemon: scheduling, Harper, the overlay, hotkeys and the tray in one GTK
-  main loop. It starts `glance-capture` and `harper-ls` itself and restarts them if they die.
-- **Write-back** puts one edit into the focused field through synthetic keys (XTEST) or the
-  clipboard, checks it landed, and undoes it if not. It never interleaves with your typing.
+- **`glance-capture`** follows the focused field over AT-SPI. A privacy gate decides from the field's metadata alone (app, window, URL, role), never its text, whether the text may leave capture.
+- **`glanced`** is the daemon: scheduling, Harper, the overlay, hotkeys and the tray in one loop. It restarts `glance-capture` and `harper-ls` if they die.
+- **Write-back** types one edit into the field (or pastes it), checks it landed, and undoes it if not.
+- **GNOME Wayland:** Wayland blocks overlays, global shortcuts and typing into other apps, so a small GNOME Shell extension (`glance@btocode.github.io`) does just those parts. The installer enables it; you log out and in once.
+- **macOS:** the same design through the Accessibility API, with a LaunchAgent. The installer needs no `sudo`, Homebrew or Xcode.
 
-## Privacy
+</details>
 
-- Grammar checks run on your computer. Nothing is sent to an AI until you connect one.
-- Text sent to any backend is redacted first (keys, tokens, cards, private keys).
-- An API key lives in the system keyring (libsecret) only, never in the config or the logs.
-- Once a day Glance asks github.com for the latest version (`git ls-remote`); nothing else is
-  sent. Turn it off with `check_updates = false` under `[general]`.
-- `glance status` and the logs never contain any of your text.
-- On GNOME Wayland, Glance's shell extension can type into the focused window and read the
-  clipboard and the selection, which Wayland keeps from ordinary apps. It serves only
-  Glance: every call is refused unless the caller owns Glance's own bus name and the bus
-  reports it as a `glanced` / `glance-capture` process of your user (only "is the extension
-  there?" is open to all), and glanced in turn accepts calls only from GNOME Shell. What is
-  left: another unsandboxed program running as you could start a fake `glanced`; such a
-  program can already read your files and attach to your processes. Flatpak and snap apps
-  cannot reach Glance's bus names unless their sandbox is given `--talk-name` for them.
-- To make Glance never read an app, add its window class to `privacy.app_denylist` (setting the
-  list replaces the built-in one, which already holds password managers and remote-desktop
-  tools): that is the "never read" switch, and select-anything honours it, as it does private
-  browser windows and banking/SSO pages. `[apps.NAME] capture = false` only stops automatic
-  field capture; it does not stop an explicit select-anything request in that app.
+<details>
+<summary><b>Status and known limits</b></summary>
 
-Found a privacy leak? Please report it privately; see [SECURITY.md](SECURITY.md).
+<br>
 
-## GNOME on Wayland
+Glance is early software, tested by automated tests (a private Xvfb on X11, a headless GNOME Shell on Wayland, a test app on a Mac), not yet in daily use on real desktops.
 
-Wayland does not let an ordinary app float a window over another app without taking the
-focus, grab global shortcuts, type into another app or read where its windows are. On GNOME,
-Glance therefore ships a small GNOME Shell extension, `glance@btocode.github.io`, that does
-exactly those parts and nothing else: it draws the status icon, the strip and the drawer
-inside the shell, binds the hotkeys, and types accepted fixes into the focused window with a
-virtual keyboard (only while that window still has the focus, and never while you hold a
-key). Everything else (checking, deciding, privacy) runs in Glance's own daemon, which talks
-to the extension over the local session bus; your text is never logged on either side.
+- Not run yet: the live desktop checklist (real Slack, Discord, Gmail, claude.ai, ChatGPT) and the suspend, lock and monitor-hotplug check.
+- Firefox write-back is not matrix-tested. Flatpak and snap apps are not captured.
+- Codex, Gemini and OpenCode are experimental; Gemini and OpenCode never returned a verified reply in testing.
+- Tested on Ubuntu 22.04 / Python 3.10 (X11) and Ubuntu 26.04 / Python 3.14 with GNOME Shell 50 (Wayland). x86_64 only. GNOME 46 to 49 are supported but untested.
+- macOS: tested on macOS 15 (Apple silicon) with a test app only. Safari, Chrome, Arc and Electron apps are expected to work but are untested. Safari private windows cannot be detected. The Accessibility grant is on the Python interpreter, so a Python update may ask again. The Ctrl+G editor window and the "Connect an AI" window are not ported yet; use `glance backend`.
+- Details: [docs/acceptance/report.md](docs/acceptance/report.md).
 
-- The installer copies the extension to `~/.local/share/gnome-shell/extensions/`, enables it
-  and tells you to **log out and in once**: GNOME on Wayland loads a new extension only at
-  login. Until then Glance checks grammar and shows its tray icon, but draws nothing.
-- `glance doctor` has a `shell_extension` line (installed, enabled, running);
-  `glance doctor --fix` enables the extension and turns GNOME's accessibility switch on.
-- The tray icon needs GNOME's AppIndicator support (on by default on Ubuntu).
-- Fixes that cannot be typed (characters outside plain ASCII) are pasted through the
-  clipboard and your clipboard is put back afterwards. Unlike on X11, a clipboard manager can
-  see that one paste.
-- The uninstaller disables the extension and removes its files.
-
-## Status and known limits
-
-> [!WARNING]
-> Glance is early software: it has been tested by automated tests (a private Xvfb on X11, a private
-> headless GNOME Shell on Wayland, a test app on a Mac), not yet in daily use on real desktops.
-
-- Not run yet: the live desktop checklist (real Slack, Discord, Gmail, claude.ai, ChatGPT in
-  real profiles).
-- Not run yet: the manual suspend, lock and monitor-hotplug check.
-- Firefox write-back is not matrix-tested (the snap build cannot run on a private D-Bus).
-  Flatpak and snap apps are not captured.
-- Gemini and OpenCode never returned a verified reply in testing; treat them as experimental.
-  Codex is experimental too (see [Connect an AI](#connect-an-ai)). Default model names are as
-  configured, not re-verified.
-- Tested on Python 3.10 / Ubuntu 22.04 on X11, and on Python 3.14 / Ubuntu 26.04 with GNOME
-  Shell 50 on Wayland (in a private headless GNOME Shell: icon, strip, Alt+Enter, following a
-  moved window, select-anything). x86_64 only.
-- Wayland: supported on GNOME Shell 46 to 50 through the extension; only GNOME 50 was tested.
-  KDE Plasma, Sway and other Wayland desktops are not supported yet.
-- macOS: first release, tested on macOS 15 (Apple Silicon) with a test app only; see
-  [Limits on macOS](#macos).
-- Details: [`docs/acceptance/report.md`](docs/acceptance/report.md).
+</details>
 
 ## Contributing
 
-Bug reports, fixes and new backends are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md):
-it covers the dev setup, which tests are safe to run on your own desktop (and which are not),
-the project layout and the privacy rules every change must keep.
-
-```sh
-uv venv --python /usr/bin/python3 --system-site-packages .venv && uv pip install -e ".[dev]"
-.venv/bin/pytest
-```
-
-Please follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security or privacy issues
-as described in [SECURITY.md](SECURITY.md).
+Bug reports, fixes and new backends are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
