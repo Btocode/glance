@@ -5,8 +5,11 @@ import re
 from dataclasses import dataclass
 
 from glance.backends.base import Analysis, AnalysisIssue, BackendError, Ctx
+from glance.grammar.corrections import CORRECTION_KINDS, SUGGESTION_KINDS
 
-KINDS = ("clarity", "grammar", "tone")
+# Corrections (they may go into the default corrected sentence), then suggestions (the
+# drawer's list only).
+KINDS = (*sorted(CORRECTION_KINDS), *SUGGESTION_KINDS)
 FLAGS = ("hostile", "missing_attachment", "missing_link")
 
 ANALYZE_SCHEMA: dict = {
@@ -98,9 +101,15 @@ def analyze_system(ctx: Ctx) -> str:
         "You are a writing assistant that reviews a short draft message. "
         + _context_line(ctx)
         + " Judge the tone of the draft and whether it mismatches the target tone (give a short "
-        "reason only when it does, else null). List at most 12 concrete issues of kind clarity, "
-        "grammar or tone; each quotes the exact problematic substring from the draft, its 1-based "
-        "occurrence among identical substrings, a short message, and a replacement (or null). "
+        "reason only when it does, else null). List at most 12 concrete issues; each quotes the "
+        "exact problematic substring from the draft (as short as possible), its 1-based "
+        "occurrence among identical substrings, a short message, a replacement (or null) and its "
+        "kind. Corrections come first, of kind spelling, grammar, punctuation, capitalization, "
+        "agreement or missing_word: each is the minimal edit that makes the writer's own words "
+        "correct. Keep their words, word choice and tone: never reword, rephrase, formalise or "
+        "'improve' a phrase that is already correct (\"handle it\" stays \"handle it\"). Only "
+        "then, optionally, suggestions of kind clarity, style, wording or tone for a phrase that "
+        "is correct but could read better; never label a rewording as a correction. "
         "Set flags only when true: hostile (the draft is abusive), missing_attachment (it mentions "
         "an attachment that cannot be there), missing_link (it refers to a link that is absent). "
         + _COMMON

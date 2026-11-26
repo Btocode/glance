@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from glance.clock import Clock, Handle
 from glance.config import Config
 from glance.daemon.scheduler import CheckScheduler
+from glance.grammar.corrections import SPELL_RULE, SPLIT_RULE, ai_correction
 from glance.grammar.filters import IssueFilter
 from glance.grammar.issues import Issue, issue_edit, merge_edits
 from glance.log import log_event
@@ -666,7 +667,17 @@ class Controller:
             ignored |= self._call("extra_ignored", rules, s, default=frozenset())
         kept = self._filter.apply(s.text, found, s.wm_class, extra_ignored=ignored)
         local = [i for i in kept if i.source == "harper"]
-        # The local checker wins where another source flags the same text.
+        # Where the AI analysis corrects a word the local checker only says is misspelled,
+        # the AI's choice wins (it reads the context: "fo" -> "of", not "for").
+        spell = [h for h in local if h.rule in (SPELL_RULE, SPLIT_RULE)]
+        overrides = [i for i in kept if i.source == "llm"
+                     and ai_correction(s.text, i) is not None
+                     and any(i.start < h.end and h.start < i.end for h in spell)
+                     and not any(i.start < h.end and h.start < i.end
+                                 for h in local if h not in spell)]
+        local = [h for h in local
+                 if not any(h.start < o.end and o.start < h.end for o in overrides)]
+        # Otherwise the local checker wins where another source flags the same text.
         others = [i for i in kept if i.source != "harper"
                   and not any(i.start < h.end and h.start < i.end for h in local)]
         self._issues = sorted(local + others, key=lambda i: (i.start, i.end))

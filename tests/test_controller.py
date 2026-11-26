@@ -27,6 +27,7 @@ PATTERNS = {
     "Teh": ("Typo", ("The",)),
     "teh": ("Typo", ("the",)),
     "brwon": ("SpellCheck", ("brown", "brawn")),
+    "Smiht": ("SpellCheck", ("Smith", "Smit")),  # a capitalised word mid-sentence: a name?
 }
 
 
@@ -930,17 +931,20 @@ def test_nothing_to_fix_shows_no_strip(rig):
     assert rig.overlay.strip is None
     rig.settle(snap(text="Teh quick brwon fox"[:3] + "x" * 20))  # Teh: a safe fix
     assert rig.overlay.strip is not None
-    rig.settle(snap(text="quick brwon fox jumps over"))  # only a spelling choice: not safe
+    rig.settle(snap(text="quick brwon fox jumps over"))  # a confident spelling fix
+    assert rig.overlay.strip.text == "quick brown fox jumps over"
+    rig.settle(snap(text="ask Smiht now"))  # only a spelling choice (maybe a name): not sure
     assert rig.overlay.strip is None
 
 
 def test_use_applies_the_sentence_in_one_verified_edit(rig):
     rig.cfg = AUTO  # the strip shows by itself
     s = rig.settle(snap(text=MIXED))
-    assert rig.overlay.strip.text == "The quick brwon fox the end of it"
+    assert rig.overlay.strip.text == "The quick brown fox the end of it"
     rig.c.use_strip()
     (req,) = rig.capture.applies
-    assert req.edit == merge_edits(MIXED, [Edit(0, 3, "The"), Edit(20, 23, "the")])
+    assert req.edit == merge_edits(MIXED, [Edit(0, 3, "The"), Edit(10, 15, "brown"),
+                                           Edit(20, 23, "the")])
     assert req.expected_sha256 == text_sha256(s.text)
     assert rig.overlay.strip is None  # while it is applied: nothing more to use
     rig.c.use_strip()

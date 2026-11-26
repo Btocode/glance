@@ -17,7 +17,7 @@ def harper(text, word, repl, *, safe=True, rule="Rule", nth=0):
 
 def llm(text, word, repl):
     start, end = _find(text, word)
-    return Issue(f"llm:x:{start}:{end}", "llm", "x", "msg", start, end,
+    return Issue(f"llm:llm:grammar:{start}:{end}", "llm", "llm:grammar", "msg", start, end,
                  (repl,) if repl is not None else (), False)
 
 

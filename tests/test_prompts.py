@@ -113,7 +113,7 @@ def test_parse_analysis_ok_and_bad():
                 {"tone": "x", "mismatch": True, "reason": None, "flags": [],
                  "issues": [{"quote": "a"}]},
                 {**ok, "issues": [bad_issue]},
-                {**ok, "issues": [{**bad_issue, "occurrence": 1, "kind": "style"}]},
+                {**ok, "issues": [{**bad_issue, "occurrence": 1, "kind": "nonsense"}]},
                 {**ok, "mismatch": "yes"}):
         with pytest.raises(BackendError) as e:
             parse_analysis(bad)

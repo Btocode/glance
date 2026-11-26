@@ -49,7 +49,7 @@ class AnalysisIssue:
     occurrence: int  # 1-based
     message: str
     replacement: str | None
-    kind: str  # clarity | grammar | tone
+    kind: str  # a correction (spelling, grammar, ...) or a suggestion (clarity, style, wording, tone)
 
 
 @dataclass(frozen=True)
