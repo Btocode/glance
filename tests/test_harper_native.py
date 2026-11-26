@@ -71,7 +71,7 @@ def test_make_client_falls_back_to_harper_ls(tmp_path, monkeypatch):
     assert isinstance(c, HarperClient) and c.engine == "harper-ls"
     monkeypatch.setattr(hn, "_core", object())
     c = make_client(tmp_path / "harper-ls", tmp_path / "d.txt", environ={})
-    assert isinstance(c, NativeHarperClient) and c.engine == "native"
+    assert isinstance(c, hn.FallbackClient) and c.engine == "native"
 
 
 # ------------------------------------------------------------------ the client
@@ -227,3 +227,22 @@ def test_native_client_end_to_end(tmp_path: Path):
     words.write_text("Zorblax\n")  # what PersonalDictionary.add writes
     assert not any(t[i.start:i.end] == "Zorblax" for i in client.check(t))
     assert any(t[i.start:i.end] == "teh" for i in client.check(t))
+
+
+def test_native_that_cannot_start_falls_back_to_harper_ls(tmp_path):
+    from glance.grammar.harper_native import FallbackClient
+
+    class Broken:
+        def start(self):
+            raise RuntimeError("engine build failed")
+
+    class Ls:
+        started = False
+        def start(self):
+            self.started = True
+        def check(self, text):
+            return ["ls"]
+
+    c = FallbackClient(Broken(), Ls)
+    c.start()
+    assert c.engine == "harper-ls" and c.check("x") == ["ls"]

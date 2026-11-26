@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from glance.grammar.issues import HarperLint, Issue, harper_issues
@@ -157,8 +158,29 @@ class NativeHarperClient:
 def make_client(binary: Path, user_dict: Path, environ: dict[str, str] | None = None,
                 **kwargs: Any) -> Any:
     """The grammar client glanced runs: in-process Harper when available, else harper-ls."""
-    if engine_choice(environ) == NATIVE:
-        return NativeHarperClient(user_dict)
     from glance.grammar.harper import HarperClient
 
+    if engine_choice(environ) == NATIVE:
+        return FallbackClient(NativeHarperClient(user_dict),
+                              lambda: HarperClient(binary, user_dict, **kwargs))
     return HarperClient(binary, user_dict, **kwargs)
+
+
+class FallbackClient:
+    """In-process Harper, switching for good to the harper-ls process if it cannot start."""
+
+    def __init__(self, native: Any, fallback: Callable[[], Any]) -> None:
+        self._inner, self._fallback, self.engine = native, fallback, NATIVE
+
+    def start(self) -> None:
+        if self.engine == NATIVE:
+            try:
+                self._inner.start()
+                return
+            except Exception as e:  # noqa: BLE001 - any engine failure: use harper-ls instead
+                log_event("grammar_native_fallback", kind=type(e).__name__)
+                self._inner, self.engine = self._fallback(), HARPER_LS
+        self._inner.start()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
