@@ -109,4 +109,5 @@ jobs:
           git push origin "$branch"
           gh pr create --base main --head "$branch" \
             --title "Pin glance_core ${GITHUB_REF_NAME#core-v} wheels" \
-            --body "SHA-256 pins for the wheels of release ${GITHUB_REF_NAME}, written by the core-wheels workflow."
+            --body "SHA-256 pins for the wheels of release ${GITHUB_REF_NAME}, written by the core-wheels workflow." \
+            || echo "::notice::Actions may not open pull requests in this repository; the pins are on branch $branch"
