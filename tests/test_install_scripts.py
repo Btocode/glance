@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from glance.doctor.desktop_entries import _is_chromium_app
+
 REPO = Path(__file__).resolve().parents[1]
 NAMES = ("glance", "glanced", "glance-capture", "glance-edit")
 BEGIN = "# >>> glance claude wrapper >>>"
@@ -582,6 +584,10 @@ def _break_venv(sb: Sandbox) -> None:
         _script(sb.checkout / ".venv/bin" / name, "echo broken >&2\nexit 1\n")
 
 
+@pytest.mark.skipif(
+    not _is_chromium_app("/usr/bin/slack"),
+    reason="needs a real Slack at /usr/bin/slack: the launcher override is only written for an "
+           "installed Chromium/Electron app")
 def test_uninstall_with_a_broken_venv_keeps_what_it_could_not_undo(sb):
     sb.seed()
     before = tree(sb.home)
