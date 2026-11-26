@@ -121,6 +121,12 @@ GLANCE_ACTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Under the table in the "Keyboard shortcuts" window: what the status icon offers.
+ICON_TIP = ("The Glance icon: click it to check; rest the pointer on it (or right-click it) "
+            "for its toolbar: Check, the tones (each shown in the strip first, the use key "
+            "applies it), Rewrite… and ⋯ (the Glance Assistant).")
+
+
 def glance_shortcuts(hotkeys: dict[str, str], use_key: str = "Alt+Return",
                      mac: bool = False) -> list[tuple[list[str], str]]:
     """Glance's shortcuts as (keycaps, what it does) rows for this platform: the chords as

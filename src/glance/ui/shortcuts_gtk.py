@@ -10,6 +10,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, Gtk
 
 from glance.ui.overlay_gtk import _classes, _keycaps, _label, _mark
+from glance.ui.shortcut_table import ICON_TIP
 from glance.ui.theme import install
 
 TITLE = "Keyboard shortcuts"
@@ -58,6 +59,9 @@ class ShortcutsWindow:
             label.set_margin_end(18 if col < COLUMNS - 1 else 0)
             grid.attach(label, col * 2 + 1, row, 1, 1)
         self._box.pack_start(grid, False, False, 0)
+        tip = _label(ICON_TIP, "glance-meta", chars=90)
+        tip.set_max_width_chars(90)
+        self._box.pack_start(tip, False, False, 0)
         bar = Gtk.Box()
         close = _classes(Gtk.Button(label="Close"), "glance-secondary")
         close.connect("clicked", lambda _b: self.window.hide())

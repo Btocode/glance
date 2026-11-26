@@ -21,7 +21,7 @@ const BADGE_C = [23, 7], BADGE_R = 7;
 const MARK_PX = 18;  // the brand mark in the icon's (invisible) click target
 const GHOST_GAP = 6;
 const SPIN_MS = 125;
-// The status icon's hover menu (glance/ui/hover_menu.py: OPEN_MS, CLOSE_MS).
+// The status icon's toolbar (glance/ui/icon_toolbar.py: OPEN_MS, CLOSE_MS).
 const MENU_OPEN_MS = 250;
 const MENU_CLOSE_MS = 400;
 const ASK_RETURN_MS = 1500;
@@ -97,7 +97,8 @@ function cursorNow() {
     return 'default';
 }
 
-export function clickable(actor, onClick) {
+// `onSecondary`: a right-click (the status icon: its toolbar at once).
+export function clickable(actor, onClick, onSecondary = null) {
     actor.reactive = true;
     actor.track_hover = true;
     actor.can_focus = false;
@@ -121,6 +122,8 @@ export function clickable(actor, onClick) {
             releases++;
             if (event.get_button() === Clutter.BUTTON_PRIMARY)
                 onClick();
+            else if (onSecondary && event.get_button() === Clutter.BUTTON_SECONDARY)
+                onSecondary();
             return Clutter.EVENT_STOP;
         }
         return Clutter.EVENT_PROPAGATE;
@@ -160,6 +163,9 @@ export class Overlay {
         clickable(this._icon, () => {
             this._cancelMenuTimers();
             this._cb.clicked('status', {});
+        }, () => {
+            this._cancelMenuTimers();
+            this._cb.clicked('rightclick', {});
         });
         this._menuOpen = 0;
         this._menuClose = 0;
@@ -208,7 +214,7 @@ export class Overlay {
         this._resizing = false;
         const tokensKey = JSON.stringify(this._t);
         this._renderStatus(scene.status, tokensKey);
-        this._renderMenu(scene.status?.menu ?? null, tokensKey);
+        this._renderMenu(scene.status?.toolbar ?? null, tokensKey);
         this._renderStrip(scene.strip, tokensKey);
         this._renderPanel(scene.panel, tokensKey);
         this._renderGhost(scene.ghost, tokensKey);
@@ -233,7 +239,7 @@ export class Overlay {
         const s = this._scene;
         if (!s)
             return;
-        const menu = s.status?.menu ? {x: s.status.x + ICON_BOX[0], y: s.status.y} : null;
+        const menu = s.status?.toolbar ?? null;
         const pieces = [[this._icon, s.status], [this._strip, s.strip],
             [this._panel, s.panel], [this._ghost, s.ghost], [this._menu, menu],
             [this._selmark, s.selmark]];
@@ -268,6 +274,11 @@ export class Overlay {
             sizes.strip_h = Math.ceil(this._strip.get_child().get_preferred_height(s.strip.w)[1]);
         if (s.panel && this._panel.get_child())
             sizes.panel_h = Math.ceil(this._panel.get_child().get_preferred_height(s.panel.w)[1]);
+        if (s.status?.toolbar && this._menu.get_child()) {
+            const child = this._menu.get_child();
+            sizes.toolbar_w = Math.ceil(child.get_preferred_width(-1)[1]);
+            sizes.toolbar_h = Math.ceil(child.get_preferred_height(sizes.toolbar_w)[1]);
+        }
         if (s.selmark?.state === 'bar' && this._selmark.get_child()) {
             const child = this._selmark.get_child();
             sizes.selmark_w = Math.ceil(child.get_preferred_width(-1)[1]);
@@ -439,9 +450,10 @@ export class Overlay {
         return this._look?.words?.[key] ?? fallback;
     }
 
-    // ------------------------------------------------------------------ the hover menu
-    // The pointer resting on the icon asks glanced for the menu ('hover'); glanced sends it
-    // in the scene (none while the user types). Leaving the icon and the menu ends it.
+    // ------------------------------------------------------------------ the icon's toolbar
+    // The pointer resting on the icon asks glanced for the toolbar ('hover'; a right-click:
+    // 'rightclick'); glanced sends it in the scene (none while the user types). Leaving the
+    // icon and the toolbar ends it.
 
     _cancelMenuTimers() {
         for (const name of ['_menuOpen', '_menuClose']) {
@@ -458,7 +470,7 @@ export class Overlay {
                 GLib.source_remove(this._menuClose);
                 this._menuClose = 0;
             }
-            if (this._icon.hover && !this._scene?.status?.menu && !this._menuOpen) {
+            if (this._icon.hover && !this._scene?.status?.toolbar && !this._menuOpen) {
                 this._menuOpen = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MENU_OPEN_MS, () => {
                     this._menuOpen = 0;
                     if (this._icon.hover)
@@ -475,15 +487,15 @@ export class Overlay {
         if (!this._menuClose) {
             this._menuClose = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MENU_CLOSE_MS, () => {
                 this._menuClose = 0;
-                if (!this._icon.hover && !this._menu.hover && this._scene?.status?.menu)
+                if (!this._icon.hover && !this._menu.hover && this._scene?.status?.toolbar)
                     this._cb.clicked('hover_end', {});
                 return GLib.SOURCE_REMOVE;
             });
         }
     }
 
-    _renderMenu(menu, tokensKey) {
-        const key = menu ? JSON.stringify([menu, tokensKey]) : '';
+    _renderMenu(bar, tokensKey) {
+        const key = bar ? JSON.stringify([{...bar, x: 0, y: 0}, tokensKey]) : '';
         if (key === this._keys.menu)
             return;
         this._keys.menu = key;
@@ -496,34 +508,55 @@ export class Overlay {
             this._menu.set_child(null);
             old.destroy();
         }
-        if (!menu)
+        if (!bar)
             return;
+        // Check · tones · Rewrite… · ⋯, in the selection bar's look; the check chord muted
+        // after "Check"; a muted state's reason first
+        this._menu.set_child(this._toolbar(bar.actions ?? [],
+            a => this._act(bar.action ?? 'icon', {key: a.key}), 'menu', {
+                note: bar.note, hint: bar.hint ? ['check', bar.hint] : null,
+            }));
+    }
+
+    // The toolbar both bars are made of (the selection's, the status icon's): a slim card,
+    // the mark, then one button per action, each a line glyph and its label.
+    _toolbar(actions, onAction, prefix, {more = [], note = null, hint = null} = {}) {
         const t = this._t;
-        const box = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
-            `border-radius: 10px; padding: 6px; spacing: 1px; box-shadow: 0 4px 14px ${t.shadow};`});
-        if (menu.note)
-            box.add_child(this._label(menu.note, 'muted', 12, 'max-width: 260px; padding: 4px 8px 6px 8px;'));
-        for (const item of menu.items) {
-            const name = `menu:${item.action}${item.args?.key ? `:${item.args.key}` : ''}`;
-            const button = this._button(item.label, 'item', this._act(item.action, item.args || {}),
-                name);
-            button.x_expand = true;
-            button.get_child().x_expand = true;
-            box.add_child(button);
+        const bar = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
+            `border-radius: 10px; padding: 4px; spacing: 4px; box-shadow: 0 4px 14px ${t.shadow};`});
+        const row = hbox({style: 'spacing: 2px;'});
+        const lead = this._mark(16);
+        lead.style = 'margin: 0 4px;';
+        row.add_child(lead);
+        if (note)
+            row.add_child(this._label(note, 'muted', 12, 'padding: 0 8px 0 2px;', false));
+        for (const a of actions)
+            row.add_child(this._barButton(a, onAction(a), prefix, hint && hint[0] === a.key ? hint[1] : null));
+        bar.add_child(row);
+        if (more.length) {
+            const line = hbox({style: `spacing: 2px; padding-top: 4px; border-top: 1px solid ${t.hairline};`});
+            for (const a of more)
+                line.add_child(this._barButton(a, onAction(a), prefix));
+            bar.add_child(line);
         }
-        if (menu.hint) {
-            // "Super+Alt+G to check": the chord as keycaps, the rest muted
-            const at = menu.hint.indexOf(' ');
-            const chord = at < 0 ? menu.hint : menu.hint.slice(0, at);
-            const rest = at < 0 ? '' : menu.hint.slice(at + 1);
-            const hint = hbox({style: `spacing: 6px; padding: 6px 8px 2px 8px; ` +
-                `border-top: 1px solid ${t.hairline};`});
-            hint.add_child(this._keycaps(chord.split('+')));
-            if (rest)
-                hint.add_child(this._label(rest, 'muted', 12, '', false));
-            box.add_child(hint);
-        }
-        this._menu.set_child(box);
+        return bar;
+    }
+
+    _barButton(a, onClick, prefix, chord = null) {
+        const t = this._t;
+        const base = 'background-color: transparent; border-radius: 6px; padding: 5px 8px;';
+        const bin = this._hoverBox({y_align: Clutter.ActorAlign.CENTER}, base,
+            `background-color: ${t.hover};`);
+        const row = hbox({style: 'spacing: 5px;'});
+        if (a.glyph && this._look?.glyphs?.[a.glyph])
+            row.add_child(this._glyph(a.glyph, 13));
+        row.add_child(this._label(a.label, 'body', 13, '', false));
+        if (chord)
+            row.add_child(this._label(chord, 'muted', 11, '', false));
+        bin.set_child(row);
+        clickable(bin, onClick);
+        this._named.set(`${prefix}:${a.key}`, bin);
+        return bin;
     }
 
     // ------------------------------------------------------------------ the status icon
@@ -632,7 +665,7 @@ export class Overlay {
         if (key === this._keys.strip)
             return;
         this._keys.strip = key;
-        for (const n of ['use', 'more', 'strip-text'])
+        for (const n of ['use', 'more', 'strip-text', 'strip-label'])
             this._named.delete(n);
         this._strip.get_child()?.destroy();
         if (!strip)
@@ -649,6 +682,11 @@ export class Overlay {
         row.set_width(strip.w);
         row.add_child(this._mark(16));
         const text = vbox({x_expand: true, y_align: Clutter.ActorAlign.CENTER, style: 'spacing: 2px;'});
+        if (v.label) {  // a tone's rewrite (the icon's toolbar), not the fixes
+            const label = this._label(v.label, 'accent', 12, 'font-weight: 600;', false);
+            this._named.set('strip-label', label);
+            text.add_child(label);
+        }
         if (v.segments.length > 0) {
             const sentence = this._label('', 'body', 14);
             sentence.clutter_text.set_markup(strip.markup);
@@ -1186,22 +1224,6 @@ export class Overlay {
         this._cb.clicked('action', {action: 'sel_hover', args: {inside}});
     }
 
-    _selButton(a) {
-        const t = this._t;
-        const base = 'background-color: transparent; border-radius: 6px; padding: 5px 8px;';
-        const bin = this._hoverBox({y_align: Clutter.ActorAlign.CENTER}, base,
-            `background-color: ${t.hover};`);
-        const row = hbox({style: 'spacing: 5px;'});
-        if (a.glyph && this._look?.glyphs?.[a.glyph])
-            row.add_child(this._glyph(a.glyph, 13));
-        row.add_child(this._label(a.label, 'body', 13, '', false));
-        bin.set_child(row);
-        const more = a.key === 'more';
-        clickable(bin, this._act(more ? 'sel_more' : 'sel_action', more ? {} : {key: a.key}));
-        this._named.set(`sel:${a.key}`, bin);
-        return bin;
-    }
-
     _renderSelmark(piece, tokensKey) {
         const key = piece ? JSON.stringify([{...piece, x: 0, y: 0}, tokensKey]) : '';
         if (key === this._keys.selmark)
@@ -1228,22 +1250,8 @@ export class Overlay {
             this._selmark.set_child(dot);
             return;
         }
-        const bar = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
-            `border-radius: 10px; padding: 4px; spacing: 4px; box-shadow: 0 4px 14px ${t.shadow};`});
-        const row = hbox({style: 'spacing: 2px;'});
-        const lead = this._mark(16);
-        lead.style = 'margin: 0 4px;';
-        row.add_child(lead);
-        for (const a of piece.actions ?? [])
-            row.add_child(this._selButton(a));
-        bar.add_child(row);
-        if (piece.more?.length) {
-            const more = hbox({style: `spacing: 2px; padding-top: 4px; border-top: 1px solid ${t.hairline};`});
-            for (const a of piece.more)
-                more.add_child(this._selButton(a));
-            bar.add_child(more);
-        }
-        this._selmark.set_child(bar);
+        const act = a => a.key === 'more' ? this._act('sel_more') : this._act('sel_action', {key: a.key});
+        this._selmark.set_child(this._toolbar(piece.actions ?? [], act, 'sel', {more: piece.more ?? []}));
     }
 
     // ------------------------------------------------------------------ the ghost
@@ -1375,7 +1383,8 @@ export class Overlay {
             status: geo(this._icon) && s?.status ? {rect: geo(this._icon), state: s.status.state,
                 badge: s.status.badge, spinning: Boolean(this._spin)} : null,
             strip: geo(this._strip) && s?.strip ? {rect: geo(this._strip),
-                text: text && text.mapped ? text.clutter_text.get_text() : null} : null,
+                text: text && text.mapped ? text.clutter_text.get_text() : null,
+                label: s.strip.view?.label ?? null} : null,
             panel: geo(this._panel) ? {rect: geo(this._panel), mode: s?.panel?.view?.mode,
                 result: s?.panel?.view?.result ? {state: s.panel.view.result.state,
                     actions: (s.panel.view.result.actions ?? []).map(([key]) => key),
@@ -1384,9 +1393,10 @@ export class Overlay {
             ghost: geo(this._ghost) ? {rect: geo(this._ghost)} : null,
             selmark: geo(this._selmark) && s?.selmark ? {rect: geo(this._selmark),
                 state: s.selmark.state} : null,
-            menu: geo(this._menu) && s?.status?.menu ? {rect: geo(this._menu),
-                items: s.status.menu.items.map(i => i.label), note: s.status.menu.note ?? null,
-                hint: s.status.menu.hint ?? null} : null,
+            menu: geo(this._menu) && s?.status?.toolbar ? {rect: geo(this._menu),
+                items: s.status.toolbar.actions.map(a => a.label),
+                keys: s.status.toolbar.actions.map(a => a.key),
+                note: s.status.toolbar.note ?? null, hint: s.status.toolbar.hint ?? null} : null,
             cursor: cursorNow(),
             ask: Boolean(this._ask),
             named: [...this._named.keys()].filter(n => this._named.get(n).mapped),

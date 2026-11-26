@@ -1,6 +1,6 @@
 """`[general] check = "shortcut"`: nothing is checked while typing; the check hotkey (or a
 click on the status icon) checks the field and opens the strip. Plus the default chords,
-the tray toggle, the extension schema and the hover menu model."""
+the tray toggle and the extension schema (the icon's toolbar: test_icon_toolbar)."""
 from __future__ import annotations
 
 import re
@@ -12,21 +12,11 @@ import pytest
 from glance.backends.base import Analysis, BackendError
 from glance.config import CHECK_MODES, Config, GeneralCfg, load_config, update_config
 from glance.daemon.controller import OPEN_WAIT_MS
-from glance.daemon.panel_actions import PanelRouter
 from glance.daemon.wiring import check_label, set_check_mode
 from glance.grammar.corrections import strip_replacement
 from glance.ui.hotkeys import parse_chord
-from glance.ui.hover_menu import (
-    CHECK,
-    RESUME,
-    SETUP,
-    TYPING_QUIET_MS,
-    hover_menu,
-    may_open,
-    menu_piece,
-)
 from glance.ui.shortcut_table import LINUX_RESERVED, MAC_RESERVED
-from glance.ui.status_model import NO_AI_LINE, PAUSED_LINE, PRIVATE_LINE, StatusState, StatusView
+from glance.ui.status_model import StatusState
 from glance.ui.tray_gtk import check_mode_labels
 from tests import test_ai_analyze as ai_t
 from tests import test_controller as ct
@@ -328,56 +318,6 @@ def test_ai_corrections_keep_only_minimal_edits_and_protected_text(tmp_path):
     assert "doing," in _shown(r)  # the quick fixes stay
 
 
-# ---------------------------------------------------------------- hover menu
-
-
-def view(state, message=None):
-    return StatusView(state, message=message)
-
-
-def test_hover_menu_items_per_state():
-    full = hover_menu(view(StatusState.IDLE), "Super+Alt+G")
-    assert [i.label for i in full.items] == ["Check spelling & grammar", "Check tone",
-                                             "Rewrite…", "Shorter", "More professional"]
-    assert full.hint == "Super+Alt+G to check" and full.note is None
-    assert full.items[3].args == {"key": "shorter"}
-    paused = hover_menu(view(StatusState.MUTED, PAUSED_LINE), "Super+Alt+G")
-    assert paused.items == (RESUME,) and paused.note == PAUSED_LINE and paused.hint is None
-    private = hover_menu(view(StatusState.MUTED, PRIVATE_LINE))
-    assert private.items == () and private.note == PRIVATE_LINE
-    no_ai = hover_menu(view(StatusState.MUTED, NO_AI_LINE), "⌃⌥G")
-    assert no_ai.items == (CHECK, SETUP) and no_ai.hint == "⌃⌥G to check"
-    assert hover_menu(view(StatusState.HIDDEN)) is None
-    assert menu_piece(no_ai)["items"][1] == {"label": "Connect an AI…", "action": "setup",
-                                             "args": {}}
-
-
-def test_typing_suppresses_hover_open(rig):
-    assert may_open(10.0, None) and may_open(10.0, 10.0 - TYPING_QUIET_MS / 1000)
-    assert not may_open(10.0, 9.9)
-    rig.c.handle_snapshot(ct.snap())
-    rig.clock.advance(1000)
-    rig.c.handle_snapshot(ct.snap(ct.TEH + " o", seq=2))
-    assert rig.c.hover_menu("Super+Alt+G") is None  # a key just now
-    rig.clock.advance(TYPING_QUIET_MS)
-    assert rig.c.hover_menu("Super+Alt+G").items[0] == CHECK
-
-
-def test_hover_menu_actions_route(rig):
-    opened = []
-    router = PanelRouter(rig.c, on_setup=lambda: opened.append(1))
-    rig.c.handle_snapshot(ct.snap())
-    router.action("check", {})
-    rig.clock.advance(0)
-    assert rig.overlay.strip is not None
-    router.action("setup", {})
-    assert opened == [1]
-    rig.c.close_panel()
-    router.action("check_tone", {})
-    rig.clock.advance(0)
-    assert rig.overlay.strip is not None and rig.overlay.panel is not None
-
-
 def test_check_label():
     assert check_label("Super+Alt+g") == "Super+Alt+G"
     assert check_label("Ctrl+Alt+g", mac=True) == "⌃⌥G"
@@ -477,34 +417,3 @@ def test_the_hotkeys_own_blur_does_not_lose_the_check(rig):
     rig.c.handle_snapshot(replace(s, seq=3))
     rig.clock.advance(0)
     assert rig.overlay.strip is not None
-
-
-def test_shell_overlay_sends_the_hover_menu_in_the_scene():
-    from glance.ui.overlay_shell import ShellOverlay
-    from tests import test_shell_adapters as sa
-
-    bus = sa.bus_with_monitors()
-    posted, actions = [], []
-    ov = ShellOverlay(bus, posted.append, lambda ms, fn: None, lambda: sa.LIGHT,
-                      lambda: None, lambda action, args: actions.append((action, args)),
-                      hover_menu=lambda: hover_menu(view(StatusState.IDLE), "Super+Alt+G"))
-
-    def run():
-        while posted:
-            posted.pop(0)()
-
-    ov.on_window({"reason": "focus", "focus": sa.WINDOW, "monitors": [[0, 0, 1280, 800]]})
-    ov.show_status(view(StatusState.IDLE), sa.ANCHOR)
-    run()
-    assert "menu" not in sa.last_scene(bus)["status"]
-    ov.on_clicked({"target": "hover", "args": {}})
-    run()
-    menu = sa.last_scene(bus)["status"]["menu"]
-    assert menu["items"][0]["action"] == "check" and menu["hint"] == "Super+Alt+G to check"
-    ov.on_clicked({"target": "action", "args": {"action": "check", "args": {}}})
-    run()
-    assert actions == [("check", {})] and "menu" not in sa.last_scene(bus)["status"]
-    ov.on_clicked({"target": "hover", "args": {}})
-    ov.on_clicked({"target": "hover_end", "args": {}})
-    run()
-    assert "menu" not in sa.last_scene(bus)["status"]

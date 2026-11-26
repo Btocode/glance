@@ -288,12 +288,10 @@ def test_strip_and_card_actions(tmp_path):
     assert d.overlay.panel is not None
     act("more")
     assert d.overlay.panel is None
-    act("tone_apply", key="shorter")  # the hover menu's "Shorter": made, then applied
-    assert len(d.capture.applies) == 1 and [c.tone for c in d.rewrites()] == ["shorter"]
-    act("tone_apply", key="custom")  # "Rewrite as…" still asks first
+    act("tone", key="custom")  # "Rewrite as…" asks first
     assert [prompt for prompt, _cb in d.overlay.asked] == ["Rewrite as…"]
     calls = []
     stub = SimpleNamespace(use_strip=lambda: calls.append("use"))
     dispatch_panel_action(stub, "use", {})
     assert calls == ["use"]
-    act("tone_apply")  # malformed: nothing raised
+    act("tone")  # malformed: nothing raised

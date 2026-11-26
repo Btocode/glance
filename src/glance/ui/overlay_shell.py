@@ -23,7 +23,7 @@ from glance.protocol import Rect
 from glance.shellbus import ShellBus, ShellUnavailable
 from glance.ui import scene as sc
 from glance.ui.chip_model import ChipView
-from glance.ui.hover_menu import menu_piece
+from glance.ui.icon_toolbar import place_toolbar, toolbar_piece
 from glance.ui.panel_model import PanelView, suggested_box
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
@@ -53,10 +53,11 @@ class ShellOverlay:
                  on_chip_click: Callable[[], None],
                  on_panel_action: Callable[[str, dict[str, Any]], None],
                  use_key: Callable[[], str] = lambda: "Alt+Return",
-                 hover_menu: Callable[[], Any] = lambda: None) -> None:
+                 icon_toolbar: Callable[..., Any] = lambda on_purpose=False: None) -> None:
         self._bus = bus
-        self._hover_menu = hover_menu  # the icon's hover menu now (None: not now)
-        self._menu: Any = None  # the HoverMenu on show
+        # the icon's toolbar now (None: not now); `on_purpose`: a right-click asks for it
+        self._icon_toolbar = icon_toolbar
+        self._menu: Any = None  # the IconToolbar on show
         self._post = post
         self._later = call_later
         self._tokens = tokens
@@ -71,7 +72,8 @@ class ShellOverlay:
         self._panel_point = (0, 0)
         self._ghost: tuple[str, int, int, int, int] | None = None
         self._selmark: tuple[Any, int, int] | None = None  # selection actions' mark / bar
-        self._sizes = {"strip_h": STRIP_H, "panel_h": PANEL_H, "selmark_w": 0, "selmark_h": 0}
+        self._sizes = {"strip_h": STRIP_H, "panel_h": PANEL_H, "selmark_w": 0, "selmark_h": 0,
+                       "toolbar_w": 0, "toolbar_h": 0}
         self._window: dict[str, Any] | None = None
         self._monitors: list[Rect] = []
         self._queued = False
@@ -216,11 +218,16 @@ class ShellOverlay:
             self._on_chip_click()
             self._queue()
             return
-        if target == "hover":  # the pointer rested on the icon: its menu, if it has one now
-            self._menu = self._hover_menu() if self._status is not None else None
+        if target == "hover":  # the pointer rested on the icon: its toolbar, if it has one now
+            self._menu = self._icon_toolbar(False) if self._status is not None else None
             self._queue()
             return
-        if target == "hover_end":  # the pointer left the icon and the menu
+        if target == "rightclick":  # the toolbar at once, typing or not; again: closed
+            self._menu = None if self._menu is not None or self._status is None else \
+                self._icon_toolbar(True)
+            self._queue()
+            return
+        if target == "hover_end":  # the pointer left the icon and the toolbar
             if self._menu is not None:
                 self._menu = None
                 self._queue()
@@ -236,7 +243,7 @@ class ShellOverlay:
 
     def on_sized(self, payload: dict[str, Any]) -> None:
         changed = False
-        for key in ("strip_h", "panel_h", "selmark_w", "selmark_h"):
+        for key in ("strip_h", "panel_h", "selmark_w", "selmark_h", "toolbar_w", "toolbar_h"):
             value = payload.get(key)
             if isinstance(value, (int, float)) and value > 0 and int(value) != self._sizes[key]:
                 self._sizes[key] = int(value)
@@ -295,9 +302,15 @@ class ShellOverlay:
             if at is not None:
                 x, y = clamp_to_monitor(at[0] - ICON_X, at[1] - ICON_Y, ICON_BOX, mons)
                 status = sc.status_piece(self._status, x, y)
-                if self._menu is not None:
-                    status["menu"] = menu_piece(self._menu)
                 placed["status"] = (x + ICON_X, y + ICON_Y, ICON, ICON)
+                if self._menu is not None:
+                    # under the caret line, its right end under the icon's (sized by the
+                    # extension once drawn: a first guess until then)
+                    size = (self._sizes["toolbar_w"] or 600, self._sizes["toolbar_h"] or 38)
+                    icon = Rect(x + ICON_X, y + ICON_Y, ICON, ICON)
+                    tx, ty = place_toolbar(icon, anchor.caret or anchor.prev_char, size, mons)
+                    status["toolbar"] = {**toolbar_piece(self._menu), "x": tx, "y": ty}
+                    placed["toolbar"] = (tx, ty, *size)
         field_drawer = self._panel is not None and self._panel_anchor is not None
         # While the field's panel is open it shows the corrected text itself ("Suggested"):
         # the strip is not drawn on its own then.
@@ -386,6 +399,12 @@ class ShellOverlay:
 
     def panel_geometry(self) -> tuple[int, int, int, int] | None:
         return self._placed.get("panel") if self._panel is not None else None
+
+    def toolbar_items(self) -> list[str] | None:
+        """The icon's toolbar's item labels, None while it is closed."""
+        m = self._menu
+        return None if m is None or "toolbar" not in self._placed else \
+            [a.label for a in m.actions]
 
 
 class ShellGhost:

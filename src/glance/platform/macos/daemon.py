@@ -186,14 +186,16 @@ def main(argv: list[str] | None = None) -> int:
     mac_cfg = CachedMacConfig(lambda: watcher.current)
 
     hotkeys = CarbonHotkeys(clock.post)
-    def hover_menu() -> Any:
+
+    def icon_toolbar(on_purpose: bool = False) -> Any:
+        """The status icon's toolbar now (`on_purpose`: a right-click, not a hover)."""
         chord = mac_hotkeys(watcher.current.general.hotkeys).get("check", "")
-        return controller.hover_menu(check_label(chord, mac=True))
+        return controller.icon_toolbar(check_label(chord, mac=True), typing_ok=on_purpose)
 
     mac_overlay = MacOverlay(on_chip_click=lambda: controller.toggle_strip(),
                              on_panel_action=lambda action, args: panels.action(action, args),
                              clock=clock, use_key=lambda: watcher.current.ui.use_key,
-                             hover_menu=hover_menu)
+                             icon_toolbar=icon_toolbar)
     overlay = PanelEscape(mac_overlay, hotkeys, lambda: panels.escape(),
                           on_use=lambda: controller.use_strip(),
                           use_key=lambda: watcher.current.ui.use_key)

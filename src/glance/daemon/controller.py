@@ -20,7 +20,7 @@ from glance.log import log_event
 from glance.privacy.entities import find_protected, overlaps
 from glance.protocol import ApplyRequest, ApplyResult, Edit, FieldSnapshot, text_sha256
 from glance.ui.chip_model import ChipInputs, ChipState, ChipView, chip_view
-from glance.ui.hover_menu import HoverMenu, hover_menu, may_open
+from glance.ui.icon_toolbar import IconToolbar, icon_toolbar, may_open
 from glance.ui.panel_model import PanelView, build_panel
 from glance.ui.placement import Anchor, place
 from glance.ui.ports import CapturePort, GrammarPort, NotifierPort, OverlayPort, TrayPort
@@ -92,6 +92,9 @@ class Controller:
       extra_status       providers of extra `status()` entries (numbers, bools, short enums)
       extra_use          tried in order before `use_strip()` applies the corrected text; one
                          that returns True has applied something else (a selected tone)
+      extra_preview      providers of a strip in place of the corrected text while a preview
+                         is open (`open_preview()`: a tone the icon's toolbar asked for);
+                         None: nothing to show any more (the preview closes)
       add_listener(obj)  obj may define on_snapshot(s), on_typing(), on_focus_lost(reason),
                          on_apply_result(r), on_pause_changed(paused), on_capture_lost(),
                          on_reset()
@@ -156,6 +159,8 @@ class Controller:
         self.requested_gen: int | None = None
         self.extra_status: list[Callable[[], dict[str, Any]]] = []
         self.extra_use: list[Callable[[], bool]] = []
+        self.extra_preview: list[Callable[[FieldSnapshot], StripView | None]] = []
+        self.icon_tones: Callable[[], tuple[str, ...]] = tuple  # the profile's tones
         self._listeners: list[object] = []
 
         self._local: list[Issue] = []  # the grammar port's issues for the current text
@@ -165,6 +170,7 @@ class Controller:
         self._settled = False
         self._snoozed_field: str | None = None
         self._panel_open = False
+        self._preview_open = False  # the strip shows `extra_preview`'s view (a tone)
         self._banner: str | None = None
         self._copy_offer: str | None = None
         self._capture_lost = False
@@ -190,7 +196,7 @@ class Controller:
         self._open_by = 0.0  # ...or by this time, with what there is
         self._open_timer: Handle | None = None
         self._mode = cfg().general.check
-        self._open_panel_too = False  # "Check tone": the drawer opens with the strip
+        self._open_panel_too = False  # the drawer opens with the strip once checked
         self._typed_at: float | None = None  # the last time the field's text changed
         self._checked_at: float | None = None  # when check_now last ran
         self._blurred_field: str | None = None  # the field a blur took away
@@ -253,14 +259,23 @@ class Controller:
         content = self._content(s, inputs)
         return self._visible_strip(s, content, self._status(s, inputs, content))
 
-    def hover_menu(self, check_chord: str = "") -> HoverMenu | None:
-        """What the status icon's hover menu offers now; None while the user is typing
-        (a key within the last moment) or when there is no icon."""
+    @property
+    def preview_open(self) -> bool:
+        """The strip shows a preview (a tone the icon's toolbar asked for)."""
+        return self._preview_open
+
+    def icon_toolbar(self, check_chord: str = "", typing_ok: bool = False) -> IconToolbar | None:
+        """What the status icon's toolbar offers now; None when there is no icon, or while
+        the user is typing (a key within the last moment) unless `typing_ok` (a right-click
+        asks for it on purpose)."""
         s = self.current
-        if s is None or self._locked or not may_open(self._clock.now(), self._typed_at):
+        if s is None or self._locked or not (
+                typing_ok or may_open(self._clock.now(), self._typed_at)):
             return None
         inputs = self._chip_inputs(s)
-        return hover_menu(self.status_icon(), check_chord, "none" if s.gated else inputs.ai)
+        tones = () if s.gated else self._call("icon_tones", self.icon_tones, default=())
+        return icon_toolbar(self.status_icon(), check_chord,
+                            "none" if s.gated else inputs.ai, tuple(tones or ()))
 
     def status_icon(self) -> StatusView:
         """What the status icon shows for the current field right now."""
@@ -331,6 +346,7 @@ class Controller:
         if prev is None or prev.field_id != s.field_id:
             self._panel_open = False
             self._strip_open = False
+            self._preview_open = False
             self._banner = self._copy_offer = None
             if s.field_id != self._snoozed_field:
                 self._snoozed_field = None
@@ -386,6 +402,7 @@ class Controller:
             if prev is not None and reason == "blur" and self._panel_open else None
         self.current = None
         self._strip_open = False
+        self._preview_open = False
         self._stop_open_wait()
         self.scheduler.on_focus_lost()
         self._leave_text()
@@ -436,7 +453,22 @@ class Controller:
             return
         self._panel_open = True
         self._strip_open = True  # the drawer comes with the strip above it
+        self._preview_open = False  # (the panel shows the tone's rewrite selected)
         self._snoozed_field = None
+        self._render()
+
+    def open_preview(self) -> None:
+        """Open the strip on what `extra_preview` shows (a tone's rewrite the icon's toolbar
+        asked for) instead of the corrected text: Use (Alt+Enter) applies it, Esc closes it.
+        The panel is not opened."""
+        s = self.current
+        if s is None or s.gated or self._paused or self._anchor(s) is None:
+            return
+        self._preview_open = True
+        self._strip_open = True
+        self._panel_open = False
+        self._snoozed_field = None
+        self._stop_open_wait()
         self._render()
 
     def close_panel(self, snooze: bool = False) -> None:
@@ -444,6 +476,7 @@ class Controller:
         strip from coming back by itself on this field, in "auto" mode."""
         self._panel_open = False
         self._strip_open = False
+        self._preview_open = False
         self._stop_open_wait()
         self._banner = self._copy_offer = None
         if snooze and self.current is not None and self._auto():
@@ -463,7 +496,7 @@ class Controller:
             log_event("icon_click_ignored", why="no_icon")
             return  # no icon on screen: there was nothing to click
         if self._strip_visible:
-            self._strip_open = self._panel_open = False
+            self._strip_open = self._panel_open = self._preview_open = False
             self._stop_open_wait()
             self._banner = self._copy_offer = None
             if self._auto():
@@ -507,6 +540,7 @@ class Controller:
         self._checking = True
         self._snoozed_field = None
         self._banner = self._copy_offer = None
+        self._preview_open = False
         self._stop_open_wait()
         self._open_when_checked = True
         self._open_panel_too = with_drawer
@@ -520,11 +554,6 @@ class Controller:
         if self.current is s and gen == self.generation:
             self._on_local(s, gen)
         self._render()
-
-    def check_tone(self) -> None:
-        """The hover menu's "Check tone": the same check, then the strip opens with its
-        drawer (the tone line and the tone cards)."""
-        self.check_now(with_drawer=True)
 
     def toggle_panel(self) -> None:
         """The strip's "⋯": open the drawer, or close it again (the strip stays)."""
@@ -838,6 +867,7 @@ class Controller:
         self._settled = False
         self._checking = False
         self._panel_open = False
+        self._preview_open = False
         self._banner = self._copy_offer = None
         self._stop_open_wait()
 
@@ -1015,6 +1045,19 @@ class Controller:
             line = NOTHING_LINE
         return StripView(note=line, expanded=self._panel_open, menu=menu, on_demand=True)
 
+    def _preview(self, s: FieldSnapshot) -> StripView | None:
+        """The open preview's strip; once it has nothing to show (the text changed, the
+        rewrite went away) the preview closes, and the strip with it."""
+        if not self._preview_open:
+            return None
+        if not (s.gated or self._paused or self._pending is not None):
+            for provider in self.extra_preview:
+                view = self._call("extra_preview", provider, s, default=None)
+                if view is not None:
+                    return replace(view, on_demand=True)
+        self._strip_open = self._preview_open = False
+        return None
+
     def _render(self) -> None:
         if self._locked:
             self._overlay.hide_chip()
@@ -1045,8 +1088,11 @@ class Controller:
         else:
             self._overlay.show_status(status, anchor)
 
-        strip = None if s is None or xy is None else self._visible_strip(s, content, status)
-        hold = (self._strip_open and self._strip_visible and content is None
+        preview = None if s is None or xy is None else self._preview(s)
+        strip = preview if preview is not None or s is None or xy is None else \
+            self._visible_strip(s, content, status)
+        hold = (preview is None and self._strip_open and self._strip_visible
+                and content is None
                 and self._working())  # typing in an open strip: it updates once checked
         if hold:
             pass
@@ -1057,7 +1103,8 @@ class Controller:
             if s is not None and (at is None or self._clock.now() - at > USE_BLUR_S):
                 self._strip_shown = None  # nothing to use (a blur, and the return, keep it)
         else:
-            fix = strip_fix(s.text, s.caret, self._issues) if strip.can_use else None
+            fix = strip_fix(s.text, s.caret, self._issues) \
+                if strip.can_use and preview is None else None
             self._strip_shown = None if fix is None else \
                 _Shown(s.field_id, text_sha256(s.text), fix.edit)
             self._overlay.show_strip(strip, anchor)

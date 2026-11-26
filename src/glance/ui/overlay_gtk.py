@@ -30,12 +30,13 @@ from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
 from glance.log import log_event
 from glance.protocol import Rect
+from glance.ui import icon_toolbar as tb
 from glance.ui import look
 from glance.ui import selection_bar as sb
 from glance.ui.chip_model import ChipView
-from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
-from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
-from glance.ui.hover_menu import HoverMenu
+from glance.ui.icon_toolbar import CLOSE_MS as MENU_CLOSE_MS
+from glance.ui.icon_toolbar import OPEN_MS as MENU_OPEN_MS
+from glance.ui.icon_toolbar import IconToolbar
 from glance.ui.panel_model import (
     IssueRow,
     PanelView,
@@ -380,12 +381,13 @@ class GtkOverlay:
 
     def __init__(self, on_chip_click: Callable[[], None],
                  on_panel_action: Callable[[str, dict[str, Any]], None],
-                 hover_menu: Callable[[], HoverMenu | None] = lambda: None,
+                 icon_toolbar: Callable[..., IconToolbar | None] = lambda on_purpose=False: None,
                  use_key: Callable[[], str] = lambda: "Alt+Return") -> None:
         self._on_chip_click = on_chip_click
         self._use_key = use_key
-        self._hover_menu = hover_menu  # the icon's hover menu now (None: not now)
-        self._menu_view: HoverMenu | None = None
+        # the icon's toolbar now (None: not now); `on_purpose`: a right-click asks for it
+        self._icon_toolbar = icon_toolbar
+        self._menu_view: IconToolbar | None = None
         self._menu_open_src: int | None = None
         self._menu_close_src: int | None = None
         self._in_icon = self._in_menu = False
@@ -432,7 +434,7 @@ class GtkOverlay:
         self._icon.connect("enter-notify-event", lambda *_a: self._menu_enter("icon"))
         self._icon.connect("leave-notify-event", lambda *_a: self._menu_leave("icon"))
 
-        # The hover menu: like the strip, a popup that never takes the focus.
+        # The icon's toolbar: like the strip, a popup that never takes the focus.
         self._menu = _popup(Gdk.WindowTypeHint.TOOLTIP)
         self._menu.connect("draw", _clear)
         self._menu.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
@@ -662,6 +664,22 @@ class GtkOverlay:
     def _sel_bar(self, view: sb.SelectionBarView) -> Gtk.Widget:
         """The mark, then one button per action (`⋯` opens a second row: "Translate to…"
         and the audience's tones)."""
+
+        def run(a: sb.BarAction) -> None:
+            if a.key == "more":
+                self._act("sel_more", {})
+            else:
+                self._act("sel_action", {"key": a.key})
+
+        return self._toolbar(view.actions, run, more=view.more)
+
+    def _toolbar(self, actions: tuple[sb.BarAction, ...], run: Callable[[sb.BarAction], None],
+                 more: tuple[sb.BarAction, ...] = (), note: str | None = None,
+                 hint: tuple[str, str] | None = None) -> Gtk.Widget:
+        """The toolbar both bars are made of (the selection's, the status icon's): a slim
+        card, the mark, then one button per action, each a line glyph and its label.
+        `more`: a second row; `note`: a muted line before the buttons; `hint`: (the key of
+        the action it follows, the chord shown after its label, muted)."""
         outer = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4),
                          "glance-menu", "glance-selbar")
         row = Gtk.Box(spacing=2)
@@ -669,28 +687,36 @@ class GtkOverlay:
         lead.set_margin_start(4)
         lead.set_margin_end(4)
         row.pack_start(lead, False, False, 0)
-        for a in view.actions:
-            row.pack_start(self._sel_button(a), False, False, 0)
+        if note:
+            line = _label(note, "glance-note", wrap=False)
+            line.set_valign(Gtk.Align.CENTER)
+            row.pack_start(line, False, False, 0)
+        for a in actions:
+            chord = hint[1] if hint is not None and hint[0] == a.key else None
+            row.pack_start(self._bar_button(a, run, chord), False, False, 0)
         outer.pack_start(row, False, False, 0)
-        if view.more:
-            more = Gtk.Box(spacing=2)
-            for a in view.more:
-                more.pack_start(self._sel_button(a), False, False, 0)
-            outer.pack_start(_classes(more, "glance-selmore"), False, False, 0)
+        if more:
+            line2 = Gtk.Box(spacing=2)
+            for a in more:
+                line2.pack_start(self._bar_button(a, run), False, False, 0)
+            outer.pack_start(_classes(line2, "glance-selmore"), False, False, 0)
         return outer
 
-    def _sel_button(self, a: sb.BarAction) -> Gtk.Button:
-        action, args = ("sel_more", {}) if a.key == "more" else ("sel_action", {"key": a.key})
+    def _bar_button(self, a: sb.BarAction, run: Callable[[sb.BarAction], None],
+                    chord: str | None = None) -> Gtk.Button:
         button = _pointer(Gtk.Button(can_focus=False, focus_on_click=False))
         _classes(button, "glance-item", "glance-selbtn")
+        button.set_name(f"bar:{a.key}")
         inner = Gtk.Box(spacing=5)
         if a.glyph is not None and a.glyph in look.GLYPHS:
             inner.pack_start(self._glyph(a.glyph, 13), False, False, 0)
         inner.pack_start(_label(a.label, wrap=False), False, False, 0)
+        if chord:
+            inner.pack_start(_label(chord, "glance-keyhint", wrap=False), False, False, 0)
         button.add(inner)
         if a.tip:
             button.set_tooltip_text(a.tip)
-        button.connect("clicked", lambda _b: self._act(action, dict(args)))
+        button.connect("clicked", lambda _b: run(a))
         return button
 
     # ------------------------------------------------------------------ placing
@@ -972,11 +998,15 @@ class GtkOverlay:
                     self._panel_anchor = self._anchor
                 self._layout()  # this frame: the window only moved, so did the field
                 self._place_icon()
+                if self._menu_view is not None and self._menu.get_visible():
+                    mx, my = self._menu.get_position()
+                    self._menu.move(mx + dx, my + dy)  # the toolbar goes along
             return
         # A resize moves the field in ways only capture can tell: hide until it is still.
         self._anchor = anchor.moved(dx, dy)
         if self._panel_anchor is not None:
             self._panel_anchor = self._anchor
+        self._hide_menu()
         if not self._resizing:
             self._resizing = True
             self._strip.hide()
@@ -1219,12 +1249,27 @@ class GtkOverlay:
 
     def _icon_pressed(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
         # A quick second click also brings a 2BUTTON_PRESS: one toggle per click.
-        if event.button == 1 and event.type == Gdk.EventType.BUTTON_PRESS:
+        if event.type != Gdk.EventType.BUTTON_PRESS:
+            return True
+        if event.button == 1:
             self._hide_menu()
             self._on_chip_click()
+        elif event.button == 3:  # a right-click: the toolbar at once (again: closes it)
+            self.toggle_toolbar()
         return True
 
-    # ------------------------------------------------------------------ the hover menu
+    def toggle_toolbar(self) -> None:
+        """The right-click on the icon: open its toolbar, typing or not; close it if open."""
+        if self._menu_view is not None:
+            self._hide_menu()
+            return
+        self._cancel_source("_menu_open_src")
+        if self._status_xy is not None:
+            bar = self._icon_toolbar(True)
+            if bar is not None:
+                self._show_menu(bar)
+
+    # ------------------------------------------------------------------ the icon's toolbar
 
     def _menu_enter(self, where: str) -> bool:
         if where == "icon":
@@ -1261,9 +1306,9 @@ class GtkOverlay:
     def _menu_open_due(self) -> bool:
         self._menu_open_src = None
         if self._in_icon and self._status_xy is not None:
-            menu = self._hover_menu()  # None while the user types
-            if menu is not None:
-                self._show_menu(menu)
+            bar = self._icon_toolbar(False)  # None while the user types
+            if bar is not None:
+                self._show_menu(bar)
         return GLib.SOURCE_REMOVE
 
     def _menu_close_due(self) -> bool:
@@ -1272,33 +1317,33 @@ class GtkOverlay:
             self._hide_menu()
         return GLib.SOURCE_REMOVE
 
-    def _show_menu(self, menu: HoverMenu) -> None:
-        self._menu_view = menu
+    def _show_menu(self, bar: IconToolbar) -> None:
+        """The icon's toolbar under the caret line, its right end under the icon."""
+        self._menu_view = bar
         old = self._menu.get_child()
         if old is not None:
             self._menu.remove(old)
             old.destroy()
-        box = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1), "glance-menu")
-        if menu.note:
-            box.pack_start(_label(menu.note, "glance-note", chars=34), False, False, 0)
-        for item in menu.items:
-            button = self._button(item.label, item.action, "glance-item", **item.args)
-            button.get_child().set_xalign(0)
-            button.connect("clicked", lambda _b: self._hide_menu())
-            box.pack_start(button, False, False, 0)
-        if menu.hint:
-            box.pack_start(self._hint(menu.hint), False, False, 0)
+
+        def run(a: sb.BarAction) -> None:
+            self._hide_menu()
+            self._act(tb.ACTION, {"key": a.key})
+
+        hint = ("check", bar.hint) if bar.hint else None
         fit = _Fit()
-        fit.pack_start(box, True, True, 0)
+        fit.pack_start(self._toolbar(bar.actions, run, note=bar.note, hint=hint), True, True, 0)
         fit.show_all()
         self._menu.add(fit)
-        x, y = self._status_xy or (0, 0)
         w, h = fit.get_preferred_size()[1].width, fit.get_preferred_size()[1].height
-        mons = self.monitors()
-        mx, my = clamp_to_monitor(x + ICON_BOX[0], y, (w, h), mons) if mons else (x, y)
+        x, y = self._status_xy or (0, 0)
+        icon = Rect(x + ICON_X, y + ICON_Y, ICON, ICON)
+        a = self._anchor
+        line = None if a is None else (a.caret or a.prev_char)
+        mx, my = tb.place_toolbar(icon, line, (w, h), self.monitors())
         self._menu.resize(w, h)
         self._menu.move(mx, my)
         self._menu.show()
+        self._menu.move(mx, my)  # a place set while unmapped can be lost
         if not self._composited:  # its rounded corners would be black: cut it to them
             gdk_window = self._menu.get_window()
             if gdk_window is not None:
@@ -1313,20 +1358,17 @@ class GtkOverlay:
         if self._menu.get_visible():
             self._menu.hide()
 
-    def menu_items(self) -> list[str] | None:
-        """Test access: the hover menu's item labels, None while it is closed."""
+    def toolbar_items(self) -> list[str] | None:
+        """Test access: the icon's toolbar's item labels, None while it is closed."""
         v = self._menu_view
         return None if v is None or not self._menu.get_visible() else \
-            [i.label for i in v.items]
+            [a.label for a in v.actions]
 
-    def _hint(self, hint: str) -> Gtk.Widget:
-        """"Super+Alt+G to check" as keycaps and the muted rest."""
-        chord, _sep, rest = hint.partition(" ")
-        row = _classes(Gtk.Box(spacing=6), "glance-hint")
-        row.pack_start(_keycaps(chord.split("+")), False, False, 0)
-        if rest:
-            row.pack_start(_label(rest, "glance-meta", wrap=False), False, False, 0)
-        return row
+    def toolbar_geometry(self) -> tuple[int, int, int, int] | None:
+        if self._menu_view is None or not self._menu.get_visible():
+            return None
+        x, y = self._menu.get_position()
+        return (x, y, *self._menu.get_size())
 
     def _glyph(self, name: str, px: int = 14, token: str = "accent") -> Gtk.Widget:
         """A line glyph (`look.GLYPHS`) in the colour `token`."""
@@ -1371,6 +1413,8 @@ class GtkOverlay:
         row.pack_start(_mark(16), False, False, 0)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         text.set_valign(Gtk.Align.CENTER)
+        if view.label is not None:  # a tone's rewrite (the icon's toolbar), not the fixes
+            text.pack_start(_label(view.label, "glance-strip-label", wrap=False), False, False, 0)
         if view.segments:
             sentence = Gtk.Label(xalign=0, wrap=True, selectable=False)
             sentence.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)

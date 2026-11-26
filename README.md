@@ -382,8 +382,9 @@ Glance runs as a systemd user service. Type in any text field: a small Glance ic
 the line shows that Glance is ready. When you want your text checked, press
 <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a Mac) or click the icon. The icon shows the
 check working, then the suggestion strip opens with the corrected text. Rest the pointer on the
-icon for a menu: check spelling and grammar, check the tone, rewrite, make it shorter or more
-professional.
+icon (or right-click it) for its toolbar: check, a tone (friendlier, more direct, shorter, more
+professional: previewed in the strip, <kbd>Alt</kbd>+<kbd>Enter</kbd> uses it), rewrite your
+own way, or ⋯ for the Glance Assistant panel.
 
 **Two ways to check**, set from the tray menu (**Check: on shortcut / while typing**) or in
 `config.toml`:
@@ -552,16 +553,22 @@ While you write in a text field, the Glance mark sits at the end of the line you
 | A grey mark | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/menu-dark.png">
-  <img alt="The icon's hover menu next to the Glance icon: Check spelling & grammar, Check tone, Rewrite…, Shorter, More professional, and Super Alt G to check as keycaps." src="docs/assets/screenshots/menu-light.png" width="640">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/toolbar-dark.png">
+  <img alt="The icon's toolbar, one slim row under the typed line: the Glance mark, Check with Super+Alt+G muted beside it, Friendlier, Direct, Shorter, Professional, Rewrite… and ⋯, each with a small line icon." src="docs/assets/screenshots/toolbar-light.png" width="720">
 </picture>
 
 Click the icon to see the corrected text (in shortcut mode the click checks first); click
-again or press <kbd>Esc</kbd> to close it. Resting the pointer on the icon opens its menu
-(not while you are typing): **Check spelling & grammar**, **Check tone**, **Rewrite…**,
-**Shorter**, **More professional**, and the check shortcut as keycaps. When Glance is paused, the field is
-private or no AI is connected, the menu shows why and what to do instead (**Resume**,
-**Connect an AI…**). <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens it with the rewrite options. In typing mode, to have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
+again or press <kbd>Esc</kbd> to close it. Resting the pointer on the icon (not while you are
+typing), or a right-click on it, opens its toolbar: one slim row under the line, in the same
+look as the selection toolbar: **Check** (with the check shortcut beside it), the tones of the
+field's audience (by default **Friendlier**, **Direct**, **Shorter**, **Professional**),
+**Rewrite…** and **⋯**. A tone runs that one rewrite and shows it in the strip with the changes
+highlighted and the tone's name above it: <kbd>Alt</kbd>+<kbd>Enter</kbd> uses it,
+<kbd>Esc</kbd> closes it; nothing is typed before you choose. The large Glance Assistant panel
+opens only from **⋯**, or **Rewrite…** (which opens it with its "Rewrite as…" input). When
+Glance is paused, the field is private or no AI is connected, the toolbar is one line saying
+why, with the one thing to do about it (**Resume**, **Connect an AI…**).
+<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens the panel with the rewrite options. In typing mode, to have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
 
 ```toml
 [ui]

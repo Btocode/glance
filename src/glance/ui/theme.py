@@ -57,7 +57,7 @@ def _rgb(hex_colour: str) -> tuple[float, float, float]:
 
 
 LIGHT: dict[str, str] = {
-    "surface": "#ffffff",       # the panel, the hover menu, the strip, the windows
+    "surface": "#ffffff",       # the panel, the toolbars, the strip, the windows
     "card": "#f6f8fa",          # boxes on it: the suggested text, tone chips, the input
     "card_border": "#d8dee4",
     "hairline": "#d8dee4",      # the panel's border and its separators
@@ -215,7 +215,7 @@ def css(t: dict[str, str]) -> str:
 .glance-quiet:hover, .glance-quiet.glance-on {{ background-color: {t['hover']}; }}
 .glance-quiet:hover label {{ color: {t['text']}; }}
 
-/* the hover menu */
+/* the toolbars' card (the status icon's, the selection's) and their items */
 .glance-menu {{
     background-color: {t['surface']}; border: 1px solid {t['hairline']};
     border-radius: 10px; padding: 6px; box-shadow: 0 4px 14px {t['shadow']}; }}
@@ -234,6 +234,10 @@ def css(t: dict[str, str]) -> str:
 .glance-selbtn {{ padding: 5px 8px; }}
 .glance-selbtn label {{ font-size: 13px; }}
 .glance-selmore {{ border-top: 1px solid {t['hairline']}; padding-top: 4px; }}
+.glance-selbar .glance-note {{ padding: 0 8px 0 2px; }}
+.glance-selbtn label.glance-keyhint {{ color: {t['muted']}; font-size: 11px; }}
+.glance-strip label.glance-strip-label {{
+    color: {t['accent']}; font-size: 12px; font-weight: 600; }}
 
 /* the assistant panel (the drawer), select-anything's panel, the "Rewrite as…" entry */
 .glance-drawer {{

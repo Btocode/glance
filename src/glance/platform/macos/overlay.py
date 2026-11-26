@@ -55,11 +55,12 @@ from glance.platform.macos.appkit_util import (
     tokens,
 )
 from glance.protocol import Rect
+from glance.ui import icon_toolbar as tb
 from glance.ui import look
 from glance.ui.chip_model import ChipView
-from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
-from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
-from glance.ui.hover_menu import HoverMenu
+from glance.ui.icon_toolbar import CLOSE_MS as MENU_CLOSE_MS
+from glance.ui.icon_toolbar import OPEN_MS as MENU_OPEN_MS
+from glance.ui.icon_toolbar import IconToolbar
 from glance.ui.panel_model import PanelView, SuggestedBox, ToneChip, suggested_box
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
@@ -257,8 +258,9 @@ class _Glyph(_Flipped):
 
 
 class _Icon(_Flipped):
-    """The status icon. `state` is set by the overlay; a click calls `on_click`; the
-    pointer entering and leaving it, `on_enter` / `on_leave` (the hover menu)."""
+    """The status icon. `state` is set by the overlay; a click calls `on_click`, a
+    right-click `on_right_click`; the pointer entering and leaving it, `on_enter` /
+    `on_leave` (the toolbar)."""
 
     def acceptsFirstMouse_(self, _event):
         return True
@@ -277,13 +279,13 @@ class _Icon(_Flipped):
     def cursorUpdate_(self, _event):
         NSCursor.pointingHandCursor().set()
 
-    def mouseDown_(self, _event):
-        cb = getattr(self, "on_click", None)
-        if cb is not None:
-            try:
-                cb()
-            except Exception as e:  # noqa: BLE001
-                log_event("ui_action_error", kind=type(e).__name__)
+    def mouseDown_(self, event):
+        # A control-click is a right-click on a Mac.
+        name = "on_right_click" if event.modifierFlags() & (1 << 18) else "on_click"
+        _hover_cb(self, name)
+
+    def rightMouseDown_(self, _event):
+        _hover_cb(self, "on_right_click")
 
     def drawRect_(self, _rect):
         """The brand mark alone, no disc or ring (`look.icon_look`): softer and without its
@@ -354,7 +356,7 @@ class _Button(NSButton):
 
 
 class _MenuCard(_Card):
-    """The hover menu's card: tells the overlay when the pointer enters and leaves it."""
+    """A toolbar's card: tells the overlay when the pointer enters and leaves it."""
 
     def viewDidMoveToWindow(self):
         _track(self)
@@ -487,10 +489,12 @@ class MacOverlay:
     def __init__(self, on_chip_click: Callable[[], None],
                  on_panel_action: Callable[[str, dict[str, Any]], None],
                  clock: Any, use_key: Callable[[], str] = lambda: "Alt+Return",
-                 hover_menu: Callable[[], HoverMenu | None] = lambda: None) -> None:
+                 icon_toolbar: Callable[..., IconToolbar | None] = lambda on_purpose=False: None
+                 ) -> None:
         self._on_chip_click = on_chip_click
-        self._hover_menu = hover_menu
-        self._menu_view: HoverMenu | None = None
+        # the icon's toolbar now (None: not now); `on_purpose`: a right-click asks for it
+        self._icon_toolbar = icon_toolbar
+        self._menu_view: IconToolbar | None = None
         self._menu_open: Any = None
         self._menu_close: Any = None
         self._in_icon = self._in_menu = False
@@ -518,6 +522,7 @@ class MacOverlay:
         self._icon.setHasShadow_(False)
         self._icon_view = _Icon.alloc().initWithFrame_(NSMakeRect(0, 0, *ICON_BOX))
         self._icon_view.on_click = self._icon_clicked
+        self._icon_view.on_right_click = self.toggle_toolbar
         self._icon_view.on_enter = lambda: self._menu_enter("icon")
         self._icon_view.on_leave = lambda: self._menu_leave("icon")
         self._icon.setContentView_(self._icon_view)
@@ -613,38 +618,62 @@ class MacOverlay:
         self._sel.orderFrontRegardless()
 
     def _sel_bar(self, view: Any) -> tuple[Any, float, float]:
+        def run(a: Any) -> None:
+            if a.key == "more":
+                self._act("sel_more", {})
+            else:
+                self._act("sel_action", {"key": a.key})
+
+        return self._toolbar((view.actions, view.more), run, "sel")
+
+    def _toolbar(self, rows: tuple[tuple[Any, ...], ...], run: Callable[[Any], None],
+                 prefix: str, note: str | None = None,
+                 hint: tuple[str, str] | None = None) -> tuple[Any, float, float]:
+        """The toolbar both bars are made of (the selection's, the status icon's): a slim
+        card, the mark, then one button per action, each a line glyph and its label.
+        `note`: a muted line before the buttons; `hint`: (the key of the action it follows,
+        the chord shown after its label, muted)."""
         t = self._t
-        buttons = []
-        for row in (view.actions, view.more):
-            line = []
+        lines: list[list[Any]] = []
+        for n, row in enumerate(rows):
+            line: list[Any] = []
+            if n == 0 and note:
+                line.append(_label(note, color(t["muted"]), 280, lines=1, size=12))
             for a in row:
-                action, args = ("sel_more", {}) if a.key == "more" else \
-                    ("sel_action", {"key": a.key})
-                b = self._link(a.label, lambda ac=action, ar=args: self._act(ac, dict(ar)))
+                b = self._link(a.label, lambda a=a: run(a))
                 b.setAttributedTitle_(_attr(a.label, color(t["body"]), size=13.0))
                 b.sizeToFit()
-                b.setAccessibilityIdentifier_(f"sel:{a.key}")
+                b.setAccessibilityIdentifier_(f"{prefix}:{a.key}")
                 if a.tip:
                     b.setToolTip_(a.tip)
+                if a.glyph:
+                    line.append(_glyph(a.glyph, color(t["accent"]), 13.0))
                 line.append(b)
+                if hint is not None and hint[0] == a.key:
+                    line.append(_label(hint[1], color(t["muted"]), 90, lines=1, size=11))
             if line:
-                buttons.append(line)
+                lines.append(line)
         pad, gap, row_h = 8.0, 12.0, 26.0
-        width = max(sum(b.frame().size.width for b in line) + gap * (len(line) - 1) + 30
-                    for line in buttons) + 2 * pad
-        height = row_h * len(buttons) + 2 * pad - 4
+
+        def width_of(line: list[Any]) -> float:
+            return sum(v.frame().size.width + (4 if v.isKindOfClass_(_Glyph) else gap)
+                       for v in line) - gap
+
+        width = max((width_of(line) for line in lines), default=0) + 30 + 2 * pad
+        height = row_h * max(1, len(lines)) + 2 * pad - 4
         card = _MenuCard.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
         card.fill, card.border, card.radius = color(t["surface"]), color(t["hairline"]), 10.0
         mark = _mark_view(16)
         mark.setFrameOrigin_(NSMakePoint(pad, pad + 4))
         card.addSubview_(mark)
         y = pad
-        for line in buttons:
+        for line in lines:
             x = pad + 26
-            for b in line:
-                b.setFrameOrigin_(NSMakePoint(x, y + 2))
-                card.addSubview_(b)
-                x += b.frame().size.width + gap
+            for v in line:
+                h = v.frame().size.height
+                v.setFrameOrigin_(NSMakePoint(x, y + (row_h - 4 - h) / 2 + 2))
+                card.addSubview_(v)
+                x += v.frame().size.width + (4 if v.isKindOfClass_(_Glyph) else gap)
             y += row_h
         return card, width, height
 
@@ -769,11 +798,22 @@ class MacOverlay:
         self._icon_view.phase = self._phase
         self._icon_view.setNeedsDisplay_(True)
 
-    # ------------------------------------------------------------------ the hover menu
+    # ------------------------------------------------------------------ the icon's toolbar
 
     def _icon_clicked(self) -> None:
         self._hide_menu()
         self._on_chip_click()
+
+    def toggle_toolbar(self) -> None:
+        """A right-click on the icon: its toolbar at once, typing or not; again: closed."""
+        if self._menu_view is not None:
+            self._hide_menu()
+            return
+        self._cancel("_menu_open")
+        if self._icon_xy is not None and self._status_view is not None:
+            bar = self._icon_toolbar(True)
+            if bar is not None:
+                self._show_menu(bar)
 
     def _cancel(self, attr: str) -> None:
         handle = getattr(self, attr)
@@ -802,45 +842,34 @@ class MacOverlay:
     def _menu_open_due(self) -> None:
         self._menu_open = None
         if self._in_icon and self._icon_xy is not None and self._status_view is not None:
-            menu = self._hover_menu()  # None while the user types
-            if menu is not None:
-                self._show_menu(menu)
+            bar = self._icon_toolbar(False)  # None while the user types
+            if bar is not None:
+                self._show_menu(bar)
 
     def _menu_close_due(self) -> None:
         self._menu_close = None
         if not (self._in_icon or self._in_menu):
             self._hide_menu()
 
-    def _show_menu(self, menu: HoverMenu) -> None:
-        self._menu_view = menu
-        t, width = self._t, 230.0
-        card = _MenuCard.alloc().initWithFrame_(NSMakeRect(0, 0, width + 2 * PAD, 10))
-        card.fill, card.border = color(t["surface"]), color(t["hairline"])
+    def _show_menu(self, bar: IconToolbar) -> None:
+        """The icon's toolbar under the caret line, its right end under the icon."""
+        self._menu_view = bar
+
+        def run(a: Any) -> None:
+            self._hide_menu()
+            self._act(tb.ACTION, {"key": a.key})
+
+        hint = ("check", bar.hint) if bar.hint else None
+        card, w, h = self._toolbar((bar.actions,), run, "menu", note=bar.note, hint=hint)
         card.on_enter = lambda: self._menu_enter("menu")
         card.on_leave = lambda: self._menu_leave("menu")
-        rows = _Rows(card, width, top=8)
-        if menu.note:
-            rows.full(_label(menu.note, color(t["muted"]), width, size=12), gap=4)
-        for item in menu.items:
-            def run(item: Any = item) -> None:
-                self._hide_menu()
-                self._act(item.action, dict(item.args))
-
-            item_b = self._link(item.label, run)
-            item_b.setAttributedTitle_(_attr(item.label, color(t["body"])))
-            item_b.sizeToFit()
-            rows.full(item_b, gap=4)
-        if menu.hint:  # "⌃⌥G to check": the chord as a keycap, the rest muted
-            chord, _sep, rest = menu.hint.partition(" ")
-            rows.run([_keycap(chord, t), _label(rest, color(t["muted"]), 150, lines=1,
-                                                size=12)], gap=6)
-        h = int(rows.y + 6)
-        card.setFrame_(NSMakeRect(0, 0, width + 2 * PAD, h))
         self._menu.setContentView_(card)
         x, y = self._icon_xy or (0, 0)
-        mx, my = clamp_to_monitor(x + ICON_BOX[0], y, (int(width + 2 * PAD), h),
-                                  self.monitors())
-        place(self._menu, Rect(mx, my, int(width + 2 * PAD), h))
+        icon = Rect(x + ICON_X, y + ICON_Y, ICON, ICON)
+        a = self._anchor
+        line = None if a is None else (a.caret or a.prev_char)
+        mx, my = tb.place_toolbar(icon, line, (int(w), int(h)), self.monitors())
+        place(self._menu, Rect(mx, my, int(w), int(h)))
         self._menu.orderFrontRegardless()
 
     def _hide_menu(self) -> None:
@@ -850,10 +879,10 @@ class MacOverlay:
         self._menu_view = None
         self._menu.orderOut_(None)
 
-    def menu_items(self) -> list[str] | None:
-        """Test access: the hover menu's item labels, None while it is closed."""
+    def toolbar_items(self) -> list[str] | None:
+        """Test access: the icon's toolbar's item labels, None while it is closed."""
         v = self._menu_view
-        return None if v is None else [i.label for i in v.items]
+        return None if v is None else [a.label for a in v.actions]
 
     def _field_drawer(self) -> bool:
         return self._panel_view is not None and self._panel_anchor is not None
@@ -1010,6 +1039,9 @@ class MacOverlay:
         lead = PAD + 16 + 10  # the mark, then the text
         text_w = max(80.0, width - lead - PAD - bw)
         rows = _Rows(card, text_w, top=9, left=lead)
+        if view.label is not None:  # a tone's rewrite (the icon's toolbar), not the fixes
+            rows.full(_label(view.label, color(t["accent"]), text_w, bold=True, lines=1,
+                             size=12), gap=2)
         if view.segments:
             s = NSMutableAttributedString.alloc().init()
             for seg in view.shown:

@@ -530,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
             on_chip_click=lambda: chip_clicked(),
             on_panel_action=lambda action, args: panels.action(action, args),
             use_key=lambda: watcher.current.ui.use_key,
-            hover_menu=lambda: hover_menu())
+            icon_toolbar=lambda on_purpose=False: icon_toolbar(on_purpose))
         theme.on_change(lambda: gtk_overlay.on_extension(True))
         ghost: Any = gtk_overlay.ghost
         selection_port: Any = ShellSelection(shell)
@@ -576,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
         hotkeys = XlibHotkeys(clock.post)
         gtk_overlay = GtkOverlay(on_chip_click=lambda: chip_clicked(),
                                  on_panel_action=lambda action, args: panels.action(action, args),
-                                 hover_menu=lambda: hover_menu(),
+                                 icon_toolbar=lambda on_purpose=False: icon_toolbar(on_purpose),
                                  use_key=lambda: watcher.current.ui.use_key)
         ghost = GtkGhost(watcher.current.ui.ghost_font_factor)
         selection_port = XlibSelection()
@@ -753,9 +753,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             controller.open_panel()
 
-    def hover_menu() -> Any:
-        """The status icon's hover menu now, with the check shortcut as configured."""
-        return controller.hover_menu(check_label(watcher.current.general.hotkeys.get("check", "")))
+    def icon_toolbar(on_purpose: bool = False) -> Any:
+        """The status icon's toolbar now, with the check shortcut as configured
+        (`on_purpose`: a right-click asked for it, not a hover)."""
+        return controller.icon_toolbar(
+            check_label(watcher.current.general.hotkeys.get("check", "")), typing_ok=on_purpose)
 
     def chip_clicked() -> None:
         """The status icon: opens the strip (or, for a muted state, the line saying why),

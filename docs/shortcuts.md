@@ -25,6 +25,13 @@ do not set keeps its default.
 | Take a Glance Shot (capture a region) | `shot` | `Super+Alt+c` | ⌃⌥C |
 | Use the strip's suggestion (only while it shows one) | `[ui] use_key` | `Alt+Return` | ⌥⏎ |
 
+With the mouse: click the Glance icon at the end of the line to check. Rest the pointer on it,
+or right-click it (control-click on a Mac), for its toolbar: **Check** (the check chord shown
+beside it), the audience's tones (**Friendlier**, **Direct**, **Shorter**, **Professional** by
+default), **Rewrite…** and **⋯**. A tone shows its rewrite in the strip; the use key
+(`Alt+Return`, ⌥⏎) applies it and `Esc` closes it. Only **Rewrite…** and **⋯** open the
+Glance Assistant panel.
+
 On macOS `Super` is ⌘, `Alt` ⌥ and `Ctrl` ⌃. A chord left at its Linux default becomes the
 macOS default above; a chord you set is used as you wrote it.
 

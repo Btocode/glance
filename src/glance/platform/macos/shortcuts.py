@@ -9,6 +9,7 @@ from Foundation import NSMakePoint, NSMakeRect
 
 from glance.platform.macos.appkit_util import color, tokens
 from glance.platform.macos.overlay import _Card, _Flipped, _keycap, _label, _mark_view
+from glance.ui.shortcut_table import ICON_TIP
 
 TITLE = "Keyboard shortcuts"
 _STYLE = 1 | 2  # titled, closable
@@ -26,7 +27,7 @@ class ShortcutsWindow:
         per = (len(rows) + 1) // 2
         col_w = _KEYS_W + _WHAT_W
         w = 2 * _PAD + 2 * col_w
-        h = 2 * _PAD + 46 + per * _ROW_H
+        h = 2 * _PAD + 46 + per * _ROW_H + 40  # (the icon's line under the table)
         card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
         card.fill, card.border, card.radius = color(t["surface"]), None, 0.0
         mark = _mark_view(22)
@@ -53,6 +54,9 @@ class ShortcutsWindow:
             label = _label(what, color(t["body"]), _WHAT_W - 10, lines=1)
             label.setFrameOrigin_(NSMakePoint(x + _KEYS_W, y + 2))
             card.addSubview_(label)
+        tip = _label(ICON_TIP, color(t["muted"]), w - 2 * _PAD, lines=2, size=12)
+        tip.setFrameOrigin_(NSMakePoint(_PAD, _PAD + 46 + per * _ROW_H + 4))
+        card.addSubview_(tip)
         if self._win is None:
             self._win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
                 NSMakeRect(0, 0, w, h), _STYLE, NSBackingStoreBuffered, False)

@@ -56,6 +56,9 @@ class StripView:
     # shown is the quick local preview, the loader runs and the keycap is disabled until
     # the AI's corrected text replaces it.
     loading: str | None = None
+    # A preview of a tone's rewrite (the icon's toolbar), not the corrected text: its tone,
+    # e.g. "Friendlier", shown above the text. Use applies the rewrite.
+    label: str | None = None
 
     @property
     def compact(self) -> bool:

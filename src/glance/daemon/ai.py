@@ -33,7 +33,7 @@ from glance.privacy.redact import Shielded, shield
 from glance.protocol import ApplyResult, FieldSnapshot, text_sha256
 from glance.ui.panel_model import PanelView, ToneChip
 from glance.ui.ports import OverlayPort
-from glance.ui.strip_model import StripView
+from glance.ui.strip_model import Segment, StripView
 from glance.wordlimit import DEFAULT_MAX_WORDS, count_words, limit_notice, word_window
 
 T = TypeVar("T")
@@ -227,7 +227,7 @@ class AiCoordinator:
     scheduler generation and one text hash. A result that arrives for anything else is
     dropped; nothing is ever typed that the focused field's current text was not the source
     of. Rewrites start only on `select` / `preview` / `apply` (a click on a tone chip, its
-    number key, the hover menu), never on hover, except the speculative ones, which need
+    number key, the icon's toolbar), never on hover, except the speculative ones, which need
     `supervisor.speculate()` and run in the supervisor's second lane.
 
     `overlay` is needed for "Rewrite as…" and for copying; `rich(snapshot)` says whether
@@ -303,6 +303,8 @@ class AiCoordinator:
         c.extra_corrects.append(self._corrects)
         c.extra_status.append(self._status)
         c.extra_use.append(self._use_selected)
+        c.extra_preview.append(self._preview_strip)
+        c.icon_tones = self.icon_tones
         c.add_listener(self)
         self.refresh_status()
 
@@ -752,7 +754,7 @@ class AiCoordinator:
     def apply(self, tone: str | None = None, custom: str | None = None) -> None:
         """Type the rewrite over the whole field, through the verified write-back path.
 
-        Without `tone`: the selected rewrite (Apply). With one (the hover menu): the rewrite
+        Without `tone`: the selected rewrite (Apply). With one: the rewrite
         in that tone, made first when there is none yet and applied once complete. A rewrite
         that cannot be restored exactly is never typed: the panel offers it as a copy.
         """
@@ -778,6 +780,44 @@ class AiCoordinator:
             self.deselect()
         else:
             self.preview(tone)
+
+    def icon_tones(self) -> tuple[str, ...]:
+        """The tones the status icon's toolbar offers: the focused field's profile's."""
+        r = self._resolved
+        return () if r is None else tuple(k for k in r.profile.chips if k in TONES)
+
+    def strip_tone(self, tone: str) -> None:
+        """A tone on the status icon's toolbar: its rewrite (one call, or the one made
+        earlier for this exact text) in the strip, the changes highlighted. Use (Alt+Enter)
+        applies it, Esc closes it; nothing is applied before that."""
+        s = self._c.current
+        if s is None or s.gated or tone not in TONES or tone == CUSTOM:
+            return
+        self.preview(tone)
+        if self._current_rewrite() is not None:
+            self._c.open_preview()
+
+    def _preview_strip(self, s: FieldSnapshot) -> StripView | None:
+        """The strip of an open preview: the rewrite as far as it is known, its changes in
+        the accent ink, its tone as the label; None once there is no rewrite for this text."""
+        rw = self._current_rewrite()
+        if rw is None or s.gated:
+            return None
+        label = _label(rw)
+        shown = rw.shown or ()
+        segments = tuple(Segment(op.text, op.kind == "ins") for op in shown if op.kind != "del")
+        changes = sum(1 for n, op in enumerate(shown) if op.kind != "eq" and (
+            n == 0 or shown[n - 1].kind == "eq"))
+        loading = "Rewriting…" if rw.state == "loading" else None
+        note = None
+        if rw.state != "loading":
+            note = self._banner(rw)
+            if not self._can_apply(rw):
+                changes = 0  # nothing to use: the line says why (⋯ has the copy)
+        if not segments and note is None and loading is None:
+            note = NO_CHANGE
+        return StripView(segments=segments, n_fixes=changes, note=note, loading=loading,
+                         label=label, menu=True)
 
     def deselect(self) -> None:
         """No tone selected: "Suggested" shows the corrected text again."""
@@ -806,7 +846,8 @@ class AiCoordinator:
     def _use_selected(self) -> bool:
         """Apply (Alt+Enter) in the open panel types the selected tone's rewrite, not the
         corrected text; False when there is none, so the corrected text is used."""
-        if not getattr(self._c, "panel_open", False) or self._current_rewrite() is None:
+        if not (getattr(self._c, "panel_open", False) or getattr(self._c, "preview_open", False)) \
+                or self._current_rewrite() is None:
             return False
         self.apply()
         return True

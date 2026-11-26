@@ -6,6 +6,8 @@ from collections.abc import Callable
 from typing import Any
 
 from glance.log import log_event
+from glance.ui.icon_toolbar import ACTION as ICON_ACTION
+from glance.ui.icon_toolbar import tone_key
 
 # Actions of select-anything's panel; `tone` there selects a tone and shows its rewrite.
 SELECTION_ACTIONS = ("tone", "sel_copy", "sel_paste", "close")
@@ -23,17 +25,11 @@ def dispatch_panel_action(controller: Any, action: str, args: dict[str, Any],
     stores an audience the user picked.
     """
     try:
-        if action in ("tone", "tone_apply", "apply_tone", "profile"):
+        if action in ("tone", "apply_tone", "profile"):
             if ai is None:
                 log_event("panel_action_unknown")
             elif action == "tone":  # a click on a tone chip: select it (again: unselect)
                 ai.select(str(args["key"]))
-            elif action == "tone_apply":  # the hover menu's Shorter...: made, then applied
-                key = str(args["key"])
-                if key == "custom":
-                    ai.select(key)  # asks how first
-                else:
-                    ai.apply(key)
             elif action == "apply_tone":
                 ai.apply()
             else:
@@ -59,10 +55,8 @@ def dispatch_panel_action(controller: Any, action: str, args: dict[str, Any],
             controller.ignore_rule(str(args["issue_id"]), str(args["scope"]))
         elif action == "close":
             controller.close_panel()
-        elif action == "check":  # the status icon's hover menu
+        elif action == "check":
             controller.check_now()
-        elif action == "check_tone":
-            controller.check_tone()
         elif action == "rewrite":
             controller.open_panel()
         elif action == "resume":
@@ -97,7 +91,10 @@ class PanelRouter:
         if sa is not None and sa.is_open and action in SELECTION_ACTIONS:
             self._selection_action(sa, action, args)
             return
-        if action == "setup":  # the hover menu's "Connect an AI…"
+        if action == ICON_ACTION:  # the status icon's toolbar
+            self._icon_action(args)
+            return
+        if action == "setup":  # "Connect an AI…"
             if self._on_setup is not None:
                 self._on_setup()
             return
@@ -117,6 +114,37 @@ class PanelRouter:
             sa.close()
         else:
             self._c.close_panel(snooze=True)
+
+    def _icon_action(self, args: dict[str, Any]) -> None:
+        """A click on the status icon's toolbar (`icon_toolbar`): Check runs the check (the
+        strip with the corrections); a tone shows its rewrite in the strip; only "Rewrite…"
+        (with its "Rewrite as…" input) and "⋯" open the Glance Assistant panel."""
+        key = args.get("key")
+        if not isinstance(key, str):
+            log_event("panel_action_malformed")
+            return
+        c, ai = self._c, self._ai
+        tone = tone_key(key)
+        if key == "check":
+            c.check_now()
+        elif tone is not None:
+            if ai is None:
+                log_event("panel_action_unknown")
+            else:
+                ai.strip_tone(tone)
+        elif key == "more":
+            c.open_panel()
+        elif key == "rewrite":
+            c.open_panel()
+            if ai is not None and getattr(c, "panel_open", False):
+                ai.ask_custom()  # the "Rewrite as…" input, as its own click opens it
+        elif key == "resume":
+            c.resume()
+        elif key == "setup":
+            if self._on_setup is not None:
+                self._on_setup()
+        else:
+            log_event("panel_action_unknown")
 
     @staticmethod
     def _bar_action(bar: Any, action: str, args: dict[str, Any]) -> None:

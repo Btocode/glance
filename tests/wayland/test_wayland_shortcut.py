@@ -1,8 +1,8 @@
 """`[general] check = "shortcut"` (the default) on GNOME Wayland, in the private headless shell.
 
 Typing checks nothing; a click on the status icon, the check keybinding (Super+Alt+G) or the
-hover menu's "Check spelling & grammar" checks the field and opens the strip, the app keeping
-the keyboard. Killing glanced while the strip is up gives every key back.
+icon toolbar's "Check" checks the field and opens the strip, the app keeping the keyboard. A
+right-click opens the toolbar at once; a tone there previews its rewrite in the strip. Killing glanced while the strip is up gives every key back.
 
 Same rules as test_wayland_e2e.py: run inside tests/wayland/private-session.sh with
 GLANCE_WAYLAND_TEST=1. The tests share one shell, app and glanced and run in file order; the
@@ -99,7 +99,16 @@ def test_check_keybinding_opens_the_strip(desk):
     assert target_still_focused(shell, app)
 
 
-def test_hover_menu_and_hand_cursor(desk):
+TOOLBAR = ["Check", "Friendlier", "Direct", "Shorter", "Professional", "Rewrite…", "⋯"]
+
+
+def toolbar(shell: Shell) -> dict:
+    ov = wait_for(lambda: placed((o := shell.overlay()).get("menu")) and o, 5)
+    assert ov, shell.overlay()
+    return ov
+
+
+def test_icon_toolbar_and_hand_cursor(desk):
     shell, app, glance = desk
     ov = icon(shell)
     x, y, w, h = ov["status"]["rect"]
@@ -107,21 +116,63 @@ def test_hover_menu_and_hand_cursor(desk):
     assert shell.call("TestPointer", {"x": 640, "y": 790})["ok"]
     time.sleep(0.6)
     assert shell.call("TestPointer", {"x": x + w // 2, "y": y + h // 2})["ok"]
-    ov = wait_for(lambda: (o := shell.overlay()).get("menu") and o, 5)
-    assert ov, shell.overlay()
-    assert ov["menu"]["items"][:2] == ["Check spelling & grammar", "Check tone"]
-    assert ov["menu"]["hint"] == "Super+Alt+G to check"
+    ov = toolbar(shell)
+    assert ov["menu"]["items"] == TOOLBAR and ov["menu"]["hint"] == "Super+Alt+G"
+    mx, my, mw, mh = ov["menu"]["rect"]
+    assert mw > 4 * mh and my >= y + h // 2  # one slim row, under the caret line
     assert ov["cursor"] == "hand"  # the icon is clickable
-    shot(shell, "shortcut-menu")
+    shot(shell, "shortcut-toolbar")
     assert target_still_focused(shell, app)
     # an item runs like a click: the check, then the strip
     assert shell.call("TestClick", {"target": "menu:check"})["ok"]
     strip_with_fix(shell, glance)
     assert wait_for(lambda: not shell.overlay().get("menu"), 3), shell.overlay()
     assert target_still_focused(shell, app)
+    close_strip(shell)
     # the pointer leaves: the hand goes with it
     assert shell.call("TestPointer", {"x": 640, "y": 790})["ok"]
     assert wait_for(lambda: shell.overlay()["cursor"] == "default", 3), shell.overlay()
+
+
+def right_click(shell: Shell, x: int, y: int) -> None:
+    assert shell.call("TestPointer", {"x": x, "y": y})["ok"]
+    time.sleep(0.1)
+    assert shell.call("TestPointer", {"how": "button", "x": 1, "button": 3})["ok"]
+    assert shell.call("TestPointer", {"how": "button", "x": 0, "button": 3})["ok"]
+
+
+def test_right_click_toolbar_tone_preview_and_panel(desk):
+    shell, app, glance = desk
+    ov = icon(shell)
+    x, y, w, h = ov["status"]["rect"]
+    assert shell.call("TestPointer", {"x": 640, "y": 790})["ok"]
+    time.sleep(0.6)
+    right_click(shell, x + w // 2, y + h // 2)
+    ov = toolbar(shell)
+    assert ov["menu"]["items"] == TOOLBAR
+    assert not ov["strip"]  # a right-click is not the click: nothing was checked
+    # a tone: its rewrite in the strip, labelled; the big panel stays shut; nothing typed
+    assert shell.call("TestClick", {"target": "menu:tone:friendlier"})["ok"]
+    ov = wait_for(lambda: placed((o := shell.overlay()).get("strip"))
+                  and o["strip"]["label"] == "Friendlier" and o["strip"]["text"] and o, 15)
+    assert ov, (shell.overlay(), glance.request("test_overlay"))
+    assert ov["strip"]["text"] == "Thanks so much, will do!" and not ov["panel"]
+    assert {"escape", "strip_use"} <= grabs(shell)  # Esc closes, Alt+Enter would use it
+    shot(shell, "shortcut-tone-preview")
+    assert app.buffer() == TEXT and target_still_focused(shell, app)
+    close_strip(shell)
+    assert app.buffer() == TEXT
+    # ⋯: the Glance Assistant panel, only from here
+    assert shell.call("TestPointer", {"x": 640, "y": 790})["ok"]
+    time.sleep(0.6)
+    right_click(shell, x + w // 2, y + h // 2)
+    toolbar(shell)
+    assert shell.call("TestClick", {"target": "menu:more"})["ok"]
+    assert wait_for(lambda: placed(shell.overlay().get("panel")), 10), shell.overlay()
+    assert target_still_focused(shell, app)
+    assert shell.call("Chord", {"keys": ["Escape"]})["ok"]
+    assert wait_for(lambda: not shell.overlay().get("panel"), 5), shell.overlay()
+    assert shell.call("TestPointer", {"x": 640, "y": 790})["ok"]
 
 
 MORE = " They has one."  # typed after the checks: a new mistake nobody checks

@@ -234,12 +234,22 @@ def test_status_icon_states_and_its_click(probe):
     assert probe["icon_corner_click_holder"] == 1  # ...but only on its circle
 
 
-def test_status_icon_hover_menu(probe):
-    assert probe["menu_items"] == ["Check spelling & grammar", "Check tone", "Rewrite…",
-                                   "Shorter", "More professional"]
+def test_status_icon_toolbar(probe):
+    items = ["Check", "Friendlier", "Direct", "Shorter", "Professional", "Rewrite…", "⋯"]
+    assert probe["menu_items"] == items
+    _x, y, w, h = probe["menu_geometry"]
+    assert w > 3 * h and y >= probe["caret_bottom"]  # one slim row, under the caret line
     assert probe["menu_override_redirect"] is True and probe["focus_with_menu"]
-    assert probe["menu_click_events"] == [["check", {}]]
+    assert probe["menu_click_events"] == [["icon", {"key": "check"}]]
     assert probe["menu_after_click"] is None and probe["focus_after_menu_click"]
+    # a right-click opens it at once (no click goes out), a second one closes it
+    assert probe["rightclick_items"] == items
+    assert probe["rightclick_events"] == [["icon", {"key": "check"}]]
+    assert probe["rightclick_again"] is None and probe["focus_after_rightclick"]
+
+
+def test_tone_preview_strip(probe):
+    assert probe["tone_strip_text_light"].startswith("Hey team! I think")
 
 
 def test_collapsed_strip_shows_only_the_corrected_sentence(probe):
@@ -330,7 +340,7 @@ def test_dark_theme_and_screenshots(probe):
     assert probe["dark"] is True
     shots = Path(probe["shots_dir"])
     states = [f"icon-{s}" for s in ("idle", "working", "ready", "tone", "muted")]
-    states += ["muted-strip", "menu", "strip", "panel", "panel-selected", "panel-working",
+    states += ["muted-strip", "toolbar", "toolbar-muted", "tone-loading", "tone-strip", "strip", "panel", "panel-selected", "panel-working",
                "selection", "ghost", "shortcuts"]
     for state in states:
         for theme in ("light", "dark"):

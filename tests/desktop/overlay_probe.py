@@ -5,7 +5,8 @@
 Run by tests/test_xvfb.py against a private Xvfb server. It clicks with XTEST, so never
 point it at a display somebody is using. With --shots it saves every piece in each state, light and dark, as
 v3-<state>-<theme>.png in DIR: the status icon (idle, working, ready, tone, muted), the strip,
-the strip a muted icon opens, the hover menu, the assistant panel, select-anything's panel,
+the strip a muted icon opens, the icon's toolbar (and muted), a tone's preview in the
+strip, the assistant panel, select-anything's panel,
 the ghost text and the "Keyboard shortcuts" window.
 """
 import argparse
@@ -30,14 +31,14 @@ from glance.diffing import word_diff
 from glance.grammar.issues import Issue
 from glance.protocol import Rect
 from glance.ui.ghost_gtk import GtkGhost
-from glance.ui.hover_menu import hover_menu
+from glance.ui.icon_toolbar import icon_toolbar
 from glance.ui.overlay_gtk import GAP, GtkOverlay, button_text
 from glance.ui.panel_model import PanelView, ToneChip, build_panel
 from glance.ui.placement import Anchor
 from glance.ui.shortcut_table import glance_shortcuts
 from glance.ui.shortcuts_gtk import ShortcutsWindow
-from glance.ui.status_model import NO_AI_LINE, StatusState, StatusView
-from glance.ui.strip_model import StripView, strip_fix
+from glance.ui.status_model import NO_AI_LINE, PAUSED_LINE, StatusState, StatusView
+from glance.ui.strip_model import Segment, StripView, strip_fix
 
 TYPED = "hey team i think its fine to ship friday but we needs the tests fixed asap"
 GHOST_TYPED = "Hey team, I think it's fine to ship Friday"  # the ghost text's shot
@@ -76,6 +77,10 @@ DRAWER = PanelView(tone="Blunt", tone_reason="curt for a channel", tone_chips=CH
                    issues=ROWS, can_fix_all=True, profile_label="Team channel",
                    profiles=(("team_channel", "Team channel"), ("email", "Email")))
 FRIENDLIER = "Hey team! I think it's fine to ship Friday, but could we get the tests fixed soon?"
+# "Friendlier" on the icon's toolbar: its rewrite previewed in the strip, Use applies it.
+_OPS = word_diff(TYPED, FRIENDLIER)
+TONE_STRIP = StripView(tuple(Segment(o.text, o.kind == "ins") for o in _OPS if o.kind != "del"),
+                       3, on_demand=True, label="Friendlier")
 # A click on "Friendlier": selected, its rewrite in "Suggested", Apply types it.
 SELECTED = replace(
     DRAWER, tone_chips=(replace(CHIPS[0], preview=FRIENDLIER, selected=True), *CHIPS[1:]),
@@ -172,10 +177,12 @@ def main() -> int:
     args = ap.parse_args()
 
     events: list = []
+    # what the icon's toolbar is made from: the icon's state (muted for one screenshot)
+    bar_for = {"view": StatusView(StatusState.IDLE)}
     overlay = GtkOverlay(lambda: events.append(["chip_click"]),
                          lambda action, a: events.append([action, a]),
-                         hover_menu=lambda: hover_menu(StatusView(StatusState.IDLE),
-                                                       "Super+Alt+G"))
+                         icon_toolbar=lambda on_purpose=False: icon_toolbar(bar_for["view"],
+                                                                            "Super+Alt+G"))
     d = display.Display()
     root = d.screen().root
     # The app being written in: it holds the input focus and sits under everything, so a
@@ -297,19 +304,41 @@ def main() -> int:
     wx, wy, ww, wh = out["icon_window"]
     click(wx + ww - 2, wy + wh - 2)  # inside its window, outside the circle: goes through
     out["icon_corner_click_holder"] = holder_clicks()
-    # the hover menu: the pointer resting on the icon opens it, a click on an item runs it
+    # the toolbar: the pointer resting on the icon opens it, a click on an item runs it
     xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
     d.sync()
     pump(0.6)
-    out["menu_items"] = overlay.menu_items()
+    out["menu_items"] = overlay.toolbar_items()
+    out["menu_geometry"] = overlay.toolbar_geometry()
+    out["caret_bottom"] = ANCHOR.caret.y + ANCHOR.caret.h
     out["menu_override_redirect"] = override_redirect(overlay._menu) \
         if overlay._menu.get_visible() else None
     out["focus_with_menu"] = focused()
     events.clear()
-    press(overlay._menu, "Check spelling & grammar")
+    press(overlay._menu, "Check")
     out["menu_click_events"] = list(events)
-    out["menu_after_click"] = overlay.menu_items()
+    out["menu_after_click"] = overlay.toolbar_items()
     out["focus_after_menu_click"] = focused()
+    # a right-click on the icon opens it at once; another closes it
+    xtest.fake_input(d, X.MotionNotify, x=5, y=5)
+    d.sync()
+    pump(0.6)
+    xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
+    xtest.fake_input(d, X.ButtonPress, 3)
+    xtest.fake_input(d, X.ButtonRelease, 3)
+    d.sync()
+    pump(0.15)  # sooner than the hover would
+    out["rightclick_items"] = overlay.toolbar_items()
+    out["rightclick_events"] = list(events)
+    xtest.fake_input(d, X.ButtonPress, 3)
+    xtest.fake_input(d, X.ButtonRelease, 3)
+    d.sync()
+    pump(0.15)
+    out["rightclick_again"] = overlay.toolbar_items()
+    out["focus_after_rightclick"] = focused()
+    xtest.fake_input(d, X.MotionNotify, x=5, y=5)
+    d.sync()
+    pump(0.6)
     holder_clicks()
     events.clear()
     overlay.show_status(StatusView(StatusState.WORKING, spin=True), ANCHOR)
@@ -354,18 +383,32 @@ def main() -> int:
         pump(0.4)
         shot(f"v3-muted-strip-{theme}")
         overlay.hide_strip()
-        overlay.show_status(StatusView(StatusState.READY, 6), ANCHOR)
-        pump(0.3)
-        ix, iy, iw, ih = overlay.status_geometry()
-        xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
-        d.sync()
-        pump(0.7)
-        menu = [*overlay._menu.get_position(), *overlay._menu.get_size()] \
-            if overlay._menu.get_visible() else None
-        grab(f"v3-menu-{theme}", [field(), menu])
-        xtest.fake_input(d, X.MotionNotify, x=5, y=5)
-        d.sync()
-        pump(0.7)
+        for name, view in (("toolbar", StatusView(StatusState.READY, 6)),
+                           ("toolbar-muted", StatusView(StatusState.MUTED, message=PAUSED_LINE))):
+            bar_for["view"] = view
+            overlay.show_status(view, ANCHOR)
+            pump(0.3)
+            ix, iy, iw, ih = overlay.status_geometry()
+            xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
+            d.sync()
+            pump(0.7)
+            grab(f"v3-{name}-{theme}", [field(), overlay.toolbar_geometry()])
+            xtest.fake_input(d, X.MotionNotify, x=5, y=5)
+            d.sync()
+            pump(0.7)
+        bar_for["view"] = StatusView(StatusState.IDLE)
+        # "Friendlier" clicked: its rewrite in the strip, the icon breathing, then ready
+        overlay.show_status(StatusView(StatusState.WORKING, spin=True), ANCHOR)
+        overlay.show_strip(replace(TONE_STRIP, segments=TONE_STRIP.segments[:4], n_fixes=0,
+                                   loading="Rewriting…"), ANCHOR)
+        pump(0.4)
+        shot(f"v3-tone-loading-{theme}")
+        overlay.show_status(StatusView(StatusState.IDLE), ANCHOR)
+        overlay.show_strip(TONE_STRIP, ANCHOR)
+        pump(0.4)
+        out[f"tone_strip_text_{theme}"] = overlay.strip_text()
+        shot(f"v3-tone-strip-{theme}")
+        overlay.hide_strip()
         overlay.hide_status()
         pump(0.2)
 
