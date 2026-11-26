@@ -328,8 +328,9 @@ main() {
 darwin_uninstall() {
     local here=""
     here="$(script_dir)" || here=""
-    [ -n "$here" ] && [ -f "$here/scripts/uninstall-macos.sh" ] \
-        || die "scripts/uninstall-macos.sh is missing next to this script"
+    if [ -z "$here" ] || [ ! -f "$here/scripts/uninstall-macos.sh" ]; then
+        die "scripts/uninstall-macos.sh is missing next to this script"
+    fi
     exec bash "$here/scripts/uninstall-macos.sh" "$@"
 }
 main_or_darwin() {

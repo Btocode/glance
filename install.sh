@@ -166,6 +166,7 @@ load_previous() {
 # Rewritten after every step that creates something, so a run that stops half-way still
 # leaves uninstall.sh an exact record.
 write_manifest() {
+    # shellcheck disable=SC2016  # the single-quoted program below is Python, not shell
     GM_SRC="$SRC" GM_CLONED="$CLONED" GM_VENV="$VENV" GM_VENV_CREATED="$VENV_CREATED" \
     GM_UNIT="$UNIT_WRITTEN" GM_ZSHRC="$ZSHRC" GM_ZSHRC_EXISTED="$ZSHRC_EXISTED" \
     GM_WRAPPER="$WRAPPER_INSTALLED" GM_EXT_ENABLED="${EXT_ENABLED:-0}" \
