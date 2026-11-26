@@ -120,8 +120,8 @@ class CaptureLink:
 class PanelEscape:
     """An OverlayPort that holds the Escape grab exactly while the drawer, or a strip the user
     opened (`StripView.on_demand`), is on screen, and the use key (Alt+Return; `use_key()`
-    says which) exactly while the strip offers a fix, the same transient rule as
-    autocomplete's Tab. Plain Return is never taken."""
+    says which) exactly while the strip offers a fix or the field's panel a selected tone's
+    rewrite, the same transient rule as autocomplete's Tab. Plain Return is never taken."""
 
     def __init__(self, overlay: OverlayPort, hotkeys: HotkeyPort,
                  on_escape: Callable[[], None],
@@ -137,25 +137,32 @@ class PanelEscape:
         self._esc_wanted = False
         self._grabbed = False
         self._use_grabbed = False
+        self._strip_use = False  # the strip offers a fix
+        self._panel_use = False  # the field's panel offers a selected tone's rewrite
 
     def show_strip(self, view: Any, anchor: Any) -> None:
         self._overlay.show_strip(view, anchor)
         self._strip_open = bool(getattr(view, "on_demand", False))
         self._sync_escape()
-        if not (view.can_use and self._on_use is not None):
+        self._strip_use = bool(view.can_use)
+        self._sync_use()
+
+    def hide_strip(self) -> None:
+        self._overlay.hide_strip()
+        self._strip_use = False
+        self._sync_use()
+        self._strip_open = False
+        self._sync_escape()
+
+    def _sync_use(self) -> None:
+        if not ((self._strip_use or self._panel_use) and self._on_use is not None):
             self._release_use()
         elif not self._use_grabbed:
             try:
                 self._use_grabbed = self._hotkeys.grab("strip_use", self._use_key(),
                                                        self._on_use)
-            except ValueError:  # not a key on this keyboard: the Use button remains
+            except ValueError:  # not a key on this keyboard: the Apply button remains
                 self._use_grabbed = False
-
-    def hide_strip(self) -> None:
-        self._overlay.hide_strip()
-        self._release_use()
-        self._strip_open = False
-        self._sync_escape()
 
     @property
     def use_grabbed(self) -> bool:
@@ -190,12 +197,19 @@ class PanelEscape:
         self._overlay.show_panel(view, *where, **kw)
         self.panel_visible = True
         self._sync_escape()
+        self._panel_use = (getattr(view, "mode", "field") == "field"
+                           and getattr(view, "preview_state", None) in ("loading", "ready")
+                           and (bool(getattr(view, "can_apply", False))
+                                or view.preview_state == "loading"))
+        self._sync_use()
 
     def hide_panel(self) -> None:
         self._overlay.hide_panel()
         if self.panel_visible:
             self.panel_visible = False
         self._sync_escape()
+        self._panel_use = False
+        self._sync_use()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._overlay, name)  # the rest of the OverlayPort, unchanged

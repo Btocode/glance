@@ -20,6 +20,7 @@ from AppKit import (
     NSBezelStyleRounded,
     NSBezierPath,
     NSButton,
+    NSColor,
     NSCursor,
     NSFont,
     NSFontAttributeName,
@@ -33,6 +34,7 @@ from AppKit import (
     NSMutableAttributedString,
     NSPasteboard,
     NSPasteboardTypeString,
+    NSRectFillUsingOperation,
     NSScrollView,
     NSTextField,
     NSTrackingArea,
@@ -58,18 +60,19 @@ from glance.ui.chip_model import ChipView
 from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
 from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
 from glance.ui.hover_menu import HoverMenu
-from glance.ui.panel_model import PanelView, ToneChip
+from glance.ui.panel_model import PanelView, SuggestedBox, ToneChip, suggested_box
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
 from glance.ui.strip_model import StripView, scroll_max_h
-from glance.ui.theme import mark_path
+from glance.ui.theme import glow_path, mark_path, rgba
 
 ICON = 22
 ICON_X, ICON_Y = 1, 5
 ICON_BOX = (30, 28)
 BADGE_C, BADGE_R = (23.0, 7.0), 7.0
-MARK_PX = 16.0
+MARK_PX = 18.0  # the brand mark in the icon's (invisible) click target
 _SOURCE_OVER = 2  # NSCompositingOperationSourceOver
+_SOURCE_ATOP = 5  # NSCompositingOperationSourceAtop
 SPIN_MS = 125
 DRAWER_MIN_W = 520
 GAP = 4
@@ -96,21 +99,52 @@ def _mono(size: float = 11.0) -> Any:
         return NSFont.userFixedPitchFontOfSize_(size)
 
 
-_MARKS: dict[float, Any] = {}
+_MARKS: dict[tuple[float, str], Any] = {}
 
 
-def mark_image(px: float) -> Any:
+def mark_image(px: float, kind: str = "mark") -> Any:
     """The brand mark at `px` points, with its 1x and 2x files: AppKit draws the one for the
-    screen, so it is crisp on Retina too."""
-    if px not in _MARKS:
-        img = NSImage.alloc().initWithSize_((px, px))
+    screen, so it is crisp on Retina too. `kind` "glow": the soft glow behind it, bigger by
+    its pad (`theme.GLOW_PAD`) on every side."""
+    key = (px, kind)
+    if key not in _MARKS:
+        files = mark_path if kind == "mark" else glow_path
+        side = px
+        img = None
         for scale in (1, 2):
-            rep = NSImageRep.imageRepWithContentsOfFile_(mark_path(int(px * scale)))
-            if rep is not None:
-                rep.setSize_((px, px))
-                img.addRepresentation_(rep)
-        _MARKS[px] = img
-    return _MARKS[px]
+            rep = NSImageRep.imageRepWithContentsOfFile_(files(int(px * scale)))
+            if rep is None:
+                continue
+            if img is None:
+                mark = NSImageRep.imageRepWithContentsOfFile_(mark_path(int(px * scale)))
+                k = px / mark.pixelsWide() if mark is not None else 1 / scale
+                side = rep.pixelsWide() * k
+                img = NSImage.alloc().initWithSize_((side, side))
+            rep.setSize_((side, side))
+            img.addRepresentation_(rep)
+        _MARKS[key] = img if img is not None else NSImage.alloc().initWithSize_((px, px))
+    return _MARKS[key]
+
+
+_TINTED: dict[tuple[int, str, str], Any] = {}
+
+
+def tinted(img: Any, colour: str) -> Any:
+    """`img` as one flat colour (its alpha kept): the glow in the theme's `icon_glow`, the
+    muted mark in grey."""
+    key = (id(img), colour, "t")
+    if key not in _TINTED:
+        size = img.size()
+        out = NSImage.alloc().initWithSize_(size)
+        out.lockFocus()
+        rect = NSMakeRect(0, 0, size.width, size.height)
+        img.drawInRect_fromRect_operation_fraction_(rect, NSZeroRect, _SOURCE_OVER, 1.0)
+        r, g, b, _a = rgba(colour)
+        NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0).set()
+        NSRectFillUsingOperation(rect, _SOURCE_ATOP)
+        out.unlockFocus()
+        _TINTED[key] = out
+    return _TINTED[key]
 
 
 def _mark_view(px: float) -> Any:
@@ -177,7 +211,7 @@ class _Flipped(NSView):
 
 class _Card(_Flipped):
     """A rounded card: the strip, the panel, a box or chip in it (`radius`, `fill`, `border`;
-    `glow`: a soft emerald line inside the border, the strip's)."""
+    `glow`: a faint line just inside the border, the strip's; never a bloom)."""
 
     def drawRect_(self, _rect):
         fill = getattr(self, "fill", None)
@@ -195,7 +229,7 @@ class _Card(_Flipped):
             inner = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
                 NSMakeRect(2, 2, b.size.width - 4, b.size.height - 4), r - 1.5, r - 1.5)
             glow.setStroke()
-            inner.setLineWidth_(3)
+            inner.setLineWidth_(1)
             inner.stroke()
         if border is not None:
             border.setStroke()
@@ -252,44 +286,33 @@ class _Icon(_Flipped):
                 log_event("ui_action_error", kind=type(e).__name__)
 
     def drawRect_(self, _rect):
-        """The brand mark on a small disc: quiet when idle, a turning emerald arc while
-        working, an emerald ring and count badge when ready, faded when muted."""
+        """The brand mark alone, no disc or ring (`look.icon_look`): softer and without its
+        glow when idle, its glow breathing while working, full colour with a gentle glow
+        and the count badge at its top right when ready, a grey silhouette when muted."""
         view = getattr(self, "view", None)
         t = getattr(self, "tokens", None)
         if view is None or t is None:
             return
-        state = view.state
-        disc = NSBezierPath.bezierPathWithOvalInRect_(
-            NSMakeRect(ICON_X + 0.6, ICON_Y + 0.6, ICON - 1.2, ICON - 1.2))
-        color(t["card" if state is StatusState.MUTED else "surface"]).setFill()
-        disc.fill()
-        color(t["strip_border" if state is StatusState.READY else "hairline"]).setStroke()
-        disc.setLineWidth_(1.2)
-        disc.stroke()
+        lk = look.icon_look(view.state.value, view.spin, int(getattr(self, "phase", 0)))
         cx, cy = ICON_X + ICON / 2, ICON_Y + ICON / 2
-        if state is StatusState.WORKING:
-            phase = int(getattr(self, "phase", 0))
-            arc = NSBezierPath.bezierPath()
-            start = phase * 30.0
-            arc.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
-                NSMakePoint(cx, cy), ICON / 2 - 1.2, start, start + 90, False)
-            color(t["accent_fill"]).setStroke()
-            arc.setLineWidth_(2.2)
-            arc.setLineCapStyle_(1)
-            arc.stroke()
-        alpha = {StatusState.IDLE: 0.8, StatusState.WORKING: 0.9,
-                 StatusState.MUTED: 0.4}.get(state, 1.0)
-        mark_image(MARK_PX).drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
+        if lk.glow > 0:
+            glow = mark_image(MARK_PX, "glow")
+            side = glow.size().width
+            alpha = min(1.0, rgba(t["icon_glow"])[3] * lk.glow)
+            soft = tinted(glow, t["icon_glow"])
+            soft.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
+                NSMakeRect(cx - side / 2, cy - side / 2, side, side), NSZeroRect,
+                _SOURCE_OVER, alpha, True, None)
+        mark = mark_image(MARK_PX)
+        if lk.grey:
+            mark = tinted(mark, t["dot_quiet"])
+        mark.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
             NSMakeRect(cx - MARK_PX / 2, cy - MARK_PX / 2, MARK_PX, MARK_PX), NSZeroRect,
-            _SOURCE_OVER, alpha, True, None)
+            _SOURCE_OVER, lk.mark_alpha, True, None)
         badge = view.badge
         if badge is not None:
             dot = badge == "•"
-            cut = NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(
-                BADGE_C[0] - BADGE_R, BADGE_C[1] - BADGE_R, 2 * BADGE_R, 2 * BADGE_R))
-            color(t["surface"]).setFill()
-            cut.fill()
-            r = 4.0 if dot else BADGE_R - 1.2
+            r = 3.5 if dot else BADGE_R - 0.8
             fill = NSBezierPath.bezierPathWithOvalInRect_(
                 NSMakeRect(BADGE_C[0] - r, BADGE_C[1] - r, 2 * r, 2 * r))
             color(t["dot_warn" if dot else "accent_fill"]).setFill()
@@ -425,7 +448,7 @@ class _Rows:
 
 class MacOverlay:
     """OverlayPort for macOS. `on_panel_action(action, args)` gets the same actions as the
-    GTK overlay's (use, more, accept, fix_all, add_dict, ignore, tone_apply, tone, profile,
+    GTK overlay's (use, more, accept, fix_all, add_dict, ignore, tone, profile,
     copy, close, guard_silence; sel_copy, sel_paste in a select-anything panel)."""
 
     def __init__(self, on_chip_click: Callable[[], None],
@@ -812,7 +835,7 @@ class MacOverlay:
         b.setWantsLayer_(True)
         layer = b.layer()
         layer.setBackgroundColor_(color(t["highlight_rgba"]).CGColor())
-        layer.setBorderColor_(cgcolor(t["strip_border"]))
+        layer.setBorderColor_(cgcolor(t["use_border"]))
         layer.setBorderWidth_(1.0)
         layer.setCornerRadius_(5.0)
         b.setToolTip_(f"Use this ({title})")
@@ -859,7 +882,7 @@ class MacOverlay:
         card.fill = color(t["warn_bg"] if warn else t["strip"])
         card.border = color(t["warn_border"] if warn else t["hairline"] if plain
                             else t["strip_border"])
-        card.glow = None if warn or plain else color(t["glow"])
+        card.glow = None if warn or plain else color(t["strip_shadow"])
         self._strip_buttons_reset()
         buttons = []
         if view.can_use:
@@ -930,19 +953,17 @@ class MacOverlay:
 
     # ------------------------------------------------------------------ the drawer
 
-    def _chip(self, chip: ToneChip, action: str, width: float) -> Any:
-        """A tone chip: its glyph and number key, its name, one line of its rewrite."""
+    def _chip(self, chip: ToneChip, width: float) -> Any:
+        """A tone chip: its glyph and number key, its name, one line of its rewrite. A click
+        selects it (emerald border and tint) and asks for its rewrite."""
         t = self._t
-        if chip.state == "loading" and not chip.preview:
-            line = "Rewriting…"
-        elif chip.state == "failed":
-            line = "Did not work"
-        elif chip.preview:
-            line = " ".join(chip.preview.split())
-        else:
-            line = "Click to rewrite"
+        line = look.card_line(chip.preview, chip.state)
         card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, 62))
-        card.fill, card.border, card.radius = color(t["card"]), color(t["card_border"]), 8.0
+        if chip.selected:
+            card.fill, card.border = color(t["highlight"]), color(t["accent_fill"])
+        else:
+            card.fill, card.border = color(t["card"]), color(t["card_border"])
+        card.radius = 8.0
         g = _glyph(look.tone_glyph(chip.key), color(t["accent"]), 15)
         g.setFrameOrigin_(NSMakePoint(10, 8))
         card.addSubview_(g)
@@ -956,7 +977,7 @@ class MacOverlay:
         preview = _label(line, color(t["muted"]), width - 20, lines=1, size=12)
         preview.setFrameOrigin_(NSMakePoint(10, 43))
         card.addSubview_(preview)
-        cover = self._cover(card, lambda: self._act(action, {"key": chip.key}),
+        cover = self._cover(card, lambda: self._act("tone", {"key": chip.key}),
                             f"card:{chip.key}")
         if chip.preview:
             cover.setToolTip_(chip.preview)
@@ -1041,13 +1062,24 @@ class MacOverlay:
             head.append(_label(extra, color(t["muted"]), rows.width - 140, lines=1, size=12))
         rows.run(head, gap=8)
 
-    def _suggested(self, rows: _Rows, strip: StripView) -> None:
-        """The strip's corrected text, in the panel: every changed word tinted, and
+    def _suggested(self, rows: _Rows, box_view: SuggestedBox) -> None:
+        """"Suggested": the corrected text, or the selected tone's rewrite (its name beside
+        the title, "Rewriting…" while it comes in), every changed word tinted, and
         "Apply (⌥⏎)"."""
         t = self._t
-        self._section(rows, look.SUGGESTED)
+        head = [_label(look.SUGGESTED, color(t["muted"]), 120, bold=True, lines=1, size=12)]
+        head[0].sizeToFit()
+        if box_view.tone:
+            tag = _label(box_view.tone, color(t["accent"]), 160, bold=True, lines=1, size=12)
+            tag.sizeToFit()
+            head.append(tag)
+        right = [_label(look.card_line(None, "loading"), color(t["muted"]), 100, lines=1,
+                        size=12)] if box_view.working else []
+        rows.run(head, right=right, gap=8)
         s = NSMutableAttributedString.alloc().init()
-        for seg in strip.shown:
+        if box_view.placeholder is not None:
+            s.appendAttributedString_(_attr(box_view.placeholder, color(t["muted"]), size=13.0))
+        for seg in box_view.segments:
             part = _attr(seg.text, color(t["text"]), size=14.0)
             if seg.changed:
                 part = NSAttributedString.alloc().initWithString_attributes_(seg.text, {
@@ -1056,26 +1088,27 @@ class MacOverlay:
                     NSBackgroundColorAttributeName: color(t["highlight"])})
             s.appendAttributedString_(part)
         inner = rows.width - 24
-        lab = _label("", color(t["text"]), inner, lines=0 if strip.compact else 8)
+        lab = _label("", color(t["text"]), inner, lines=0 if box_view.scroll else 8)
         lab.setAttributedStringValue_(s)
         _fit(lab, inner)
-        text: Any = self._scrolled(lab, inner) if strip.compact else lab
+        text: Any = self._scrolled(lab, inner) if box_view.scroll else lab
         h = min(text.frame().size.height, 200.0)
         text.setFrameSize_((inner, h))
         box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, rows.width, h + 20))
-        box.fill, box.border, box.radius = color(t["card"]), color(t["card_border"]), 8.0
+        box.fill, box.radius = color(t["card"]), 8.0
+        box.border = color(t["accent_fill" if box_view.tone else "card_border"])
         text.setFrameOrigin_(NSMakePoint(12, 10))
         box.addSubview_(text)
         rows.full(box, gap=8)
         lines = [_label(x, color(t["muted"]), rows.width - 180, lines=2, size=12)
-                 for x in (strip.summary, strip.meta) if x]
+                 for x in box_view.lines]
         right = [self._act_button(look.apply_label(self._use_key(), mac=True), "use",
-                                  primary=True)] if strip.can_use else []
+                                  primary=True)] if box_view.can_apply else []
         if lines or right:
             rows.run(lines, right=right)
         rows.y += 4
 
-    def _tones(self, rows: _Rows, view: PanelView, action: str) -> None:
+    def _tones(self, rows: _Rows, view: PanelView) -> None:
         """The "Tone" section: how the text reads, the chips, "Rewrite as…"."""
         cards = tuple(c for c in view.tone_chips if c.key != "custom")
         custom = any(c.key == "custom" for c in view.tone_chips)
@@ -1085,7 +1118,7 @@ class MacOverlay:
         if cards:
             n = len(cards)
             w = (rows.width - 8 * (n - 1)) / n
-            rows.run([self._chip(c, action, w) for c in cards], gap=8)
+            rows.run([self._chip(c, w) for c in cards], gap=8)
         if custom:
             rows.full(self._rewrite_as(rows.width), gap=8)
         rows.y += 4
@@ -1112,12 +1145,13 @@ class MacOverlay:
             rows.run([self._act_button(label, "profile", name=name)
                       for name, label in view.profiles])
         strip = self._strip_view  # shown here while the panel is open, not on its own
-        suggested = strip is not None and bool(strip.segments)
-        if suggested:
-            self._suggested(rows, strip)
+        box = suggested_box(view, strip)
+        suggested = box is not None
+        if box is not None:
+            self._suggested(rows, box)
         elif strip is not None and strip.note and not view.tone:
             rows.full(_label(strip.note, color(t["muted"]), inner, size=12))
-        self._tones(rows, view, "tone_apply")
+        self._tones(rows, view)
         if view.banner:
             rows.full(_label(view.banner, color(t["warn_text"]), inner))
         if view.copy_offer is not None:
@@ -1162,7 +1196,7 @@ class MacOverlay:
     def _fill_selection(self, rows: _Rows, view: PanelView, inner: float) -> None:
         t = self._t
         self._header(rows, view)
-        self._tones(rows, view, "tone")
+        self._tones(rows, view)
         if view.preview is not None:
             self._section(rows, "Rewrite")
             s = NSMutableAttributedString.alloc().init()

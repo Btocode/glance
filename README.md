@@ -26,7 +26,7 @@ Offline grammar fixes, in place, in any app. No AI required.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
-  <img alt="The Glance Assistant panel under a typed message: the corrected text under Suggested with each change tinted green and an Apply (Alt+Enter) button, four tone chips (Friendlier, More direct, Shorter, Professional) with their number keys, a Rewrite as… box, and the line of fixes with Fix All." src="docs/assets/screenshots/panel-light.png" width="708">
+  <img alt="The Glance Assistant panel under a typed message with the Friendlier tone chip picked: its rewrite under Suggested · Friendlier with each change tinted green and an Apply (Alt+Enter) button, four tone chips (Friendlier, More direct, Shorter, Professional) with their number keys, a Rewrite as… box, and the line of fixes with Fix All." src="docs/assets/screenshots/panel-light.png" width="708">
 </picture>
 
 </div>
@@ -73,15 +73,19 @@ checks as you type? Switch to **Check: while typing** in the tray menu.
 **Tone and rewrites**<br>
 "⋯" (or <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>) opens the Glance Assistant panel:
 the corrected text with every change tinted, the tone chips (<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd>),
-"Rewrite as…" and the list of fixes. The tone chips follow the audience profile of the field
-you are in. Tones need a connected AI.
+"Rewrite as…" and the list of fixes. Click a tone chip (or press its number key) to pick it:
+its rewrite is made once and shown under **Suggested** with the changes tinted, and
+**Apply** (<kbd>Alt</kbd>+<kbd>Enter</kbd>) puts that version in. Click the chip again to go
+back to the plain corrected text. Nothing is asked of the AI while the pointer only rests on
+a chip. The tone chips follow the audience profile of the field you are in. Tones need a
+connected AI.
 
 </td>
 <td>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
-  <img alt="The Glance Assistant panel: the suggested text with its changes tinted, Apply (Alt+Enter), four tone chips with number keys, Rewrite as… and the fixes with Fix All." src="docs/assets/screenshots/panel-light.png">
+  <img alt="The Glance Assistant panel with the Friendlier chip picked: its rewrite under Suggested with the changes tinted, Apply (Alt+Enter), four tone chips with number keys, Rewrite as… and the fixes with Fix All." src="docs/assets/screenshots/panel-light.png">
 </picture>
 
 </td>
@@ -287,7 +291,7 @@ chords clash with app shortcuts, the defaults on macOS are ⌃⌥ chords:
 | Fix all | ⌃⌥F |
 | Undo the last fix | ⌃⌥Z |
 | Pause / resume | ⌃⌥P |
-| Tone 1–4 | ⌃⌥1 … ⌃⌥4 |
+| Pick tone 1–4 (then ⌥⏎ applies it) | ⌃⌥1 … ⌃⌥4 |
 | Complete (autocomplete) | ⌃⌥⏎ |
 | Select-anything | ⌃⌥A |
 
@@ -402,7 +406,7 @@ another field closes the strip. **Typing** mode is how Glance worked before: it 
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/status-ready-dark.png">
-  <img alt="The Glance icon at the end of a typed line: the Glance mark in an emerald ring with a 6 badge, six fixes ready." src="docs/assets/screenshots/status-ready-light.png">
+  <img alt="The Glance icon at the end of a typed line: the Glance mark with a soft emerald glow and a 6 badge at its top right, six fixes ready." src="docs/assets/screenshots/status-ready-light.png">
 </picture>
 &nbsp;&nbsp;
 <picture>
@@ -417,12 +421,12 @@ None of these is a GNOME, Ubuntu, KDE, Xfce or macOS system shortcut;
 | Linux | macOS | Action |
 | --- | --- | --- |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | ⌃⌥G | check the field now and open the strip (again: check again) |
-| <kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌥⏎ | put the corrected text in (only grabbed while the strip shows a fix) |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌥⏎ | put the suggestion in: the corrected text, or the tone you picked in the panel (only grabbed while there is one) |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | ⌃⌥O | open the panel: tone rewrites, "Rewrite as…", the list of fixes |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>F</kbd> | ⌃⌥F | fix all safe grammar |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Z</kbd> | ⌃⌥Z | revert the last change |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | ⌃⌥P | pause |
-| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd> | ⌃⌥1 … ⌃⌥4 | apply the Nth tone chip of the field's audience |
+| <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd> … <kbd>4</kbd> | ⌃⌥1 … ⌃⌥4 | pick the Nth tone chip of the field's audience: the panel opens with its rewrite under Suggested; <kbd>Alt</kbd>+<kbd>Enter</kbd> applies it |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> | ⌃⌥⏎ | ask for a completion (ghost text) |
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | ⌃⌥A | rewrite the selected text in any app |
 | <kbd>Esc</kbd> | Esc | close the strip and the panel |
@@ -538,14 +542,14 @@ around your cursor"). A value outside 50-5000 is ignored with a warning in the l
 
 ### Status icon and when suggestions appear
 
-While you write in a text field, a small round Glance icon sits at the end of the line you are typing and shows what Glance is doing:
+While you write in a text field, the Glance mark sits at the end of the line you are typing and shows what Glance is doing:
 
 | Icon | Meaning |
 |---|---|
-| The Glance mark, quiet | Watching this field, nothing to suggest (in shortcut mode: ready to check) |
-| An emerald arc (turns during an AI call) | Checking |
-| An emerald ring with a number | That many fixes are ready (an amber dot instead of a number: a tone note) |
-| Faded grey | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
+| The Glance mark, softened | Watching this field, nothing to suggest (in shortcut mode: ready to check) |
+| The mark with a soft glow that breathes (during an AI call) | Checking |
+| The mark in full colour, gently glowing, with an emerald number | That many fixes are ready (an amber dot instead of a number: a tone note) |
+| A grey mark | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/menu-dark.png">

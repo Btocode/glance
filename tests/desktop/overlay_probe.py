@@ -4,7 +4,7 @@
 
 Run by tests/test_xvfb.py against a private Xvfb server. It clicks with XTEST, so never
 point it at a display somebody is using. With --shots it saves every piece in each state, light and dark, as
-v2-<state>-<theme>.png in DIR: the status icon (idle, working, ready, tone, muted), the strip,
+v3-<state>-<theme>.png in DIR: the status icon (idle, working, ready, tone, muted), the strip,
 the strip a muted icon opens, the hover menu, the assistant panel, select-anything's panel,
 the ghost text and the "Keyboard shortcuts" window.
 """
@@ -26,6 +26,7 @@ from Xlib import X, display
 from Xlib.ext import xtest
 
 from glance.config import GeneralCfg
+from glance.diffing import word_diff
 from glance.grammar.issues import Issue
 from glance.protocol import Rect
 from glance.ui.ghost_gtk import GtkGhost
@@ -74,6 +75,17 @@ SELECTION = PanelView(mode="selection", tone_chips=CHIPS, issues=ROWS[:2],
 DRAWER = PanelView(tone="Blunt", tone_reason="curt for a channel", tone_chips=CHIPS,
                    issues=ROWS, can_fix_all=True, profile_label="Team channel",
                    profiles=(("team_channel", "Team channel"), ("email", "Email")))
+FRIENDLIER = "Hey team! I think it's fine to ship Friday, but could we get the tests fixed soon?"
+# A click on "Friendlier": selected, its rewrite in "Suggested", Apply types it.
+SELECTED = replace(
+    DRAWER, tone_chips=(replace(CHIPS[0], preview=FRIENDLIER, selected=True), *CHIPS[1:]),
+    preview=word_diff(TYPED, FRIENDLIER), preview_state="ready", can_apply=True,
+    preview_label="Friendlier")
+# ... and "Professional" a moment after its click: being written.
+WORKING = replace(
+    DRAWER, tone_chips=(*CHIPS[:3], replace(CHIPS[3], selected=True), CHIPS[4]),
+    preview=word_diff(TYPED, "Hi team, I believe it is fine to ship"),
+    preview_state="loading", preview_label="Professional")
 
 
 def pump(seconds: float) -> None:
@@ -221,9 +233,35 @@ def main() -> int:
         y0 = max(0, min(r[1] for r in rects) - pad)
         x1 = min(1280, max(r[0] + r[2] for r in rects) + pad)
         y1 = min(800, max(r[1] + r[3] for r in rects) + pad)
+        icon = overlay.status_window
+        drawn = icon.get_visible() and not overlay._composited
+        if drawn:
+            # Xvfb has no compositor, so the icon's window is cut to its mark there. Shoot
+            # what is under it and draw the icon on that as a compositor shows it: its own
+            # draw function onto the picture (glow and soft edges included).
+            ix, iy = icon.get_position()
+            icon.hide()
+            pump(0.15)
         pix = Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), x0, y0,
                                          x1 - x0, y1 - y0)
-        pix.savev(str(Path(args.shots) / f"{name}.png"), "png", [], [])
+        path = str(Path(args.shots) / f"{name}.png")
+        if not drawn:
+            pix.savev(path, "png", [], [])
+            return
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, x1 - x0, y1 - y0)
+        cr = cairo.Context(surface)
+        Gdk.cairo_set_source_pixbuf(cr, pix, 0, 0)
+        cr.paint()
+        cr.translate(ix - x0, iy - y0)
+        cr.push_group()
+        overlay._composited = True
+        overlay._draw_icon(icon, cr)
+        overlay._composited = False
+        cr.pop_group_to_source()
+        cr.paint()
+        surface.write_to_png(path)
+        icon.show()
+        pump(0.15)
 
     def field() -> tuple:
         f = ANCHOR.field
@@ -299,7 +337,7 @@ def main() -> int:
         overlay.hide_panel()
         overlay.show_panel(SELECTION, 640, 160)
         pump(0.4)
-        grab(f"v2-selection-{theme}", [overlay.panel_geometry()], pad=16)
+        grab(f"v3-selection-{theme}", [overlay.panel_geometry()], pad=16)
 
     def icon_shots(theme: str) -> None:
         """Each icon state, the strip a muted icon opens and the hover menu."""
@@ -310,11 +348,11 @@ def main() -> int:
                            ("muted", StatusView(StatusState.MUTED, message=NO_AI_LINE))):
             overlay.show_status(view, ANCHOR)
             pump(0.35)
-            icon_shot(f"v2-icon-{name}-{theme}")
+            icon_shot(f"v3-icon-{name}-{theme}")
         overlay.show_strip(StripView(note=NO_AI_LINE, on_demand=True), ANCHOR)
         overlay.show_status(StatusView(StatusState.MUTED, message=NO_AI_LINE), ANCHOR)
         pump(0.4)
-        shot(f"v2-muted-strip-{theme}")
+        shot(f"v3-muted-strip-{theme}")
         overlay.hide_strip()
         overlay.show_status(StatusView(StatusState.READY, 6), ANCHOR)
         pump(0.3)
@@ -324,7 +362,7 @@ def main() -> int:
         pump(0.7)
         menu = [*overlay._menu.get_position(), *overlay._menu.get_size()] \
             if overlay._menu.get_visible() else None
-        grab(f"v2-menu-{theme}", [field(), menu])
+        grab(f"v3-menu-{theme}", [field(), menu])
         xtest.fake_input(d, X.MotionNotify, x=5, y=5)
         d.sync()
         pump(0.7)
@@ -344,13 +382,13 @@ def main() -> int:
         f = ANCHOR.field
         ghost.show(" and we can demo it Monday", x, y, round(h * 0.81), f.x + f.w - 12 - x)
         pump(0.4)
-        grab(f"v2-ghost-{theme}", [field(), ghost.geometry()])
+        grab(f"v3-ghost-{theme}", [field(), ghost.geometry()])
         ghost.hide()
         page.label.set_text(TYPED)
         win = ShortcutsWindow()
         win.show(glance_shortcuts(GeneralCfg().hotkeys))
         pump(0.6)
-        grab(f"v2-shortcuts-{theme}", [[*win.window.get_position(), *win.window.get_size()]],
+        grab(f"v3-shortcuts-{theme}", [[*win.window.get_position(), *win.window.get_size()]],
              pad=10)
         win.window.destroy()
         pump(0.2)
@@ -371,7 +409,7 @@ def main() -> int:
     # theme: light unless told otherwise
     overlay.show_status(StatusView(StatusState.READY, STRIP.n_fixes), ANCHOR)
     pump(0.3)
-    shot("v2-strip-light")
+    shot("v3-strip-light")
     overlay.hide_status()
     sx, sy, _sw, sh = overlay.strip_geometry()
     holder_clicks()
@@ -417,7 +455,16 @@ def main() -> int:
     out["panel_override_redirect"] = override_redirect(overlay.panel_window)
     out["focus_with_panel"] = focused()
     out["drawer_buttons"] = [button_text(b) for b in buttons(overlay.panel_window)]
-    shot("v2-panel-light")
+    shot("v3-panel-light")
+    overlay.show_panel(SELECTED, 0, 0, anchor=ANCHOR)
+    pump(0.4)
+    out["selected_buttons"] = [button_text(b) for b in buttons(overlay.panel_window)]
+    shot("v3-panel-selected-light")
+    overlay.show_panel(WORKING, 0, 0, anchor=ANCHOR)
+    pump(0.4)
+    shot("v3-panel-working-light")
+    overlay.show_panel(DRAWER, 0, 0, anchor=ANCHOR)
+    pump(0.4)
     for text in ("Shorter", "Rewrite as…", "Fix All", "hey → Hey", "its → it's"):
         press(overlay.panel_window, text)
     press(overlay.panel_window, "6 fixes")  # every fix, with its other choices
@@ -450,14 +497,20 @@ def main() -> int:
     pump(0.4)
     overlay.show_status(StatusView(StatusState.READY, STRIP.n_fixes), ANCHOR)
     pump(0.3)
-    shot("v2-strip-dark")
+    shot("v3-strip-dark")
     overlay.hide_status()
     overlay.show_strip(StripView(STRIP.segments, STRIP.n_fixes, expanded=True), ANCHOR)
     overlay.show_panel(DRAWER, 0, 0, anchor=ANCHOR)
     pump(0.5)
     out["dark_panel"] = overlay.panel_geometry()
     out["dark_strip"] = overlay.strip_geometry()
-    shot("v2-panel-dark")
+    shot("v3-panel-dark")
+    overlay.show_panel(SELECTED, 0, 0, anchor=ANCHOR)
+    pump(0.4)
+    shot("v3-panel-selected-dark")
+    overlay.show_panel(WORKING, 0, 0, anchor=ANCHOR)
+    pump(0.4)
+    shot("v3-panel-working-dark")
     overlay.hide_panel()
     overlay.hide_strip()
     icon_shots("dark")

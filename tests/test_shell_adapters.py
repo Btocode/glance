@@ -1,19 +1,21 @@
 """The GNOME Wayland adapters over a fake extension bus: no shell, no display."""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
 from glance.capture.windows_shell import ShellScreen
 from glance.daemon.shell_link import dispatch
+from glance.diffing import word_diff
 from glance.protocol import Rect
 from glance.session import GNOME_WAYLAND, X11, is_gnome, session_kind
 from glance.shellbus import DAEMON_XML, SHELL_XML, ShellUnavailable, decode, encode
 from glance.ui import scene as sc
 from glance.ui.hotkeys_shell import ShellHotkeys, to_accel
 from glance.ui.overlay_shell import ShellOverlay
-from glance.ui.panel_model import IssueRow, PanelView, ToneChip
+from glance.ui.panel_model import IssueRow, PanelView, ToneChip, suggested_box
 from glance.ui.placement import Anchor
 from glance.ui.selection_shell import ShellSelection
 from glance.ui.status_model import StatusState, StatusView
@@ -109,10 +111,48 @@ def test_scene_serializes_views_and_escapes_the_text():
     assert piece["can_use"] and piece["use_label"] == sc.USE_LABEL == "Alt+Enter"
     assert piece["view"]["segments"][1] == {"text": "it's", "changed": True}
     assert sc.use_label("Ctrl+Return") == "Ctrl+Enter"
-    suggested = sc.suggested_piece(view, LIGHT, "Alt+Return")
+    suggested = sc.suggested_piece(suggested_box(PanelView(), view), LIGHT, "Alt+Return")
     assert suggested["markup"] == (f'a &lt;b&gt; <span background="{LIGHT["highlight"]}" '
                                    f'foreground="{LIGHT["text"]}">it\'s</span>')
     assert suggested["can_use"] and suggested["apply_label"] == "Apply (Alt+Enter)"
+    assert suggested["tone"] is None and not suggested["working"]
+
+
+def test_suggested_shows_the_selected_tone_s_rewrite_instead():
+    strip = StripView((Segment("we need ", False), Segment("it", True)), 1)
+    chips = (ToneChip("shorter", "Shorter", 3, None, "loading", selected=True),
+             ToneChip("friendlier", "Friendlier", 1))
+    loading = PanelView(tone_chips=chips, preview=word_diff("we needs it", "We need"),
+                        preview_state="loading", preview_label="Shorter")
+    piece = sc.suggested_piece(suggested_box(loading, strip), LIGHT, "Alt+Return")
+    assert piece["tone"] == "Shorter" and piece["working"] and not piece["can_use"]
+    assert piece["working_label"] == "Rewriting…"
+    assert piece["markup"].endswith(f'foreground="{LIGHT["text"]}">We need</span>')
+    ready = replace(loading, preview=word_diff("we needs it", "We need it."),
+                    preview_state="ready", can_apply=True)
+    piece = sc.suggested_piece(suggested_box(ready, strip), LIGHT, "Alt+Return")
+    assert piece["can_use"] and not piece["working"] and piece["placeholder"] is None
+    # nothing streamed yet: a placeholder in the box
+    empty = replace(loading, preview=None)
+    assert suggested_box(empty, strip).placeholder == "Rewriting…"
+    # the chips say "Click to preview" until they have a rewrite; nothing on hover
+    panel = sc.panel_piece(loading, 0, 0, 520, True)
+    lines = [c["line"] for c in panel["view"]["tone_chips"]]
+    assert lines == ["Rewriting…", "Click to preview"]
+    assert [c["selected"] for c in panel["view"]["tone_chips"]] == [True, False]
+
+
+def test_status_piece_says_how_the_mark_is_drawn():
+    for state, glow, grey in (("idle", 0.0, False), ("ready", 1.0, False),
+                              ("muted", 0.0, True)):
+        piece = sc.status_piece(StatusView(StatusState(state)), 0, 0)
+        assert (piece["look"]["glow"], piece["look"]["grey"]) == (glow, grey)
+    work = sc.status_piece(StatusView(StatusState.WORKING, spin=True), 0, 0)["look"]
+    assert work["pulse"] and 0 < work["glow"] <= 1
+    still = sc.status_piece(StatusView(StatusState.WORKING, spin=False), 0, 0)["look"]
+    assert not still["pulse"]  # keys still arriving: no animation
+    assert sc.LOOK["pulse"][0] == 1.0 and len(sc.LOOK["pulse"]) == 12
+    assert sc.LOOK["glow_pad"] == 0.25
 
 
 def test_panel_piece_marks_spelling_rows():

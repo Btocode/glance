@@ -110,7 +110,7 @@ GLANCE_ACTIONS: tuple[tuple[str, str], ...] = (
     ("check", "Check the field now"),
     ("panel", "Open the panel and tones"),
     ("fix_all", "Fix all safe grammar"),
-    ("tones", "Apply tone 1–4"),
+    ("tones", "Pick tone 1–4 (then Apply)"),
     ("complete", "Complete the text (ghost text)"),
     ("accept", "Take the completion"),
     ("selection", "Rewrite the selection in any app"),

@@ -53,7 +53,7 @@ def test_the_shortcuts_window_lists_the_configured_chords():
     assert len(rows) == len(GLANCE_ACTIONS)
     assert rows["Apply the suggestion"] == ["Alt", "Enter"]
     assert rows["Open the panel and tones"] == ["Super", "Alt", "O"]
-    assert rows["Apply tone 1–4"] == ["Super", "Alt", "1…4"]
+    assert rows["Pick tone 1–4 (then Apply)"] == ["Super", "Alt", "1…4"]
     assert rows["Take the completion"] == ["Tab"]
     mac = dict((what, keys) for keys, what in glance_shortcuts(GeneralCfg().hotkeys,
                                                               mac=True))

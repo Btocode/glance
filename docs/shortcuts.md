@@ -19,7 +19,7 @@ do not set keeps its default.
 | Fix all safe grammar | `fix_all` | `Super+Alt+f` | ⌃⌥F |
 | Undo Glance's last change | `revert` | `Super+Alt+z` | ⌃⌥Z |
 | Pause / resume | `pause` | `Super+Alt+p` | ⌃⌥P |
-| Apply tone 1–4 | `tone1` … `tone4` | `Super+Alt+1`, `Super+Alt+2`, `Super+Alt+3`, `Super+Alt+4` | ⌃⌥1 … ⌃⌥4 |
+| Pick tone 1–4 (Alt+Enter applies it) | `tone1` … `tone4` | `Super+Alt+1`, `Super+Alt+2`, `Super+Alt+3`, `Super+Alt+4` | ⌃⌥1 … ⌃⌥4 |
 | Ask for a completion | `complete` | `Super+Alt+Return` | ⌃⌥⏎ |
 | Rewrite the selection in any app | `selection` | `Super+Alt+a` | ⌃⌥A |
 | Use the strip's suggestion (only while it shows one) | `[ui] use_key` | `Alt+Return` | ⌥⏎ |

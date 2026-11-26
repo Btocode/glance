@@ -24,11 +24,24 @@ ASSETS = Path(__file__).resolve().parent / "assets"
 MARK_SIZES = (14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 64, 128)
 
 
+# The status icon's glow (scripts/make-glow-assets.py): glance-glow-<px>.png is the mark at
+# <px> blurred, white on a square GLOW_PAD * px bigger on every side, for tinting.
+GLOW_PAD = 0.25
+
+
+def _size(px: int) -> int:
+    return next((s for s in MARK_SIZES if s >= px), MARK_SIZES[-1])
+
+
 def mark_path(px: int) -> str:
     """The brand mark's file for `px` device pixels: the smallest one at least that big (the
     largest otherwise), so it is only ever scaled down, a little."""
-    size = next((s for s in MARK_SIZES if s >= px), MARK_SIZES[-1])
-    return str(ASSETS / f"glance-mark-{size}.png")
+    return str(ASSETS / f"glance-mark-{_size(px)}.png")
+
+
+def glow_path(px: int) -> str:
+    """The glow behind a mark `px` device pixels wide (the file is bigger by its pad)."""
+    return str(ASSETS / f"glance-glow-{_size(px)}.png")
 
 
 def _blend(fg: str, alpha: float, bg: str) -> str:
@@ -49,8 +62,10 @@ LIGHT: dict[str, str] = {
     "card_border": "#d8dee4",
     "hairline": "#d8dee4",      # the panel's border and its separators
     "strip": "#ffffff",         # the inline suggestion strip ...
-    "strip_border": "#10B981",  # ... with its thin emerald border
-    "glow": "rgba(16, 185, 129, 0.28)",  # and soft glow
+    "strip_border": "#d8dee4",  # ... with a hairline border (no glow in the light theme)
+    "strip_shadow": "rgba(23, 25, 28, 0.10)",  # and a soft neutral shadow (8 px blur)
+    "use_border": "#10B981",    # the strip's Alt+Enter chip
+    "icon_glow": "rgba(16, 185, 129, 0.12)",  # behind the status icon's mark: very faint
     "text": "#17191c",
     "body": "#24292f",
     "muted": "#5a636e",
@@ -80,8 +95,10 @@ DARK: dict[str, str] = {
     "card_border": "#2a3340",
     "hairline": "#2a3340",
     "strip": "#151b23",
-    "strip_border": "#3ECF8E",
-    "glow": "rgba(62, 207, 142, 0.35)",
+    "strip_border": "rgba(62, 207, 142, 0.45)",  # a 1 px emerald line, no bloom
+    "strip_shadow": "rgba(62, 207, 142, 0.12)",  # at most a whisper of one (8 px blur)
+    "use_border": "#3ECF8E",
+    "icon_glow": "rgba(62, 207, 142, 0.30)",
     "text": "#e6edf3",
     "body": "#d8e0e8",
     "muted": "#8b98a8",
@@ -166,8 +183,7 @@ def css(t: dict[str, str]) -> str:
 /* the inline suggestion strip */
 .glance-strip {{
     background-color: {t['strip']}; border: 1px solid {t['strip_border']};
-    border-radius: 10px; padding: 7px 8px 7px 10px;
-    box-shadow: inset 0 0 12px {t['glow']}; }}
+    border-radius: 10px; padding: 7px 8px 7px 10px; box-shadow: none; }}
 .glance-strip.glance-plain {{ border-color: {t['hairline']}; box-shadow: none; }}
 .glance-strip .glance-sentence {{ color: {t['body']}; font-size: 14px; }}
 .glance-strip .glance-note {{ color: {t['muted']}; font-size: 13px; }}
@@ -175,7 +191,7 @@ def css(t: dict[str, str]) -> str:
 .glance-strip.glance-warn {{ background-color: {t['warn_bg']};
                              border-color: {t['warn_border']}; box-shadow: none; }}
 .glance-use {{
-    background-color: {t['highlight_rgba']}; border: 1px solid {t['strip_border']};
+    background-color: {t['highlight_rgba']}; border: 1px solid {t['use_border']};
     border-radius: 5px; padding: 2px 7px; }}
 .glance-use label {{ font-family: {MONO}; font-size: 11.5px; color: {t['accent']};
                      font-weight: 600; }}
@@ -221,6 +237,10 @@ def css(t: dict[str, str]) -> str:
     background-color: {t['card']}; border: 1px solid {t['card_border']};
     border-radius: 8px; padding: 8px 10px; }}
 .glance-card:hover {{ border-color: {t['accent']}; background-color: {t['hover']}; }}
+.glance-card.glance-selected, .glance-card.glance-selected:hover {{
+    border-color: {t['accent_fill']}; background-color: {t['highlight']}; }}
+.glance-suggest.glance-selected {{ border-color: {t['accent_fill']}; }}
+.glance-root label.glance-tone-tag {{ color: {t['accent']}; font-size: 12px; font-weight: 600; }}
 .glance-card .glance-card-title {{ color: {t['text']}; font-size: 13px; font-weight: 600; }}
 .glance-card .glance-card-preview {{ color: {t['muted']}; font-size: 12px; }}
 .glance-input {{

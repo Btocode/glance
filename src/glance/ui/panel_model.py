@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from glance.diffing import DiffOp
 from glance.grammar.issues import Issue
+from glance.ui.strip_model import Segment, StripView
 
 EXCERPT_CONTEXT = 20
 
@@ -28,6 +29,9 @@ class ToneChip:
     # loading | ready | failed while there is one.
     preview: str | None = None
     state: str | None = None
+    # The user clicked it (or pressed its number key): its rewrite is the one on show in
+    # "Suggested", and the one Apply types. A second click goes back to the corrected text.
+    selected: bool = False
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,7 @@ class PanelView:
     preview: tuple[DiffOp, ...] | None = None
     preview_state: str | None = None
     can_apply: bool = False
+    preview_label: str | None = None  # the selected tone's name ("Friendlier")
     profile_label: str | None = None
     profiles: tuple[tuple[str, str], ...] = ()  # (name, label) the audience can be set to
     # `field`: the focused field's panel. `selection`: select-anything, a read-only issue list,
@@ -54,6 +59,48 @@ class PanelView:
     confirm: str | None = None
     # The send-guard's warning for the text in the field (e.g. "Sounds hostile").
     guard: str | None = None
+
+
+@dataclass(frozen=True)
+class SuggestedBox:
+    """The panel's "Suggested" box, the same in every renderer: the corrected text, or the
+    rewrite in the tone the user selected (`tone`: its name beside "Suggested")."""
+
+    segments: tuple[Segment, ...]  # changed words are tinted
+    tone: str | None = None
+    working: bool = False  # the selected tone's rewrite is still being written
+    placeholder: str | None = None  # muted, in the box, while there is no text to show
+    lines: tuple[str, ...] = ()  # muted lines under it (the strip's summary and meta)
+    can_apply: bool = False  # "Apply (Alt+Enter)" (the `use` action) types it
+    scroll: bool = False  # long: it scrolls
+
+
+REWRITING = "Rewriting…"
+SCROLL_CHARS = 320  # a rewrite longer than this scrolls in "Suggested"
+NO_REWRITE = "No rewrite this time."
+
+
+def preview_segments(ops: tuple[DiffOp, ...]) -> tuple[Segment, ...]:
+    """A rewrite's diff as the text it makes, the words it put in marked changed."""
+    return tuple(Segment(op.text, op.kind == "ins") for op in ops if op.kind != "del")
+
+
+def suggested_box(view: PanelView, strip: StripView | None) -> SuggestedBox | None:
+    """What "Suggested" shows in the field's panel: the selected tone's rewrite (streaming in,
+    then ready to apply), else the strip's corrected text; None for neither."""
+    if view.mode == "field" and view.preview_state is not None:
+        segs = preview_segments(view.preview or ())
+        working = view.preview_state == "loading"
+        placeholder = None
+        if not segs:
+            placeholder = REWRITING if working else NO_REWRITE
+        long = sum(len(x.text) for x in segs) > SCROLL_CHARS
+        return SuggestedBox(segs, view.preview_label or "Rewrite", working, placeholder,
+                            can_apply=view.can_apply, scroll=long)
+    if strip is not None and strip.segments:
+        return SuggestedBox(strip.shown, lines=tuple(x for x in (strip.summary, strip.meta) if x),
+                            can_apply=strip.can_use, scroll=strip.compact)
+    return None
 
 
 def _excerpt(text: str, start: int, end: int) -> str:

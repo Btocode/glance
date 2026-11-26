@@ -162,7 +162,7 @@ def test_select_anything_reads_the_selection(desk):
 REWRITE = "Thanks so much, will do!"  # FakeAiBackend.REWRITE
 
 
-def test_drawer_tone_card_applies_the_rewrite(desk):
+def test_drawer_tone_card_selects_and_apply_types_it(desk):
     shell, app, glance, _root = desk
     assert shell.call("Chord", {"keys": ["End"]})["ok"]  # drop select-anything's selection
     assert shell.call("Chord", {"keys": ["super", "alt", "space"]})["ok"]  # the panel hotkey
@@ -173,7 +173,15 @@ def test_drawer_tone_card_applies_the_rewrite(desk):
     shot(shell, "drawer")
     card = min(n for n in ov["named"] if n.startswith("card:"))
     done = len(glance.applies())
+    # a click selects the tone: its rewrite comes into "Suggested", nothing is typed yet
     assert shell.call("TestClick", {"target": card})["ok"]
+    assert wait_for(lambda: {"suggested-tone", "apply"} <= set(shell.overlay()["named"]),
+                    15, 0.1), shell.overlay()
+    time.sleep(0.5)
+    assert len(glance.applies()) == done and app.buffer() != REWRITE
+    shot(shell, "drawer-selected")
+    # Apply types the selected rewrite
+    assert shell.call("TestClick", {"target": "apply"})["ok"]
     assert wait_for(lambda: len(glance.applies()) > done, 15, 0.1)
     assert glance.applies()[-1] == "status=verified"
 
@@ -187,6 +195,8 @@ def test_rewrite_as_takes_the_keyboard_and_gives_it_back(desk):
     assert shell.call("Chord", {"keys": ["BackSpace"]})["ok"]
     assert shell.call("TypeText", {"text": "We needs a plan."})["ok"]
     assert wait_for(lambda: app.buffer() == "We needs a plan.", 5, 0.1)
+    # ...and glanced has it too: "Rewrite as…" is asked about the text glanced last saw
+    assert wait_for(lambda: (glance.status().get("field") or {}).get("len") == 16, 5, 0.1)
     if not shell.overlay().get("panel"):
         assert shell.call("Chord", {"keys": ["super", "alt", "space"]})["ok"]
     assert wait_for(lambda: "rewrite-as" in shell.overlay()["named"], 10)
@@ -203,6 +213,11 @@ def test_rewrite_as_takes_the_keyboard_and_gives_it_back(desk):
     assert shell.call("TestAskText", {"text": "make it short", "submit": True})["ok"]
 
     assert wait_for(lambda: target_still_focused(shell, app), 5)
+    # Enter makes the rewrite into "Suggested"; Apply types it
+    assert wait_for(lambda: {"suggested-tone", "apply"} <= set(shell.overlay()["named"]),
+                    15, 0.1), shell.overlay()
+    assert len(glance.applies()) == done
+    assert shell.call("TestClick", {"target": "apply"})["ok"]
     assert wait_for(lambda: len(glance.applies()) > done, 15, 0.1)
     assert glance.applies()[-1] == "status=verified"
     assert app.buffer() == REWRITE

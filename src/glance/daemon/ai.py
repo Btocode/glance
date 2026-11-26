@@ -135,12 +135,20 @@ class _Awaited:
     field_id: str
     sha: str
     custom: str
-    apply: bool
+    apply: bool  # the focus came back by itself: the rewrite may be applied
     until: float
 
 
 def _tone_key(tone: str, custom: str | None) -> str:
     return f"{CUSTOM}:{custom}" if tone == CUSTOM else tone
+
+
+def _label(rw: _Rewrite) -> str:
+    """The name of a rewrite's tone, as "Suggested" shows it beside itself."""
+    if rw.tone == CUSTOM:
+        return "Your rewrite"
+    spec = TONES.get(rw.tone)
+    return spec.label if spec is not None else rw.tone
 
 
 def _display(text: str, shielded: Shielded) -> str:
@@ -182,9 +190,9 @@ class AiCoordinator:
     Rewrites follow the same rule, more strictly: a rewrite belongs to one field, one
     scheduler generation and one text hash. A result that arrives for anything else is
     dropped; nothing is ever typed that the focused field's current text was not the source
-    of. Rewrites start only on `preview` / `apply` (hover, click, hotkey), except the
-    speculative ones, which need `supervisor.speculate()` and run in the supervisor's
-    second lane.
+    of. Rewrites start only on `select` / `preview` / `apply` (a click on a tone chip, its
+    number key, the hover menu), never on hover, except the speculative ones, which need
+    `supervisor.speculate()` and run in the supervisor's second lane.
 
     `overlay` is needed for "Rewrite as…" and for copying; `rich(snapshot)` says whether
     the field is a rich editor, where protected entities cannot be typed back.
@@ -233,6 +241,8 @@ class AiCoordinator:
         self._changed_at = 0.0
         self._spec: _Speculation | None = None
         self._spec_timer: Handle | None = None
+        # (target, made) of the text the focus just left: kept for its return
+        self._kept_made: tuple[_Target, dict[str, RewriteOutcome]] | None = None
 
     # ------------------------------------------------------------------ wiring
 
@@ -253,6 +263,7 @@ class AiCoordinator:
         c.extra_issues.append(self._issues)
         c.extra_ignored.append(self._ignored)
         c.extra_status.append(self._status)
+        c.extra_use.append(self._use_selected)
         c.add_listener(self)
         self.refresh_status()
 
@@ -322,7 +333,7 @@ class AiCoordinator:
             self._changed_at = self._clock.now()
         if self._offer is not None and self._offer[0] != s.field_id:
             self._offer = None
-        if self._awaited is not None or self._away is not None:
+        if self._awaited is not None or self._away is not None or self._kept_made is not None:
             # The scheduler has not seen this snapshot yet: let it count the change first.
             self._clock.call_later(0, self._field_is_back)
 
@@ -391,7 +402,7 @@ class AiCoordinator:
         rw = self._current_rewrite()
         if rw is not None:
             panel = replace(panel, preview=rw.shown, preview_state=rw.state,
-                            can_apply=self._can_apply(rw))
+                            can_apply=self._can_apply(rw), preview_label=_label(rw))
             banner = self._banner(rw)
             if banner is not None:
                 panel = replace(panel, banner=banner)
@@ -423,7 +434,9 @@ class AiCoordinator:
             if rw is not None and rw.key == chip.key:
                 text = None if rw.shown is None else \
                     "".join(op.text for op in rw.shown if op.kind != "del")
-                chip = replace(chip, preview=text, state=rw.state)
+                chip = replace(chip, preview=text, state=rw.state, selected=True)
+            elif rw is not None and chip.key == CUSTOM and rw.tone == CUSTOM:
+                chip = replace(chip, selected=True)
             elif chip.key in made and made[chip.key].text is not None:
                 chip = replace(chip, preview=made[chip.key].text, state="ready")
             out.append(chip)
@@ -564,11 +577,12 @@ class AiCoordinator:
     def _leave(self, keep_rewrite: bool = False) -> None:
         """No field, a private one, or paused: forget everything derived from the text.
 
-        `keep_rewrite`: the focus only left the field. A rewrite in flight stays in flight
-        for AWAIT_FIELD_MS in case the same field with the same text comes right back.
+        `keep_rewrite`: the focus only left the field (a hotkey's key grab blurs it). The
+        selected rewrite, in flight or made, waits AWAIT_FIELD_MS for the same field with the
+        same text to come right back, and so do the rewrites made for that text.
         """
         rw = self._rw
-        if keep_rewrite and rw is not None and rw.state == "loading" and not rw.cancelled:
+        if keep_rewrite and rw is not None and rw.state != "failed" and not rw.cancelled:
             self._rw = None
             self._drop_away()
             self._away = rw
@@ -576,11 +590,13 @@ class AiCoordinator:
         elif not keep_rewrite:
             self._drop_away()
         self._cancel(spare=self._away)
+        made = (self._made_for, self._made) if keep_rewrite and self._made_for else None
         self._resolved = None
         self._shown = None
         self._seen = None
         self._made_for = None
         self._made = {}
+        self._kept_made = made
         if not keep_rewrite:
             # After a mere blur the result of an apply just sent is still to come, and a
             # rewrite offered as a copy is still wanted when the same field is back.
@@ -599,7 +615,7 @@ class AiCoordinator:
         return (*chips, ToneChip(CUSTOM, TONES[CUSTOM].label, None))
 
     def preview(self, tone: str, custom: str | None = None) -> None:
-        """Show the rewrite of the focused field's text in `tone` (hover, click).
+        """Show the rewrite of the focused field's text in `tone` (selected: a click).
 
         A rewrite already made for this exact text is shown at once; otherwise one is
         started and streams into the panel. Only one rewrite is ever in flight: asking for
@@ -634,8 +650,8 @@ class AiCoordinator:
     def apply(self, tone: str | None = None, custom: str | None = None) -> None:
         """Type the rewrite over the whole field, through the verified write-back path.
 
-        Without `tone`: the preview on show. With one (a hotkey): the rewrite in that tone,
-        made first when there is none yet and applied as soon as it is complete. A rewrite
+        Without `tone`: the selected rewrite (Apply). With one (the hover menu): the rewrite
+        in that tone, made first when there is none yet and applied once complete. A rewrite
         that cannot be restored exactly is never typed: the panel offers it as a copy.
         """
         if tone is not None:
@@ -648,23 +664,50 @@ class AiCoordinator:
         else:
             self._apply(rw)
 
-    def apply_chip(self, n: int) -> None:
-        """Hotkey N: apply the profile's Nth tone chip."""
-        chip = next((c for c in self.tone_chips() if c.hotkey == n), None)
-        if chip is not None:
-            self.apply(chip.key)
-
-    def choose(self, tone: str) -> None:
-        """A click on a tone chip: show its rewrite first; a second click applies what is
-        shown. "Rewrite as…" asks for the instruction."""
+    def select(self, tone: str) -> None:
+        """A click on a tone chip: select it and show its rewrite in "Suggested" (made now
+        if it was not made for this text before); Apply then types it. A click on the chip
+        already selected goes back to the corrected text. "Rewrite as…" asks how first."""
         if tone == CUSTOM:
             self.ask_custom()
             return
         rw = self._current_rewrite()
-        if rw is not None and rw.key == tone and self._can_apply(rw):
-            self._apply(rw)
+        if rw is not None and rw.key == tone:
+            self.deselect()
         else:
             self.preview(tone)
+
+    def deselect(self) -> None:
+        """No tone selected: "Suggested" shows the corrected text again."""
+        if self._rw is None:
+            return
+        self._drop_rewrite()
+        self._c.refresh()
+
+    def select_chip(self, n: int) -> None:
+        """Super+Alt+N: what a click on the profile's Nth tone chip does, with the panel
+        opened first to show it. Nothing is applied until Apply (Alt+Enter)."""
+        chip = next((c for c in self.tone_chips() if c.hotkey == n), None)
+        if chip is None:
+            return
+        if not getattr(self._c, "panel_open", True):
+            self._c.open_panel()
+            self.preview(chip.key)  # opening the panel never takes a selection away
+        else:
+            self.select(chip.key)
+
+    def selected(self) -> str | None:
+        """The tone whose rewrite is selected for the focused field's text, if any."""
+        rw = self._current_rewrite()
+        return None if rw is None else rw.tone
+
+    def _use_selected(self) -> bool:
+        """Apply (Alt+Enter) in the open panel types the selected tone's rewrite, not the
+        corrected text; False when there is none, so the corrected text is used."""
+        if not getattr(self._c, "panel_open", False) or self._current_rewrite() is None:
+            return False
+        self.apply()
+        return True
 
     def ask_custom(self) -> None:
         """Ask how to rewrite. The entry takes the keyboard focus away from the field, so the
@@ -845,13 +888,17 @@ class AiCoordinator:
         if rw is not None:
             rw.cancelled = True
             newer = self._rw is not None and self._rw.state == "loading"
-            if rw.finished is None and not newer:  # stopping is all or nothing
+            if rw.state == "loading" and rw.finished is None and not newer:  # all or nothing
                 self._supervisor.cancel_all()
 
     def _field_is_back(self) -> None:
         """A field is focused again (and the scheduler has counted it)."""
         rw, target = self._away, self._target()
         s = self._c.current
+        kept, self._kept_made = self._kept_made, None
+        if kept is not None and target is not None and self._made_for is None \
+                and (kept[0].field_id, kept[0].sha) == (target.field_id, target.sha):
+            self._made_for, self._made = target, kept[1]  # same text: made for it still
         if rw is not None and s is not None and target is not None:
             if (target.field_id, target.sha) != (rw.target.field_id, rw.target.sha) \
                     or s.text != rw.original or self._rw is not None:
@@ -879,12 +926,11 @@ class AiCoordinator:
                 or self._clock.now() > a.until or self._resolved is None):
             return  # not the text that was asked about any more
         self._c.open_panel()
-        if a.apply:
-            self.apply(CUSTOM, a.custom)
-            return
+        # Into "Suggested", selected, like a tone chip's: Apply (Alt+Enter) types it. Where
+        # the focus did not come back by itself, it can only be copied.
         self.preview(CUSTOM, a.custom)
         rw = self._current_rewrite()
-        if rw is not None:
+        if rw is not None and not a.apply:
             rw.copy_only = True
             self._c.refresh()
 

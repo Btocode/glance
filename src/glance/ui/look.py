@@ -4,6 +4,8 @@ the scene) and macOS all take these, so the three look alike.
 """
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass, replace
 from html import escape
 
 from glance.ui.hotkeys import parse_chord
@@ -27,6 +29,36 @@ _KEYS = {"return": "Enter", "enter": "Enter", "kp_enter": "Enter", "space": "Spa
          "escape": "Esc", "tab": "Tab", "backspace": "Backspace", "left": "←", "right": "→",
          "up": "↑", "down": "↓"}
 _MAC_KEYS = {**_KEYS, "return": "⏎", "enter": "⏎", "tab": "⇥", "backspace": "⌫"}
+
+
+# The status icon: the brand mark alone (no disc, no ring), its glow and the count badge.
+@dataclass(frozen=True)
+class IconLook:
+    mark_alpha: float  # the mark's opacity
+    glow: float  # the glow's strength, times the theme's `icon_glow` alpha (0: none)
+    grey: bool  # the mark as a flat grey silhouette (muted)
+    pulse: bool  # the glow breathes (PULSE, one step per frame)
+
+
+ICON_LOOKS = {
+    "idle": IconLook(0.7, 0.0, False, False),
+    "working": IconLook(0.9, 1.0, False, True),
+    "ready": IconLook(1.0, 1.0, False, False),
+    "muted": IconLook(0.55, 0.0, True, False),
+}
+
+# The working glow over the 12 animation frames (8 a second: a 1.5 s breath), as factors.
+PULSE = tuple(round(0.6 + 0.4 * math.cos(2 * math.pi * i / 12), 3) for i in range(12))
+
+
+def icon_look(state: str, spin: bool = False, phase: int = 0) -> IconLook:
+    """How the icon is drawn in `state` (StatusState's value). Working breathes only while
+    `spin` (not while keys arrive: a still glow costs nothing per keystroke); `phase` is
+    the animation frame."""
+    base = ICON_LOOKS.get(state, ICON_LOOKS["idle"])
+    if state == "working":
+        return replace(base, glow=PULSE[phase % 12] if spin else PULSE[3], pulse=spin)
+    return base
 
 
 def chord_keys(chord: str, mac: bool = False) -> list[str]:
@@ -61,6 +93,21 @@ def subline(mode: str, has_tones: bool) -> str:
     """The muted line under the panel's title: what is at work."""
     head = "Selected text" if mode == "selection" else "Local grammar"
     return f"{head} · AI tones" if has_tones else head
+
+
+CARD_HINT = "Click to preview"
+
+
+def card_line(preview: str | None, state: str | None) -> str:
+    """A tone card's second line: its rewrite on one line once there is one, "Rewriting…"
+    while it is being written, "Click to preview" before (nothing is asked for on hover)."""
+    if state == "loading" and not preview:
+        return "Rewriting…"
+    if state == "failed":
+        return "Did not work"
+    if preview:
+        return " ".join(preview.split())
+    return CARD_HINT
 
 
 def tone_line(tone: str | None, reason: str | None) -> str | None:

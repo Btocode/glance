@@ -19,7 +19,7 @@ from Xlib import X, display
 from Xlib.ext import xtest
 
 from glance.diffing import word_diff
-from glance.ui.overlay_gtk import HOVER_MS, GtkOverlay, button_text
+from glance.ui.overlay_gtk import GtkOverlay, button_text
 from glance.ui.panel_model import PanelView, ToneChip
 
 OLD = "ok send me the report today, i need it before the <b>meeting</b> starts & ends."
@@ -109,26 +109,30 @@ def main() -> int:
     base = PanelView(tone="Blunt", tone_reason="curt for a channel", tone_chips=CHIPS,
                      profile_label="Team channel", profiles=PROFILES)
 
-    # 1. chips only: hovering asks for a preview, but never for "Rewrite as…"
+    # 1. chips only: resting the pointer on a chip (or "Rewrite as…") asks for nothing
     overlay.show_panel(base, 300, 150)
     pump(0.4)
     out["chips_only"] = labels()
     move("Close", 0.1)
-    move("Shorter", HOVER_MS / 1000 / 3)  # passing over it is not resting on it
-    move("Close", HOVER_MS / 1000 + 0.2)
-    out["after_passing_over"] = list(events)
-    move("Shorter", HOVER_MS / 1000 + 0.3)
-    move("Rewrite as…", HOVER_MS / 1000 + 0.3)
+    move("Shorter", 0.8)
+    move("Rewrite as…", 0.8)
     move("Close", 0.1)
     out["after_resting"] = list(events)
     events.clear()
 
-    # 2. loading, then a streamed and a finished preview
-    overlay.show_panel(PanelView(**{**base.__dict__, "preview_state": "loading"}), 300, 150)
+    # 2. "Shorter" clicked: selected, its rewrite streaming into "Suggested", then ready
+    chosen = (*CHIPS[:2], ToneChip("shorter", "Shorter", 3, None, "loading", selected=True),
+              *CHIPS[3:])
+    overlay.show_panel(PanelView(**{**base.__dict__, "tone_chips": chosen,
+                                    "preview_state": "loading",
+                                    "preview_label": "Shorter"}), 300, 150)
     pump(0.3)
     out["loading"] = labels()
-    ready = PanelView(**{**base.__dict__, "preview": word_diff(OLD, NEW),
-                         "preview_state": "ready", "can_apply": True})
+    done = (*CHIPS[:2], ToneChip("shorter", "Shorter", 3, NEW, "ready", selected=True),
+            *CHIPS[3:])
+    ready = PanelView(**{**base.__dict__, "tone_chips": done, "preview": word_diff(OLD, NEW),
+                         "preview_state": "ready", "can_apply": True,
+                         "preview_label": "Shorter"})
     overlay.show_panel(ready, 300, 150)
     pump(0.4)
     out["ready"] = labels()
@@ -137,6 +141,7 @@ def main() -> int:
         w, h = d.screen().width_in_pixels, d.screen().height_in_pixels
         Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), 0, 0, w, h).savev(
             args.screenshot, "png", [], [])
+    click("Apply")
     click("Shorter")
     click("Rewrite as…")
     click("For Team channel")  # opens the audience list

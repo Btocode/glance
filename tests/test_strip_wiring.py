@@ -70,3 +70,28 @@ def test_the_default_use_key_is_alt_return():
     from glance.config import Config
 
     assert Config().ui.use_key == "Alt+Return"
+
+
+def test_alt_return_is_also_grabbed_while_the_panel_offers_a_selected_tone():
+    from glance.ui.panel_model import PanelView
+
+    overlay, keys, used = FakeOverlay(), FakeHotkeys(), []
+    esc = PanelEscape(overlay, keys, lambda: None, on_use=lambda: used.append(1))
+    esc.show_panel(PanelView(tone="Blunt"), 0, 0, anchor=AT)  # no tone selected
+    assert "strip_use" not in keys.grabbed()
+    esc.show_panel(PanelView(preview_state="loading"), 0, 0, anchor=AT)  # applied when done
+    assert keys.grabbed()["strip_use"] == "Alt+Return"
+    esc.show_panel(PanelView(preview_state="ready", can_apply=True), 0, 0, anchor=AT)
+    keys.press("strip_use")
+    assert used == [1]
+    esc.show_panel(PanelView(preview_state="ready", can_apply=False), 0, 0, anchor=AT)
+    assert "strip_use" not in keys.grabbed()  # a copy only: nothing to apply
+    esc.show_strip(FIX, AT)
+    esc.show_panel(PanelView(preview_state="ready", can_apply=True), 0, 0, anchor=AT)
+    esc.hide_panel()  # the strip still offers its fix
+    assert keys.grabbed()["strip_use"] == "Alt+Return"
+    esc.hide_strip()
+    assert "strip_use" not in keys.grabbed()
+    sel = PanelView(mode="selection", preview_state="ready", can_apply=True)
+    esc.show_panel(sel, 0, 0)  # select-anything's panel: Copy / Paste, not Alt+Return
+    assert "strip_use" not in keys.grabbed()

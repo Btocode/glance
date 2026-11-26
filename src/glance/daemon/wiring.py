@@ -100,8 +100,9 @@ def session_problem(env: Mapping[str, str]) -> str | None:
 
 
 def tone_hotkeys(ai: Any) -> dict[str, Callable[[], None]]:
-    """`tone1`..`tone4`: apply the Nth tone chip of the focused field's audience."""
-    return {f"tone{n}": (lambda n=n: ai.apply_chip(n)) for n in range(1, 5)}
+    """`tone1`..`tone4`: select the Nth tone chip of the focused field's audience (the panel
+    opens with its rewrite; Apply types it)."""
+    return {f"tone{n}": (lambda n=n: ai.select_chip(n)) for n in range(1, 5)}
 
 
 def hotkeys_status(grabbed: Iterable[str], configured: Iterable[str]) -> dict[str, str]:

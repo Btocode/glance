@@ -23,6 +23,7 @@ from glance.grammar.store import IgnoredRules, PersonalDictionary
 from glance.privacy.redact import shield
 from glance.protocol import ApplyResult, Edit, FieldSnapshot, Rect, text_sha256
 from glance.ui.chip_model import ChipState
+from glance.ui.panel_model import suggested_box
 from tests.fakes import (
     FakeBackend,
     FakeBg,
@@ -253,11 +254,12 @@ def test_ai_profile_offers_sharpen_first(rig):
     rig.open(prompt_box())
     first = rig.ai.tone_chips()[0]
     assert (first.key, first.hotkey) == ("sharpen_prompt", 1)
-    rig.ai.apply_chip(1)  # Super+Alt+1
+    rig.ai.select_chip(1)  # Super+Alt+1: selected and made, not applied
     assert [c.tone for c in rig.rewrites()] == ["sharpen_prompt"]
+    assert rig.capture.applies == [] and rig.panel.preview_label == "Sharpen prompt"
 
 
-def test_no_rewrite_call_without_hover_or_click(rig):
+def test_no_rewrite_call_without_a_click(rig):
     rig.open()
     rig.clock.advance(60_000)
     assert rig.rewrites() == [] and rig.rewrites(rig.spec) == []
@@ -268,12 +270,12 @@ def test_no_rewrite_call_without_hover_or_click(rig):
 # ---------------------------------------------------------------- preview and apply
 
 
-def test_hover_streams_preview_then_click_applies_whole_field(held):
+def test_selected_tone_streams_into_suggested_then_apply_types_the_whole_field(held):
     s = held.open()
     seen = []
     show = held.overlay.show_panel
     held.overlay.show_panel = lambda view, x, y, **kw: (seen.append(view), show(view, x, y, **kw))
-    held.ai.preview("friendlier")
+    held.ai.select("friendlier")
     assert held.panel.preview_state == "loading" and held.panel.preview is None
     assert held.panel.can_apply is False
     held.backend.finish(["Thanks ", "so much!"])
@@ -307,20 +309,57 @@ def test_apply_leaves_the_method_to_a_per_app_writeback_choice(held, writeback, 
 def test_preview_of_the_same_tone_is_not_started_twice(held):
     held.open()
     held.ai.preview("shorter")
-    held.ai.preview("shorter")  # the pointer came back over the chip
+    held.ai.preview("shorter")  # asked for again while on its way
     assert len(held.rewrites()) == 1 and held.backend.cancelled == 0
     held.backend.finish(["Short."])
     held.ai.preview("shorter")
     assert len(held.rewrites()) == 1 and held.panel.preview_state == "ready"
 
 
-def test_clicking_a_chip_previews_first_and_applies_what_was_seen(rig):
+def test_clicking_a_chip_selects_it_and_apply_types_what_was_seen(rig):
     s = rig.open()
-    rig.ai.choose("shorter")
+    rig.ai.select("shorter")
     assert rig.panel.preview_state == "ready" and rig.capture.applies == []
-    rig.ai.choose("shorter")
+    assert rig.panel.preview_label == "Shorter" and rig.ai.selected() == "shorter"
+    chips = {c.key: c for c in rig.panel.tone_chips}
+    assert chips["shorter"].selected and chips["shorter"].preview == "Thanks so much, will do!"
+    assert not any(c.selected for k, c in chips.items() if k != "shorter")
+    box = suggested_box(rig.panel, None)
+    assert box.tone == "Shorter" and box.can_apply and not box.working
+    assert "".join(x.text for x in box.segments) == "Thanks so much, will do!"
+    # another chip: the selection moves (its rewrite made); the first is kept for this text
+    rig.ai.select("friendlier")
+    assert rig.ai.selected() == "friendlier" and len(rig.rewrites()) == 2
+    rig.ai.select("shorter")
+    assert len(rig.rewrites()) == 2  # remembered: not asked for again
+    # Apply (Alt+Enter) in the open panel types the selected rewrite
+    rig.c.use_strip()
     assert [r.edit for r in rig.capture.applies] == [Edit(0, len(s.text),
                                                           "Thanks so much, will do!")]
+
+
+def test_clicking_the_selected_chip_again_goes_back_to_the_corrected_text(rig):
+    rig.open()
+    rig.ai.select("shorter")
+    rig.ai.select("shorter")
+    assert rig.ai.selected() is None and rig.panel.preview_state is None
+    assert not any(c.selected for c in rig.panel.tone_chips)
+    assert rig.panel.preview_label is None and rig.capture.applies == []
+    rig.c.use_strip()  # nothing selected: Apply is the corrected text's (none here)
+    assert rig.capture.applies == []
+
+
+def test_number_keys_select_like_a_click_and_open_the_panel(rig):
+    rig.c.handle_snapshot(snap())
+    rig.clock.advance(1200)
+    assert rig.panel is None
+    rig.ai.select_chip(3)  # Super+Alt+3, the panel closed: it opens, "Shorter" selected
+    assert rig.panel is not None and rig.ai.selected() == "shorter"
+    assert rig.capture.applies == []
+    rig.ai.select_chip(1)  # the panel open: another chip
+    assert rig.ai.selected() == "friendlier"
+    rig.ai.select_chip(1)  # the same one again: unselected
+    assert rig.ai.selected() is None and rig.capture.applies == []
 
 
 def test_late_rewrite_is_discarded(held):
@@ -491,18 +530,46 @@ def test_embedded_object_blocks_apply_offers_copy(tmp_path):
     assert rig.capture.applies == []
 
 
+def test_the_number_key_s_grab_blur_keeps_the_panel_and_the_selection(rig):
+    s = snap()
+    rig.c.handle_snapshot(s)
+    rig.clock.advance(1200)
+    rig.ai.select_chip(3)
+    rig.c.handle_focus_lost("blur")  # X sends the app a FocusOut for the key grab
+    rig.c.handle_snapshot(s)
+    rig.clock.advance(0)
+    assert rig.panel is not None and rig.ai.selected() == "shorter"
+    rig.ai.select("friendlier")
+    rig.ai.select("shorter")  # made before the blur: not asked for again
+    assert [c.tone for c in rig.rewrites()] == ["shorter", "friendlier"]
+    rig.c.use_strip()
+    assert [r.edit.replacement for r in rig.capture.applies] == ["Thanks so much, will do!"]
+
+
+def test_a_real_focus_change_still_closes_the_panel(rig):
+    rig.open()
+    rig.ai.select("shorter")
+    rig.c.handle_focus_lost("window")
+    rig.clock.advance(3000)
+    rig.c.handle_snapshot(snap())
+    rig.clock.advance(0)
+    assert rig.overlay.panel is None
+
+
 def test_mention_in_a_rich_editor_blocks_apply_offers_copy(tmp_path):
     kept = "Hey [[GLANCE_E1]], could you look at the release notes before the meeting?"
     want = kept.replace("[[GLANCE_E1]]", "@sam")
     rig = Rig(tmp_path, deltas=(kept,))
     rig.open(snap(MENTION))  # Slack: the mention is a pill, typing it back would flatten it
-    rig.ai.apply_chip(1)
+    rig.ai.select_chip(1)
+    rig.c.use_strip()  # Apply
     assert rig.capture.applies == []
     assert rig.panel.can_apply is False and rig.panel.copy_offer == want
     assert "Copy" in rig.panel.banner
     # The same text in a plain editor is applied with the mention restored.
     rig.open(plain(MENTION, field_id="f2"))
-    rig.ai.apply_chip(1)
+    rig.ai.select_chip(1)
+    rig.c.use_strip()
     assert [r.edit.replacement for r in rig.capture.applies] == [want]
 
 
@@ -540,16 +607,17 @@ def test_hotkey_apply_runs_then_applies(held):
 
 def test_hotkey_for_a_chip_the_profile_does_not_have_does_nothing(rig):
     rig.open(prompt_box())  # three chips
-    rig.ai.apply_chip(4)
-    rig.ai.apply_chip(0)
+    rig.ai.select_chip(4)
+    rig.ai.select_chip(0)
     assert rig.rewrites() == [] and rig.capture.applies == []
 
 
-def test_hotkey_apply_that_cannot_apply_opens_the_panel(tmp_path):
+def test_number_key_for_a_rewrite_that_cannot_apply_shows_the_copy(tmp_path):
     rig = Rig(tmp_path, deltas=("Hey, look at the notes?",))
     rig.c.handle_snapshot(plain(MENTION))
     rig.clock.advance(1200)
-    rig.ai.apply_chip(1)
+    rig.ai.select_chip(1)
+    rig.c.use_strip()
     assert rig.capture.applies == []
     assert rig.panel is not None and rig.panel.copy_offer == "Hey, look at the notes?"
 
@@ -601,7 +669,8 @@ def test_reverted_rewrite_offers_copy(rig):
 def test_reverted_rewrite_is_still_offered_after_the_hotkeys_blur(rig):
     rig.c.handle_snapshot(snap())
     rig.clock.advance(1200)
-    rig.ai.apply_chip(3)
+    rig.ai.select_chip(3)
+    rig.c.use_strip()  # Alt+Enter
     r = rig.capture.applies[-1]
     rig.c.handle_focus_lost("blur")  # the key grab
     rig.c.handle_apply_result(ApplyResult(r.apply_id, "reverted", ""))
@@ -707,9 +776,9 @@ def test_pregenerated_preview_shows_at_once(tmp_path):
 # ---------------------------------------------------------------- "Rewrite as…"
 
 
-def test_rewrite_as_applies_once_the_field_is_back(rig):
+def test_rewrite_as_fills_suggested_once_the_field_is_back_and_apply_types_it(rig):
     s = rig.open()
-    rig.ai.choose("custom")
+    rig.ai.select("custom")
     ((prompt, answer),) = rig.overlay.asked
     assert prompt == "Rewrite as…" and rig.rewrites() == []
     rig.c.handle_focus_lost("window")  # the entry window took the focus
@@ -719,6 +788,10 @@ def test_rewrite_as_applies_once_the_field_is_back(rig):
     rig.clock.advance(0)
     (call,) = rig.rewrites()
     assert (call.tone, call.custom) == ("custom", "as a pirate")
+    assert rig.capture.applies == []  # in "Suggested" first, selected
+    assert rig.panel.preview_label == "Your rewrite" and rig.panel.can_apply
+    assert [c.selected for c in rig.panel.tone_chips if c.key == "custom"] == [True]
+    rig.c.use_strip()  # Apply (Alt+Enter)
     (r,) = rig.capture.applies
     assert r.edit == Edit(0, len(s.text), "Thanks so much, will do!")
     assert r.expected_sha256 == text_sha256(s.text)

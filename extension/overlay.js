@@ -18,10 +18,9 @@ const ICON = 22;
 const ICON_X = 1, ICON_Y = 5;
 const ICON_BOX = [30, 28];
 const BADGE_C = [23, 7], BADGE_R = 7;
-const MARK_PX = 16;
+const MARK_PX = 18;  // the brand mark in the icon's (invisible) click target
 const GHOST_GAP = 6;
 const SPIN_MS = 125;
-const HOVER_MS = 350;
 // The status icon's hover menu (glance/ui/hover_menu.py: OPEN_MS, CLOSE_MS).
 const MENU_OPEN_MS = 250;
 const MENU_CLOSE_MS = 400;
@@ -32,6 +31,15 @@ const MAX_CHOICES = 5;
 function rgb(hex) {
     const h = (hex || '#000000').replace('#', '');
     return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+}
+
+// `#rrggbb` or `rgba(r, g, b, a)` as [r, g, b, a] in 0..1.
+function rgba(value) {
+    const m = /rgba\(([^)]*)\)/.exec(value || '');
+    if (!m)
+        return [...rgb(value), 1];
+    const p = m[1].split(',').map(v => parseFloat(v));
+    return [p[0] / 255, p[1] / 255, p[2] / 255, p[3]];
 }
 
 function esc(text) {
@@ -139,7 +147,6 @@ export class Overlay {
         this._keys = {status: '', strip: '', panel: '', ghost: '', menu: ''};
         this._phase = 0;
         this._spin = 0;
-        this._hover = 0;
         this._resizing = false;
         this._details = false;
         this._profiles = false;
@@ -173,8 +180,6 @@ export class Overlay {
         this._closeAsk(false);
         if (this._spin)
             GLib.source_remove(this._spin);
-        if (this._hover)
-            GLib.source_remove(this._hover);
         this._cancelMenuTimers();
         for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu]) {
             Main.layoutManager.removeChrome(actor);
@@ -310,7 +315,7 @@ export class Overlay {
             primary: [`background-color: ${t.accent_fill}; color: ${t.on_accent}; border-radius: 7px; ` +
                 'padding: 7px 14px; font-weight: 600;', `background-color: ${t.accent_fill_hover};`, 13],
             use: [`background-color: ${t.highlight_rgba}; color: ${t.accent}; border: 1px solid ` +
-                `${t.strip_border}; border-radius: 5px; padding: 2px 7px; font-weight: 600; ` +
+                `${t.use_border}; border-radius: 5px; padding: 2px 7px; font-weight: 600; ` +
                 `font-family: ${this._look?.mono ?? MONO};`,
             `background-color: ${t.accent_fill}; color: ${t.on_accent};`, 11.5],
             quiet: [`background-color: transparent; color: ${t.muted}; border-radius: 6px; ` +
@@ -354,14 +359,15 @@ export class Overlay {
     }
 
     // The brand mark's file for `px` logical pixels at the screen's scale: never scaled up.
-    _markPath(px) {
+    // `kind` 'glow': the soft glow behind it (bigger by `glow_pad` of it on every side).
+    _markPath(px, kind = 'mark') {
         const look = this._look;
         if (!look?.mark_dir)
             return null;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor || 1;
         const sizes = look.mark_sizes ?? [];
         const size = sizes.find(s => s >= px * scale) ?? sizes[sizes.length - 1];
-        return `${look.mark_dir}/glance-mark-${size}.png`;
+        return `${look.mark_dir}/glance-${kind}-${size}.png`;
     }
 
     _mark(px) {
@@ -372,8 +378,8 @@ export class Overlay {
             y_align: Clutter.ActorAlign.CENTER});
     }
 
-    _markSurface(px) {
-        const path = this._markPath(px);
+    _markSurface(px, kind = 'mark') {
+        const path = this._markPath(px, kind);
         if (!path)
             return null;
         if (!this._surfaces.has(path)) {
@@ -536,8 +542,9 @@ export class Overlay {
         }
     }
 
-    // The brand mark on a small disc: quiet when idle, a turning emerald arc while working,
-    // an emerald ring and count badge when ready, faded when muted.
+    // The brand mark alone, no disc or ring (`look` from the scene): softer and without its
+    // glow when idle, its glow breathing while working, full colour with a gentle glow and
+    // the count badge at its top right when ready, a grey silhouette when muted.
     _drawIcon(area) {
         const cr = area.get_context();
         const st = this._scene?.status;
@@ -546,40 +553,43 @@ export class Overlay {
             return;
         }
         const t = this._t;
-        const r = ICON / 2, cx = ICON_X + r, cy = ICON_Y + r, tau = 2 * Math.PI;
-        cr.arc(cx, cy, r, 0, tau);
-        cr.setSourceRGB(...rgb(t[st.state === 'muted' ? 'card' : 'surface']));
-        cr.fill();
-        cr.arc(cx, cy, r - 0.6, 0, tau);
-        cr.setSourceRGB(...rgb(t[st.state === 'ready' ? 'strip_border' : 'hairline']));
-        cr.setLineWidth(1.2);
-        cr.stroke();
-        if (st.state === 'working') {
-            const start = this._phase * tau / 12;
-            cr.arc(cx, cy, r - 1.2, start, start + tau / 4);
-            cr.setSourceRGB(...rgb(t.accent_fill));
-            cr.setLineWidth(2.2);
-            cr.setLineCap(Cairo.LineCap.ROUND);
-            cr.stroke();
+        const lk = st.look ?? {mark_alpha: 1, glow: 0, grey: false, pulse: false};
+        const cx = ICON_X + ICON / 2, cy = ICON_Y + ICON / 2;
+        const mark = this._markSurface(MARK_PX);
+        const glowStrength = lk.pulse ? (this._look?.pulse?.[this._phase % 12] ?? lk.glow) : lk.glow;
+        if (mark && glowStrength > 0) {
+            const glow = this._markSurface(MARK_PX, 'glow');
+            const [r, g, b, a] = rgba(t.icon_glow);
+            if (glow) {
+                const k = MARK_PX / mark.getWidth();
+                const side = glow.getWidth() * k;
+                cr.save();
+                cr.translate(cx - side / 2, cy - side / 2);
+                cr.scale(k, k);
+                cr.setSourceRGBA(r, g, b, Math.min(1, a * glowStrength));
+                cr.maskSurface(glow, 0, 0);
+                cr.restore();
+            }
         }
-        const surface = this._markSurface(MARK_PX);
-        if (surface) {
-            const k = MARK_PX / surface.getWidth();
+        if (mark) {
+            const k = MARK_PX / mark.getWidth();
             cr.save();
             cr.translate(cx - MARK_PX / 2, cy - MARK_PX / 2);
             cr.scale(k, k);
-            cr.setSourceSurface(surface, 0, 0);
-            cr.paintWithAlpha({idle: 0.8, working: 0.9, muted: 0.4}[st.state] ?? 1);
+            if (lk.grey) {
+                cr.setSourceRGBA(...rgb(t.dot_quiet), lk.mark_alpha);
+                cr.maskSurface(mark, 0, 0);
+            } else {
+                cr.setSourceSurface(mark, 0, 0);
+                cr.paintWithAlpha(lk.mark_alpha);
+            }
             cr.restore();
         }
         const badge = st.badge;
         if (badge) {
             const [bx, by] = BADGE_C;
             const dot = badge === '•';
-            cr.arc(bx, by, BADGE_R, 0, tau);  // a cut-out ring around it
-            cr.setSourceRGB(...rgb(t.surface));
-            cr.fill();
-            cr.arc(bx, by, dot ? 4 : BADGE_R - 1.2, 0, tau);
+            cr.arc(bx, by, dot ? 3.5 : BADGE_R - 0.8, 0, 2 * Math.PI);
             cr.setSourceRGB(...rgb(t[dot ? 'dot_warn' : 'accent_fill']));
             cr.fill();
             if (!dot) {
@@ -610,7 +620,8 @@ export class Overlay {
         const warn = v.guard !== null && v.guard !== undefined && v.segments.length === 0;
         const plain = !warn && v.segments.length === 0;
         const border = warn ? t.warn_border : plain ? t.hairline : t.strip_border;
-        const glow = warn || plain ? '' : `box-shadow: inset 0 0 12px ${t.glow};`;
+        // no bloom: at most a soft 8 px shadow (emerald at 12 % in dark, neutral in light)
+        const glow = warn || plain ? '' : `box-shadow: 0 1px 8px ${t.strip_shadow};`;
         const row = hbox({style: `background-color: ${t[warn ? 'warn_bg' : 'strip']}; ` +
             `border: 1px solid ${border}; border-radius: 10px; padding: 7px 8px 7px 10px; ` +
             `spacing: 10px; ${glow}`});
@@ -659,7 +670,6 @@ export class Overlay {
             this._details = this._profiles = false;
         }
         this._keys.panel = key;
-        this._cancelHover();
         for (const n of [...this._named.keys()]) {
             if (!['status', 'use', 'more', 'strip-text', 'ask-entry'].includes(n) &&
                 !n.startsWith('menu:'))
@@ -726,13 +736,16 @@ export class Overlay {
         return header;
     }
 
-    // A tone chip: its glyph and number key, its name, one line of its rewrite once known.
-    _card(chip, action) {
+    // A tone chip: its glyph and number key, its name, one line of its rewrite once known. A
+    // click selects it (emerald border and tint) and asks for its rewrite; hovering only
+    // changes its look.
+    _card(chip) {
         const t = this._t;
-        const button = this._hoverBox({x_expand: true},
-            `background-color: ${t.card}; border: 1px solid ${t.card_border}; ` +
-            'border-radius: 8px; padding: 8px 10px;',
-            `border-color: ${t.accent}; background-color: ${t.hover};`);
+        const base = chip.selected
+            ? `background-color: ${t.highlight}; border: 1px solid ${t.accent_fill}; `
+            : `background-color: ${t.card}; border: 1px solid ${t.card_border}; `;
+        const button = this._hoverBox({x_expand: true}, `${base}border-radius: 8px; padding: 8px 10px;`,
+            chip.selected ? '' : `border-color: ${t.accent}; background-color: ${t.hover};`);
         const box = vbox({style: 'spacing: 3px;', x_expand: true});
         const top = hbox({style: 'spacing: 6px; padding-bottom: 2px;', x_expand: true});
         top.add_child(this._glyph(chip.glyph ?? 'spark', 15));
@@ -741,41 +754,17 @@ export class Overlay {
             top.add_child(this._kbd(String(chip.hotkey)));
         box.add_child(top);
         box.add_child(this._label(chip.label, 'text', 13, 'font-weight: 600;', false));
-        let line = 'Hover to preview';
-        if (chip.state === 'loading' && !chip.preview)
-            line = 'Rewriting…';
-        else if (chip.state === 'failed')
-            line = 'Did not work';
-        else if (chip.preview)
-            line = chip.preview.split(/\s+/).join(' ');
-        box.add_child(this._label(line, 'muted', 12, '', false));
+        box.add_child(this._label(chip.line ?? '', 'muted', 12, '', false));
         button.set_child(box);
-        button.connect('notify::hover', () => {
-            this._cancelHover();
-            if (button.hover) {
-                this._hover = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOVER_MS, () => {
-                    this._hover = 0;
-                    this._cb.clicked('action', {action: 'tone_hover', args: {key: chip.key}});
-                    return GLib.SOURCE_REMOVE;
-                });
-            }
-        });
-        clickable(button, this._act(action, {key: chip.key}));
+        clickable(button, this._act('tone', {key: chip.key}));
         this._named.set(`card:${chip.key}`, button);
         return button;
     }
 
-    _cancelHover() {
-        if (this._hover) {
-            GLib.source_remove(this._hover);
-            this._hover = 0;
-        }
-    }
-
-    _cards(chips, action) {
+    _cards(chips) {
         const row = hbox({style: 'spacing: 8px;'});
         for (const chip of chips)
-            row.add_child(this._card(chip, action));
+            row.add_child(this._card(chip));
         return row;
     }
 
@@ -799,7 +788,7 @@ export class Overlay {
     }
 
     // The "Tone" section: how the text reads, the chips, "Rewrite as…".
-    _tones(panel, action) {
+    _tones(panel) {
         const v = panel.view;
         const cards = v.tone_chips.filter(c => c.key !== 'custom');
         const custom = v.tone_chips.some(c => c.key === 'custom');
@@ -815,23 +804,39 @@ export class Overlay {
         }
         box.add_child(head);
         if (cards.length)
-            box.add_child(this._cards(cards, action));
+            box.add_child(this._cards(cards));
         if (custom)
             box.add_child(this._rewriteAs());
         return box;
     }
 
-    // The strip's corrected text, in the panel: every changed word tinted; "Apply (Alt+Enter)".
+    // "Suggested": the corrected text, or the selected tone's rewrite (its name beside the
+    // title, "Rewriting…" while it comes in), every changed word tinted; "Apply (Alt+Enter)".
     _suggested(s) {
         const t = this._t;
         const box = vbox({style: 'spacing: 6px;'});
-        box.add_child(this._section(this._word('suggested', 'Suggested')));
-        const text = this._label('', 'text', 14);
-        text.clutter_text.set_markup(s.markup);
+        const head = hbox({style: 'spacing: 8px;'});
+        head.add_child(this._section(this._word('suggested', 'Suggested')));
+        if (s.tone) {
+            const tag = this._label(s.tone, 'accent', 12, 'font-weight: 600;', false);
+            this._named.set('suggested-tone', tag);
+            head.add_child(tag);
+        }
+        head.add_child(new St.Widget({x_expand: true}));
+        if (s.working)
+            head.add_child(this._label(s.working_label ?? 'Rewriting…', 'muted', 12, '', false));
+        box.add_child(head);
+        let text;
+        if (s.placeholder) {
+            text = this._label(s.placeholder, 'muted', 13);
+        } else {
+            text = this._label('', 'text', 14);
+            text.clutter_text.set_markup(s.markup);
+        }
         text.x_expand = true;
         this._named.set('suggested-text', text);
         const frame = new St.Bin({x_expand: true, style: `background-color: ${t.card}; border: 1px solid ` +
-            `${t.card_border}; border-radius: 8px; padding: 10px 12px;`});
+            `${s.tone ? t.accent_fill : t.card_border}; border-radius: 8px; padding: 10px 12px;`});
         if (s.scroll) {
             const inner = vbox({x_expand: true});
             inner.add_child(text);
@@ -943,7 +948,7 @@ export class Overlay {
             card.add_child(this._suggested(panel.suggested));
         else if (panel.note && !v.tone)
             card.add_child(this._label(panel.note, 'muted', 12));
-        const tones = this._tones(panel, 'tone_apply');
+        const tones = this._tones(panel);
         if (tones)
             card.add_child(tones);
         if (v.banner)
@@ -978,7 +983,7 @@ export class Overlay {
     _fillSelection(card, panel) {
         const v = panel.view, t = this._t;
         card.add_child(this._header(panel));
-        const tones = this._tones(panel, 'tone');
+        const tones = this._tones(panel);
         if (tones)
             card.add_child(tones);
         if (panel.preview_markup !== null && panel.preview_markup !== undefined) {

@@ -255,6 +255,19 @@ class SelectAnything:
         """Rewrite the selection in `tone` and show the result in the panel."""
         self._preview(tone, custom, None)
 
+    def select(self, tone: str) -> None:
+        """A click on a tone chip: its rewrite is shown (made now); a click on the chip
+        already selected takes it away again. "Rewrite as…" asks how first."""
+        s = self._sess
+        if s is None:
+            return
+        if tone != CUSTOM and s.rw is not None and s.rw.key == (tone, None):
+            self._cancel_rewrite(s)
+            s.banner = None
+            self._render()
+            return
+        self.preview(tone)
+
     def _preview(self, tone: str, custom: str | None, then: str | None) -> None:
         """`then` (copy | paste) is done as soon as the rewrite is ready."""
         s = self._sess
@@ -442,9 +455,16 @@ class SelectAnything:
     # ------------------------------------------------------------------ the panel
 
     def _chips(self, s: _Session) -> tuple[ToneChip, ...]:
-        chips = [ToneChip(key, TONES[key].label, None)
-                 for key in s.resolved.profile.chips if key in TONES]
-        return (*chips, ToneChip(CUSTOM, TONES[CUSTOM].label, None))
+        rw = s.rw
+        on = None if rw is None else rw.tone
+
+        def chip(key: str) -> ToneChip:
+            if key != on or rw is None:
+                return ToneChip(key, TONES[key].label, None)
+            text = None if rw.outcome is None else rw.outcome.text
+            return ToneChip(key, TONES[key].label, None, text, rw.state, selected=True)
+
+        return (*(chip(k) for k in s.resolved.profile.chips if k in TONES), chip(CUSTOM))
 
     def _render(self) -> None:
         s = self._sess

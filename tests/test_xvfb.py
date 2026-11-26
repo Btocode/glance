@@ -277,11 +277,18 @@ def test_drawer_opens_in_the_strips_place(probe):
     assert probe["drawer_buttons"][:8] == [
         "For Team channel ▾", "Esc | Close", "Apply (Alt+Enter)",
         "Friendlier | Could someone pick this up? Thanks! | 1",
-        "More direct | Ship Friday once tests pass. | 2", "Shorter | Hover to preview | 3",
+        "More direct | Ship Friday once tests pass. | 2", "Shorter | Click to preview | 3",
         "Professional | Rewriting… | 4", "Rewrite as… | e.g. make it a bullet list | ↵"]
     # the same six issues as the strip's sentence: count and fixes agree with it
     assert probe["drawer_buttons"][8:] == ["6 fixes", "hey → Hey", "i → I", "its → it's",
                                            "+3 more", "Fix All"]
+
+
+def test_a_selected_tone_shows_its_rewrite_in_suggested(probe):
+    buttons = probe["selected_buttons"]
+    assert buttons[2] == "Apply (Alt+Enter)"  # applies the selected rewrite
+    assert buttons[3].startswith("Friendlier | Hey team! I think it's fine")
+    assert "Shorter | Click to preview | 3" in buttons
 
 
 def test_drawer_clicks_reach_the_callbacks(probe):
@@ -289,7 +296,7 @@ def test_drawer_clicks_reach_the_callbacks(probe):
     first = "harper:SentenceCapitalization:0:3"
     friday = "harper:SpellCheck:34:40"
     assert probe["drawer_events"] == [
-        ["tone_apply", {"key": "shorter"}],
+        ["tone", {"key": "shorter"}],  # a click selects; nothing happens on hover
         ["tone", {"key": "custom"}],
         ["fix_all", {}],
         ["accept", {"issue_id": first, "choice": 0}],
@@ -323,10 +330,11 @@ def test_dark_theme_and_screenshots(probe):
     assert probe["dark"] is True
     shots = Path(probe["shots_dir"])
     states = [f"icon-{s}" for s in ("idle", "working", "ready", "tone", "muted")]
-    states += ["muted-strip", "menu", "strip", "panel", "selection", "ghost", "shortcuts"]
+    states += ["muted-strip", "menu", "strip", "panel", "panel-selected", "panel-working",
+               "selection", "ghost", "shortcuts"]
     for state in states:
         for theme in ("light", "dark"):
-            name = f"v2-{state}-{theme}"
+            name = f"v3-{state}-{theme}"
             assert (shots / f"{name}.png").stat().st_size > 2000, name
 
 

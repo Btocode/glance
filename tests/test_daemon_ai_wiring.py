@@ -125,7 +125,7 @@ def test_language_detector_filters_local_issues_and_tells_the_backend(tmp_path):
     assert d.backend.calls[-1].ctx.mixed_language is False
 
 
-def test_tone_hotkeys_are_bound_by_default_and_apply_the_nth_chip(tmp_path):
+def test_tone_hotkeys_are_bound_by_default_and_select_the_nth_chip(tmp_path):
     d = Daemon(tmp_path)
     actions = tone_hotkeys(d.ai)
     assert sorted(actions) == ["tone1", "tone2", "tone3", "tone4"]
@@ -135,6 +135,9 @@ def test_tone_hotkeys_are_bound_by_default_and_apply_the_nth_chip(tmp_path):
     d.focus()
     keys.grabs["tone3"][1]()  # Super+Alt+3
     assert [c.tone for c in d.rewrites()] == ["shorter"]
+    # selected in the panel it opened, not typed: Apply (Alt+Enter) types it
+    assert d.capture.applies == [] and d.overlay.panel.preview_label == "Shorter"
+    d.c.use_strip()
     assert [r.edit.replacement for r in d.capture.applies] == ["Thanks so much, will do!"]
 
 
@@ -161,7 +164,8 @@ def test_rich_editor_rule_uses_the_live_config(tmp_path):
     text = "ping @sam about the release notes before the meeting today"
     d.backend.deltas = ("Hey [[GLANCE_E1]], a word about the release notes?",)
     d.focus(snap(text, wm_class="Slack", title="general (Channel) - Acme - Slack"))
-    d.ai.apply_chip(1)
+    d.ai.select_chip(1)
+    d.c.use_strip()
     assert d.capture.applies == []
     assert d.overlay.panel.copy_offer == "Hey @sam, a word about the release notes?"
     d.cfg = load_config(_write(tmp_path, "[apps.slack]\nrich = false\n"))
@@ -169,7 +173,8 @@ def test_rich_editor_rule_uses_the_live_config(tmp_path):
     # The user said Slack is plain text for them: the next rewrite there is typed.
     d.focus(snap(text, wm_class="Slack", title="general (Channel) - Acme - Slack",
                  field_id="f2"))
-    d.ai.apply_chip(1)
+    d.ai.select_chip(1)
+    d.c.use_strip()
     assert [r.edit.replacement for r in d.capture.applies] == [
         "Hey @sam, a word about the release notes?"]
 
@@ -195,11 +200,18 @@ def test_panel_tone_actions_reach_the_coordinator(tmp_path):
     def act(action, **args):
         dispatch_panel_action(d.c, action, args, d.ai, d.overrides.set)
 
-    act("tone_hover", key="shorter")
+    act("tone_hover", key="shorter")  # gone: resting on a chip asks for nothing
+    assert d.rewrites() == [] and d.overlay.panel.preview_state is None
+    act("tone", key="shorter")  # a click selects it: its rewrite in "Suggested"
     assert d.overlay.panel.preview_state == "ready" and d.capture.applies == []
+    assert d.overlay.panel.preview_label == "Shorter"
+    act("tone", key="shorter")  # again: back to the corrected text
+    assert d.overlay.panel.preview_state is None and d.capture.applies == []
+    act("tone", key="shorter")
+    act("use")  # Apply (Alt+Enter): the selected rewrite
+    assert len(d.capture.applies) == 1 and [c.tone for c in d.rewrites()] == ["shorter"]
+    act("tone", key="friendlier")
     act("apply_tone")
-    assert len(d.capture.applies) == 1
-    act("tone", key="friendlier")  # a click shows the preview first
     assert len(d.capture.applies) == 1 and [c.tone for c in d.rewrites()] == [
         "shorter", "friendlier"]
     act("tone", key="custom")
@@ -217,7 +229,7 @@ def test_copy_action_prefers_the_rewrite_then_the_controllers_offer(tmp_path):
     d = Daemon(tmp_path)
     d.backend.deltas = ("Hey, a word about the notes?",)
     d.focus(snap("ping @sam about the release notes before the meeting today"))
-    d.ai.apply_chip(1)  # the mention was lost: copy only
+    d.ai.select_chip(1)  # the mention was lost: copy only
     dispatch_panel_action(d.c, "copy", {}, d.ai)
     assert d.overlay.clipboard == ["Hey, a word about the notes?"]
     calls = []
@@ -276,7 +288,7 @@ def test_strip_and_card_actions(tmp_path):
     assert d.overlay.panel is not None
     act("more")
     assert d.overlay.panel is None
-    act("tone_apply", key="shorter")  # a card click: made, then applied in one go
+    act("tone_apply", key="shorter")  # the hover menu's "Shorter": made, then applied
     assert len(d.capture.applies) == 1 and [c.tone for c in d.rewrites()] == ["shorter"]
     act("tone_apply", key="custom")  # "Rewrite as…" still asks first
     assert [prompt for prompt, _cb in d.overlay.asked] == ["Rewrite as…"]

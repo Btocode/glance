@@ -24,7 +24,7 @@ from glance.shellbus import ShellBus, ShellUnavailable
 from glance.ui import scene as sc
 from glance.ui.chip_model import ChipView
 from glance.ui.hover_menu import menu_piece
-from glance.ui.panel_model import PanelView
+from glance.ui.panel_model import PanelView, suggested_box
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
 from glance.ui.strip_model import StripView, scroll_max_h
@@ -314,8 +314,9 @@ class ShellOverlay:
                         if mon is not None:
                             card_x = max(mon.x, min(card_x, mon.x + mon.w - card_w))
                         s = self._strip
-                        suggested = sc.suggested_piece(s, tokens, self._use_key()) \
-                            if s is not None and s.segments else None
+                        box = suggested_box(self._panel, s)
+                        suggested = None if box is None else \
+                            sc.suggested_piece(box, tokens, self._use_key())
                         panel = sc.panel_piece(self._panel, card_x, card_y, card_w, True,
                                                suggested, s.note if s is not None else None)
                         placed["panel"] = (card_x, card_y, card_w, card_h)

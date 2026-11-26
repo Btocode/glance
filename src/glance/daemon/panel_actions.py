@@ -7,8 +7,8 @@ from typing import Any
 
 from glance.log import log_event
 
-# Actions of select-anything's panel; `tone` and `tone_hover` there preview a rewrite.
-SELECTION_ACTIONS = ("tone", "tone_hover", "sel_copy", "sel_paste", "close")
+# Actions of select-anything's panel; `tone` there selects a tone and shows its rewrite.
+SELECTION_ACTIONS = ("tone", "sel_copy", "sel_paste", "close")
 
 
 def dispatch_panel_action(controller: Any, action: str, args: dict[str, Any],
@@ -20,19 +20,17 @@ def dispatch_panel_action(controller: Any, action: str, args: dict[str, Any],
     stores an audience the user picked.
     """
     try:
-        if action in ("tone", "tone_hover", "tone_apply", "apply_tone", "profile"):
+        if action in ("tone", "tone_apply", "apply_tone", "profile"):
             if ai is None:
                 log_event("panel_action_unknown")
-            elif action == "tone":
-                ai.choose(str(args["key"]))
-            elif action == "tone_apply":  # a click on a tone card: made first if need be
+            elif action == "tone":  # a click on a tone chip: select it (again: unselect)
+                ai.select(str(args["key"]))
+            elif action == "tone_apply":  # the hover menu's Shorter...: made, then applied
                 key = str(args["key"])
                 if key == "custom":
-                    ai.choose(key)  # asks how first
+                    ai.select(key)  # asks how first
                 else:
                     ai.apply(key)
-            elif action == "tone_hover":
-                ai.preview(str(args["key"]))
             elif action == "apply_tone":
                 ai.apply()
             else:
@@ -110,10 +108,10 @@ class PanelRouter:
 
     @staticmethod
     def _selection_action(sa: Any, action: str, args: dict[str, Any]) -> None:
-        if action in ("tone", "tone_hover"):
+        if action == "tone":
             key = args.get("key")
             if isinstance(key, str):
-                sa.preview(key)
+                sa.select(key)
             else:
                 log_event("panel_action_malformed")
         elif action == "sel_copy":

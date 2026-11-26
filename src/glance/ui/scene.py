@@ -15,10 +15,10 @@ from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
 from glance.protocol import Rect
 from glance.ui import look
-from glance.ui.panel_model import PanelView
+from glance.ui.panel_model import PanelView, SuggestedBox
 from glance.ui.status_model import StatusView
 from glance.ui.strip_model import StripView
-from glance.ui.theme import ASSETS, MARK_SIZES
+from glance.ui.theme import ASSETS, GLOW_PAD, MARK_SIZES
 
 USE_LABEL = "Alt+Enter"
 ASK_PLACEHOLDER = "e.g. make it a bullet list"
@@ -49,8 +49,13 @@ def use_label(use_key: str) -> str:
 
 
 def status_piece(view: StatusView, x: int, y: int) -> dict[str, Any]:
+    """`look`: how the mark is drawn (`look.icon_look`); a pulsing glow takes its strength
+    from LOOK["pulse"], one step per animation frame."""
+    lk = look.icon_look(view.state.value, view.spin)
     return {"state": view.state.value, "badge": view.badge, "spin": view.spin,
-            "message": view.message, "x": x, "y": y}
+            "message": view.message, "x": x, "y": y,
+            "look": {"mark_alpha": lk.mark_alpha, "glow": lk.glow, "grey": lk.grey,
+                     "pulse": lk.pulse}}
 
 
 def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
@@ -63,12 +68,14 @@ def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
             "scroll": scroll_h if view.expanded and view.compact else None}
 
 
-def suggested_piece(view: StripView, tokens: dict[str, str], use_key: str) -> dict[str, Any]:
-    """The strip's corrected text as the open panel shows it ("Suggested")."""
-    return {"markup": look.suggested_markup(view.shown, tokens),
-            "lines": [x for x in (view.summary, view.meta) if x],
-            "can_use": view.can_use, "apply_label": look.apply_label(use_key),
-            "scroll": view.compact}
+def suggested_piece(box: SuggestedBox, tokens: dict[str, str], use_key: str) -> dict[str, Any]:
+    """The open panel's "Suggested" box (`panel_model.suggested_box`): the corrected text, or
+    the selected tone's rewrite (`tone`, `working`); Apply is the `use` action either way."""
+    return {"markup": look.suggested_markup(box.segments, tokens),
+            "lines": list(box.lines), "can_use": box.can_apply,
+            "apply_label": look.apply_label(use_key), "scroll": box.scroll,
+            "tone": box.tone, "working": box.working, "placeholder": box.placeholder,
+            "working_label": look.card_line(None, "loading")}
 
 
 def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool,
@@ -81,6 +88,7 @@ def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool,
         row["spelling"] = issue.rule == SPELL_RULE
     for chip in plain["tone_chips"]:
         chip["glyph"] = look.tone_glyph(chip["key"])
+        chip["line"] = look.card_line(chip["preview"], chip["state"])
     has_tones = bool(view.tone_chips)
     return {"view": plain,
             "preview_markup": None if view.preview is None else diff_markup(view.preview),
@@ -111,10 +119,12 @@ def scene(tokens: dict[str, str], window: dict[str, Any] | None, *,
             "ask_placeholder": ASK_PLACEHOLDER, "look": LOOK}
 
 
-# What the extension draws with besides the tokens: the brand mark's files (it picks the size
-# for the screen's scale), the line glyphs and the fixed words.
+# What the extension draws with besides the tokens: the brand mark's files and its glow's
+# (glance-glow-<px>.png; it picks the size for the screen's scale), the working glow's
+# breath, the line glyphs and the fixed words.
 LOOK: dict[str, Any] = {
-    "mark_dir": str(ASSETS), "mark_sizes": list(MARK_SIZES),
+    "mark_dir": str(ASSETS), "mark_sizes": list(MARK_SIZES), "glow_pad": GLOW_PAD,
+    "pulse": list(look.PULSE),
     "glyphs": {name: [list(c) for c in path] for name, path in look.GLYPHS.items()},
     "words": {"suggested": look.SUGGESTED, "tone": look.TONE, "rewrite": look.REWRITE_LEAD,
               "return_key": look.RETURN_KEY, "esc": look.ESC_KEY, "close": look.CLOSE,

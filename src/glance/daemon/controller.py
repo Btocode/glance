@@ -87,6 +87,8 @@ class Controller:
                          a local one)
       extra_ignored      providers of rule names to ignore for a snapshot
       extra_status       providers of extra `status()` entries (numbers, bools, short enums)
+      extra_use          tried in order before `use_strip()` applies the corrected text; one
+                         that returns True has applied something else (a selected tone)
       add_listener(obj)  obj may define on_snapshot(s), on_typing(), on_focus_lost(reason),
                          on_apply_result(r), on_pause_changed(paused), on_capture_lost(),
                          on_reset()
@@ -148,6 +150,7 @@ class Controller:
         self.extra_issues: list[Callable[[FieldSnapshot], list[Issue]]] = []
         self.extra_ignored: list[Callable[[FieldSnapshot], frozenset[str]]] = []
         self.extra_status: list[Callable[[], dict[str, Any]]] = []
+        self.extra_use: list[Callable[[], bool]] = []
         self._listeners: list[object] = []
 
         self._local: list[Issue] = []  # the grammar port's issues for the current text
@@ -189,6 +192,8 @@ class Controller:
         # (field id, until, with drawer): the check hotkey's own grab blurred this field;
         # check it once it is back
         self._check_back: tuple[str, float, bool] | None = None
+        # (field id, until): the panel was open when a hotkey's key grab blurred the field
+        self._panel_back: tuple[str, float] | None = None
 
     # ------------------------------------------------------------------ read-only state
 
@@ -201,6 +206,11 @@ class Controller:
         """`[general] check = "shortcut"`: nothing is checked or asked of an AI while the
         user types (features that would run by themselves stay quiet too)."""
         return self._cfg().general.check == "shortcut"
+
+    @property
+    def panel_open(self) -> bool:
+        """The field's panel (the drawer) is open."""
+        return self._panel_open
 
     @property
     def issues(self) -> tuple[Issue, ...]:
@@ -308,6 +318,11 @@ class Controller:
         self._capture_lost = False
         if prev is not None and prev.field_id == s.field_id and prev.text != s.text:
             self._typed_at = self._clock.now()
+        back, self._panel_back = self._panel_back, None
+        # A hotkey's key grab (Super+Alt+1…4 picking a tone) blurred the field with the
+        # panel open: it is open again now the field is back.
+        reopen = (back is not None and back[0] == s.field_id and self._clock.now() <= back[1]
+                  and not s.gated and not self._paused)
         if prev is None or prev.field_id != s.field_id:
             self._panel_open = False
             self._strip_open = False
@@ -332,6 +347,9 @@ class Controller:
             self.scheduler.on_snapshot(s)
             if self._typing:
                 self._render()
+        if reopen and not self._panel_open:
+            self._panel_open = self._strip_open = True
+            self._render()
         check_back = self._check_back
         if check_back is not None:
             self._check_back = None
@@ -359,6 +377,8 @@ class Controller:
             # check is run again (from the cache) once the field is back.
             self._check_back = (prev.field_id, now + USE_GRACE_S,
                                 self._open_panel_too or self._panel_open)
+        self._panel_back = (prev.field_id, now + USE_GRACE_S) \
+            if prev is not None and reason == "blur" and self._panel_open else None
         self.current = None
         self._strip_open = False
         self._stop_open_wait()
@@ -534,6 +554,9 @@ class Controller:
 
     def use_strip(self) -> None:
         """Apply the corrected text the strip shows: one edit, one undo step."""
+        for hook in self.extra_use:
+            if self._call("extra_use", hook, default=False):
+                return
         s, shown, at = self.current, self._strip_shown, self._blurred_at
         recent = shown is not None and at is not None and self._clock.now() - at <= USE_BLUR_S
         if s is None:

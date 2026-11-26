@@ -229,7 +229,11 @@ def test_tone_hotkey_rewrites_gtk_field(session):
     assert st["hotkeys_unavailable"] is None and st["backend"] == "fake", st
     assert session.screen.active()[1] == APP_TITLE and session.buffer() == TEXT
     session.screen.chord("Super_L", "Alt_L", "1")
-    assert _wait(lambda: session.buffer() == REWRITE, 2.0), session.buffer()
+    # selected, in the panel it opened: nothing is typed until Apply (Alt+Enter)
+    time.sleep(1.5)
+    assert session.buffer() == TEXT
+    session.screen.chord("Alt_L", "Return")
+    assert _wait(lambda: session.buffer() == REWRITE, 3.0), session.buffer()
     # One undo step gives the text back.
     assert _wait(lambda: session.field_is(REWRITE), 3.0), session.status()
     session.screen.chord("Control_L", "z")
@@ -247,7 +251,10 @@ def test_rewrite_as_returns_focus(session):
     session.screen.chord("Return")
     assert _wait(lambda: session.screen.active() == (session.app.pid, APP_TITLE), 2.0), \
         session.screen.active()
-    # Back in the field, and only then: the rewrite is typed into it.
+    # Back in the field: the rewrite is made into "Suggested", and Apply types it.
+    time.sleep(1.0)
+    assert session.buffer() == TEXT
+    session.screen.chord("Alt_L", "Return")
     assert _wait(lambda: session.buffer() == REWRITE, 5.0), (session.buffer(), session.status())
     assert session.screen.active() == (session.app.pid, APP_TITLE)
     assert _wait(lambda: session.field_is(REWRITE), 3.0)
@@ -330,31 +337,34 @@ def probe():
         _stop(xvfb)
 
 
-CARDS = ["Friendlier | Hover to preview | 1", "More direct | Hover to preview | 2",
-         "Shorter | Hover to preview | 3", "Professional | Hover to preview | 4",
+CARDS = ["Friendlier | Click to preview | 1", "More direct | Click to preview | 2",
+         "Shorter | Click to preview | 3", "Professional | Click to preview | 4",
          "Rewrite as… | e.g. make it a bullet list | ↵"]
+HEAD = ["For Team channel ▾", "Esc | Close"]
 
 
 def test_drawer_shows_the_profile_and_the_tone_cards_with_their_hotkeys(probe):
-    assert probe["chips_only"] == ["For Team channel ▾", "Esc | Close", *CARDS]
-    # a card click applies: there is no separate Apply button, loading or ready
-    assert probe["loading"] == probe["chips_only"] == probe["ready"]
+    assert probe["chips_only"] == [*HEAD, *CARDS]
+    # "Shorter" selected: its card says so; Apply comes once its rewrite is complete
+    shorter = "Shorter | Rewriting… | 3"
+    assert probe["loading"] == [*HEAD, *CARDS[:2], shorter, *CARDS[3:]]
+    assert probe["ready"][:3] == [*HEAD, "Apply (Alt+Enter)"]
+    assert probe["ready"][5].startswith("Shorter | Could you send me the report today?")
 
 
-def test_resting_on_a_card_asks_for_its_preview_passing_over_does_not(probe):
-    assert probe["after_passing_over"] == []
-    # "Rewrite as…" was rested on too: it only ever starts on a click.
-    assert probe["after_resting"] == [["tone_hover", {"key": "shorter"}]]
+def test_resting_on_a_card_asks_for_nothing(probe):
+    # the pointer rested on "Shorter" and on "Rewrite as…": only a click starts anything
+    assert probe["after_resting"] == []
 
 
 def test_drawer_clicks_reach_the_tone_actions(probe):
     assert probe["clicks"] == [
-        ["tone_apply", {"key": "shorter"}],
+        ["use", {}],  # Apply: the selected rewrite (the router sends it to the tone)
+        ["tone", {"key": "shorter"}],  # the selected chip again: unselects it
         ["tone", {"key": "custom"}],
         ["profile", {"name": "email"}],
     ]
-    assert probe["profiles_open"] == ["For Team channel ▾", "Esc | Close", "Team channel",
-                                      "Direct message", "Email", *CARDS]
+    assert probe["profiles_open"][:5] == [*HEAD, "Team channel", "Direct message", "Email"]
     assert probe["profiles_closed"] == probe["ready"]
 
 
