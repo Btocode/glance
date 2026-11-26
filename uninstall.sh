@@ -46,6 +46,8 @@ setup_paths() {
     UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/glance.service"
     RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/glance"
     BIN_NAMES=(glance glanced glance-capture glance-edit)
+    EXT_UUID="glance@btocode.github.io"
+    EXT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$EXT_UUID"
     HERE="$(script_dir)" || HERE=""
 }
 
@@ -79,6 +81,8 @@ load_manifest() {
     ZSHRC_EXISTED="$(manifest_get zshrc_existed)"
     mapfile -t LINKS < <(manifest_get symlinks)
     mapfile -t CREATED_DIRS < <(manifest_get created_dirs)
+    mapfile -t EXT_FILES < <(manifest_get extension_files)
+    EXT_ENABLED="$(manifest_get extension_enabled)"
     if [ -z "$SRC" ] && [ -n "$HERE" ]; then SRC="$HERE"; fi
     if [ -z "$VENV" ] && [ -n "$HERE" ]; then VENV="$HERE/.venv"; fi
     if [ -z "$ZSHRC" ]; then ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"; fi
@@ -164,6 +168,48 @@ report_leftovers() {
     say "Or by hand: delete the files above that contain X-Glance-Override=true, rename each"
     say "*.glance-bak back to its name without that suffix, delete the marked block in"
     say "$ZSHRC, then run this script again."
+}
+
+# GNOME on Wayland: disable the shell extension if the installer enabled it, and remove the
+# files it recorded, each only while it is still byte for byte what was installed.
+remove_extension() {
+    [ ${#EXT_FILES[@]} -gt 0 ] || [ "${EXT_ENABLED:-0}" = 1 ] || return 0
+    say "Removing the GNOME Shell extension"
+    if [ "${EXT_ENABLED:-0}" = 1 ] && [ -z "${GLANCE_SKIP_GSETTINGS:-}" ]; then
+        gnome-extensions disable "$EXT_UUID" </dev/null >/dev/null 2>&1 || true
+        # `disable` lists it in disabled-extensions; take it off both lists, so that a later
+        # install is not disabled by this one.
+        local key now
+        for key in enabled-extensions disabled-extensions; do
+            now="$(gsettings get org.gnome.shell "$key" 2>/dev/null </dev/null)" || continue
+            if [[ "$now" == *"'$EXT_UUID'"* ]] && [ -x "$SYS_PY" ]; then
+                now="$("$SYS_PY" -c '
+import re, sys
+items = [i for i in re.findall(r"\x27([^\x27]*)\x27", sys.argv[1]) if i != sys.argv[2]]
+print("[" + ", ".join("\x27%s\x27" % i for i in items) + "]")
+' "$now" "$EXT_UUID")"
+                gsettings set org.gnome.shell "$key" "$now" </dev/null >/dev/null 2>&1 || true
+            fi
+        done
+        note "disabled $EXT_UUID"
+    fi
+    local line sum path
+    for line in "${EXT_FILES[@]}"; do
+        sum="${line%%  *}" path="${line#*  }"
+        case "$path" in "$EXT_DIR"/*) ;; *) continue ;; esac
+        [ -f "$path" ] || continue
+        if [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$sum" ]; then
+            rm -f "$path"
+        else
+            note "left $path (changed since it was installed)"
+        fi
+    done
+    if [ -d "$EXT_DIR" ]; then
+        find "$EXT_DIR" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+        if [ -d "$EXT_DIR" ]; then note "left $EXT_DIR (it holds files Glance did not put there)"
+        else note "removed $EXT_DIR"; fi
+    fi
+    say "GNOME unloads the extension at your next login."
 }
 
 remove_unit() {
@@ -263,6 +309,7 @@ main() {
     stop_service
     undo_doctor
     remove_unit
+    remove_extension
     remove_links
     remove_data
     remove_source
@@ -277,4 +324,18 @@ main() {
     fi
 }
 
-{ main "$@"; exit $?; }
+# >>> macOS: the Mac install is undone by scripts/uninstall-macos.sh (bash 3.2-safe).
+darwin_uninstall() {
+    local here=""
+    here="$(script_dir)" || here=""
+    [ -n "$here" ] && [ -f "$here/scripts/uninstall-macos.sh" ] \
+        || die "scripts/uninstall-macos.sh is missing next to this script"
+    exec bash "$here/scripts/uninstall-macos.sh" "$@"
+}
+main_or_darwin() {
+    if [ "${GLANCE_UNAME:-$(uname -s)}" = Darwin ]; then darwin_uninstall "$@"; fi
+    main "$@"
+}
+# <<< macOS
+
+{ main_or_darwin "$@"; exit $?; }

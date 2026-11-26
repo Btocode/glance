@@ -167,16 +167,112 @@ def _exe(argv: list[str]) -> str:
     return os.path.basename(argv[0]).casefold()
 
 
+def gnome_shell_major(env: DoctorEnv) -> int | None:
+    rc, out = env.run(["gnome-shell", "--version"])
+    m = re.search(r"GNOME Shell (\d+)", out) if rc == 0 else None
+    return int(m.group(1)) if m else None
+
+
+def _wayland(env: DoctorEnv) -> bool:
+    from glance.session import GNOME_WAYLAND, session_kind
+
+    return session_kind(env.environ) == GNOME_WAYLAND
+
+
 class Session(_Base):
-    id, title = "session", "X11 session"
+    id, title = "session", "Desktop session"
 
     def run(self, env):
-        kind = env.environ.get("XDG_SESSION_TYPE", "")
-        if kind != "x11" or not env.environ.get("DISPLAY"):
-            return self.result("fail", f"session is {kind or 'unknown'}, DISPLAY "
-                               f"{'set' if env.environ.get('DISPLAY') else 'missing'}",
-                               "Glance needs an X11 session (log out, choose 'Ubuntu on Xorg')")
-        return self.ok("X11")
+        from glance.session import GNOME_MAX, GNOME_MIN, SUPPORTED, X11, session_kind
+
+        kind = session_kind(env.environ)
+        if kind == X11:
+            return self.ok("X11")
+        if kind is not None:
+            major = gnome_shell_major(env)
+            if major is not None and GNOME_MIN <= major <= GNOME_MAX:
+                return self.ok(f"GNOME Shell {major} on Wayland (through Glance's shell "
+                               "extension)")
+            return self.result("fail", f"GNOME Shell {major or 'unknown'} on Wayland",
+                               f"Glance supports {SUPPORTED}; on this GNOME log out and choose "
+                               "'Ubuntu on Xorg'")
+        raw = env.environ.get("XDG_SESSION_TYPE", "")
+        desktop = env.environ.get("XDG_CURRENT_DESKTOP", "") or "unknown desktop"
+        what = (f"{desktop} on Wayland" if raw == "wayland"
+                else f"session is {raw or 'unknown'}, DISPLAY "
+                     f"{'set' if env.environ.get('DISPLAY') else 'missing'}")
+        return self.result("fail", what,
+                           f"Glance supports {SUPPORTED}; KDE Plasma, Sway and other Wayland "
+                           "desktops are not supported yet (log out, choose 'Ubuntu on Xorg' "
+                           "or 'Ubuntu')")
+
+
+class ShellExtension(_Base):
+    """GNOME on Wayland: Glance's shell extension draws the overlay and types the fixes."""
+
+    id, title = "shell_extension", "GNOME Shell extension"
+    UUID = "glance@btocode.github.io"
+
+    def _dir(self, env: DoctorEnv) -> Path:
+        base = env.environ.get("XDG_DATA_HOME") or str(env.home / ".local" / "share")
+        return Path(base) / "gnome-shell" / "extensions" / self.UUID
+
+    def _enabled(self, env: DoctorEnv) -> tuple[bool, bool]:
+        """(enabled: in enabled-extensions and not in disabled-extensions, which wins;
+        user extensions switched off as a whole)."""
+        rc, out = env.run(["gsettings", "get", "org.gnome.shell", "enabled-extensions"])
+        listed = rc == 0 and f"'{self.UUID}'" in out
+        rc, out = env.run(["gsettings", "get", "org.gnome.shell", "disabled-extensions"])
+        listed = listed and not (rc == 0 and f"'{self.UUID}'" in out)
+        rc, out = env.run(["gsettings", "get", "org.gnome.shell", "disable-user-extensions"])
+        return listed, rc == 0 and out.strip() == "true"
+
+    def run(self, env):
+        if not _wayland(env):
+            return self.ok("not needed on X11")
+        if not (self._dir(env) / "metadata.json").is_file():
+            return self.result("fail", f"not installed in {self._dir(env)}",
+                               "run the installer again (it installs the extension)")
+        listed, all_off = self._enabled(env)
+        if all_off:
+            return self.result("fail", "user extensions are switched off in GNOME",
+                               "switch Extensions on in the Extensions app, then log out and in")
+        if not listed:
+            return self.result("fail", "installed but not enabled",
+                               f"run `glance doctor --fix` (gnome-extensions enable {self.UUID}),"
+                               " then log out and in once")
+        st = env.ctl("status", {})
+        if st is not None and st.get("shell_extension") == "running":
+            return self.ok("enabled and running")
+        if st is None:
+            return self.result("warn", "enabled; not checked whether it runs (glanced is down)")
+        return self.result("warn", "enabled but not running yet",
+                           "log out and in once: GNOME on Wayland loads a new extension only "
+                           "at login")
+
+    def fix(self, env):
+        if not _wayland(env) or _skip(env, "GLANCE_SKIP_GSETTINGS"):
+            return False
+        if not (self._dir(env) / "metadata.json").is_file():
+            return False
+        if env.run(["gnome-extensions", "enable", self.UUID])[0] == 0:
+            return True
+        # Not loaded by this session yet: gnome-extensions cannot see it. Listing it in
+        # enabled-extensions (and not in disabled-extensions, which wins) makes the next
+        # login load it.
+        return (self._edit(env, "enabled-extensions", add=True)
+                and self._edit(env, "disabled-extensions", add=False))
+
+    def _edit(self, env: DoctorEnv, key: str, add: bool) -> bool:
+        rc, out = env.run(["gsettings", "get", "org.gnome.shell", key])
+        if rc != 0:
+            return False
+        current = re.findall(r"'([^']*)'", out)
+        if (self.UUID in current) == add:
+            return True
+        items = [*current, self.UUID] if add else [u for u in current if u != self.UUID]
+        value = "[" + ", ".join(f"'{u}'" for u in items) + "]"
+        return env.run(["gsettings", "set", "org.gnome.shell", key, value])[0] == 0
 
 
 class A11y(_Base):
@@ -522,7 +618,8 @@ class Updates(_Base):
 
 
 CHECKS: list[Check] = [
-    Session(), A11y(), PythonDeps(), Harper(), Tray(), ConfigCheck(), Daemon(), Hotkeys(),
+    Session(), ShellExtension(), A11y(), PythonDeps(), Harper(), Tray(), ConfigCheck(), Daemon(),
+    Hotkeys(),
     DesktopFlags(), RunningFlags(), Firefox(), OtherElectron(), Backend(), Wrapper(),
     PathCheck(), Autostart(), ClipboardHistory(), Updates(),
 ]

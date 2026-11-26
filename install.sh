@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Glance installer (Linux, X11).
+# Glance installer (Linux: X11, or GNOME 46-50 on Wayland).
 #
 #   curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash -s -- --with-apt
@@ -30,6 +30,9 @@ Usage: install.sh [options]
 Environment (for tests and unusual setups): GLANCE_HOME (use instead of $HOME), GLANCE_SRC,
 GLANCE_REPO_URL, GLANCE_TARBALL_URL, GLANCE_SYSTEM_PYTHON, GLANCE_NO_GIT, GLANCE_SKIP_CLONE,
 GLANCE_SKIP_VENV, GLANCE_SKIP_FETCH, GLANCE_SKIP_SYSTEMCTL, GLANCE_SKIP_GSETTINGS.
+
+On GNOME Wayland it also installs Glance's GNOME Shell extension into
+~/.local/share/gnome-shell/extensions and enables it; log out and in once afterwards.
 EOF
 }
 
@@ -91,6 +94,8 @@ setup_paths() {
     UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/glance.service"
     ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
     BIN_NAMES=(glance glanced glance-capture glance-edit)
+    EXT_UUID="glance@btocode.github.io"
+    EXT_DIR="$DATA_ROOT/gnome-shell/extensions/$EXT_UUID"
 
     local here=""
     here="$(script_dir)" || here=""
@@ -135,6 +140,11 @@ load_previous() {
     ZSHRC_EXISTED="$(manifest_get zshrc_existed)"
     mapfile -t CREATED_DIRS < <(manifest_get created_dirs)
     mapfile -t PREV_LINKS < <(manifest_get symlinks)
+    mapfile -t PREV_EXT_FILES < <(manifest_get extension_files)
+    EXT_FILES=("${PREV_EXT_FILES[@]}")
+    EXT_ENABLED="$(manifest_get extension_enabled)"
+    : "${EXT_ENABLED:=0}"
+    EXT_RELOGIN=0
     HAD_MANIFEST=0
     [ -f "$MANIFEST" ] && HAD_MANIFEST=1
     : "${CLONED:=0}" "${VENV_CREATED:=0}" "${WRAPPER_INSTALLED:=0}"
@@ -158,7 +168,8 @@ load_previous() {
 write_manifest() {
     GM_SRC="$SRC" GM_CLONED="$CLONED" GM_VENV="$VENV" GM_VENV_CREATED="$VENV_CREATED" \
     GM_UNIT="$UNIT_WRITTEN" GM_ZSHRC="$ZSHRC" GM_ZSHRC_EXISTED="$ZSHRC_EXISTED" \
-    GM_WRAPPER="$WRAPPER_INSTALLED" \
+    GM_WRAPPER="$WRAPPER_INSTALLED" GM_EXT_ENABLED="${EXT_ENABLED:-0}" \
+    GM_EXT_FILES="$(printf '%s\n' "${EXT_FILES[@]}")" \
     GM_LINKS="$(printf '%s\n' "${LINKS[@]}")" GM_DIRS="$(printf '%s\n' "${CREATED_DIRS[@]}")" \
         "$SYS_PY" -c '
 import json, os, sys
@@ -177,6 +188,9 @@ doc = {
     "zshrc_existed": flag("GM_ZSHRC_EXISTED") if e["GM_ZSHRC_EXISTED"] else None,
     "wrapper_installed": flag("GM_WRAPPER"),
     "created_dirs": lines("GM_DIRS"),
+    # GNOME Wayland: every file of the shell extension, as `sha256  path` (byte-exact)
+    "extension_files": lines("GM_EXT_FILES"),
+    "extension_enabled": flag("GM_EXT_ENABLED"),
 }
 tmp = sys.argv[1] + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
@@ -246,11 +260,52 @@ refuse_awkward_path() {
     esac
 }
 
+# A GNOME desktop: XDG_CURRENT_DESKTOP names GNOME (Ubuntu says ubuntu:GNOME).
+is_gnome_desktop() {
+    local d
+    local -a desktops
+    IFS=':;' read -r -a desktops <<<"${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+    for d in "${desktops[@]}"; do
+        case "${d,,}" in gnome | gnome-*) return 0 ;; esac
+    done
+    return 1
+}
+
+gnome_shell_major() {
+    gnome-shell --version 2>/dev/null </dev/null | sed -n 's/^GNOME Shell \([0-9][0-9]*\).*/\1/p'
+}
+
+# Sets SESSION to x11 or wayland (GNOME 46-50); anything else is refused.
+check_session() {
+    local supported="an X11 session, or GNOME Shell 46 to 50 on Wayland"
+    case "${XDG_SESSION_TYPE:-}" in
+        x11) SESSION=x11 ;;
+        wayland)
+            is_gnome_desktop || die "Glance supports $supported. This is" \
+                "'${XDG_CURRENT_DESKTOP:-an unknown desktop}' on Wayland, which is not" \
+                "supported yet (KDE Plasma, Sway and other Wayland desktops are not). Log in to" \
+                "GNOME (\"Ubuntu\" on Ubuntu) or an X11 session and run the installer again."
+            local major
+            major="$(gnome_shell_major)"
+            if [ -z "$major" ] || [ "$major" -lt 46 ] || [ "$major" -gt 50 ]; then
+                die "Glance supports $supported, and this is GNOME Shell ${major:-unknown}." \
+                    "Log out, pick \"Ubuntu on Xorg\" at the login screen, and run the" \
+                    "installer again."
+            fi
+            have glib-compile-schemas || die "glib-compile-schemas is needed for Glance's" \
+                "GNOME Shell extension (sudo apt install libglib2.0-bin)."
+            SESSION=wayland
+            GNOME_MAJOR="$major"
+            ;;
+        *) die "Glance needs $supported, and this session is" \
+            "'${XDG_SESSION_TYPE:-unknown}'. Log out, pick \"Ubuntu\" or \"Ubuntu on Xorg\" at" \
+            "the login screen, and run the installer again." ;;
+    esac
+}
+
 check_prerequisites() {
     step "Checking the system"
-    [ "${XDG_SESSION_TYPE:-}" = "x11" ] || die "Glance needs an X11 session, and this one is" \
-        "'${XDG_SESSION_TYPE:-unknown}'. Log out, pick \"Ubuntu on Xorg\" at the login screen," \
-        "and run the installer again."
+    check_session
     local arch
     arch="$(uname -m)"
     [ "$arch" = "x86_64" ] || die "Glance's grammar engine (harper-ls) is only packaged for" \
@@ -258,12 +313,12 @@ check_prerequisites() {
     local pyver=""
     if [ -x "$SYS_PY" ]; then
         pyver="$("$SYS_PY" -c 'import sys; v = sys.version_info[:2]; print("%d.%d" % v)
-sys.exit(0 if (3, 10) <= v < (3, 14) else 1)' 2>/dev/null)" || {
-            die "Glance needs the system Python ($SYS_PY) at version 3.10, 3.11, 3.12 or" \
-                "3.13, and this one is ${pyver:-unknown}."
+sys.exit(0 if (3, 10) <= v < (3, 15) else 1)' 2>/dev/null)" || {
+            die "Glance needs the system Python ($SYS_PY) at version 3.10, 3.11, 3.12, 3.13" \
+                "or 3.14, and this one is ${pyver:-unknown}."
         }
     else
-        die "Glance needs the system Python ($SYS_PY), version 3.10 to 3.13; it is not installed" \
+        die "Glance needs the system Python ($SYS_PY), version 3.10 to 3.14; it is not installed" \
             "(sudo apt install python3)."
     fi
     have curl || die "curl is needed (sudo apt install curl)."
@@ -306,7 +361,11 @@ sys.exit(0 if (3, 10) <= v < (3, 14) else 1)' 2>/dev/null)" || {
 
 (or pass --with-apt and the installer runs that for you)"
     fi
-    note "X11 session, $("$SYS_PY" --version 2>&1), GTK 3, AT-SPI, Wnck: ok"
+    if [ "$SESSION" = wayland ]; then
+        note "GNOME Shell $GNOME_MAJOR on Wayland, $("$SYS_PY" --version 2>&1), GTK 3, AT-SPI: ok"
+    else
+        note "X11 session, $("$SYS_PY" --version 2>&1), GTK 3, AT-SPI, Wnck: ok"
+    fi
     if tray_missing; then
         note "optional, for the tray icon: sudo apt install $tray"
     fi
@@ -496,6 +555,100 @@ install_unit() {
     fi
 }
 
+# ---------------------------------------------------------------------- step 6b: shell extension
+
+# gs_list KEY add|remove UUID: edit one of org.gnome.shell's extension lists.
+gs_list() {
+    local now
+    now="$(gsettings get org.gnome.shell "$1" 2>/dev/null </dev/null)" || return 1
+    now="$("$SYS_PY" -c '
+import re, sys
+items = [i for i in re.findall(r"\x27([^\x27]*)\x27", sys.argv[1]) if i != sys.argv[3]]
+if sys.argv[2] == "add":
+    items.append(sys.argv[3])
+print("[" + ", ".join("\x27%s\x27" % i for i in items) + "]")
+' "$now" "$2" "$3")"
+    gsettings set org.gnome.shell "$1" "$now" </dev/null
+}
+
+# Enabled: in enabled-extensions and not in disabled-extensions (`gnome-extensions disable`
+# puts it there, and that list wins).
+ext_enabled_now() {
+    gsettings get org.gnome.shell enabled-extensions 2>/dev/null </dev/null \
+        | grep -qF "'$EXT_UUID'" || return 1
+    ! gsettings get org.gnome.shell disabled-extensions 2>/dev/null </dev/null \
+        | grep -qF "'$EXT_UUID'"
+}
+
+# GNOME on Wayland: Glance's overlay, hotkeys and write-back keys live in a GNOME Shell
+# extension. Its files are copied (and recorded with their SHA-256, so uninstall.sh removes
+# exactly them), its schema compiled, and it is enabled for the next login.
+install_extension() {
+    [ "$SESSION" = wayland ] || return 0
+    [ -f "$SRC/extension/metadata.json" ] || die "$SRC/extension is missing: the source is incomplete."
+    ensure_dir "$EXT_DIR/schemas"
+    local f rel before after
+    before="$(printf '%s\n' "${PREV_EXT_FILES[@]}")"
+    # What the last install put there and is unchanged goes first: a file this version no
+    # longer ships must not stay behind unrecorded.
+    local line sum path
+    for line in "${PREV_EXT_FILES[@]}"; do
+        sum="${line%%  *}" path="${line#*  }"
+        case "$path" in "$EXT_DIR"/*) ;; *) continue ;; esac
+        if [ -f "$path" ] && [ "$(sha256sum "$path" | cut -d' ' -f1)" = "$sum" ]; then
+            rm -f "$path"
+        fi
+    done
+    EXT_FILES=()
+    while IFS= read -r -d '' f; do
+        rel="${f#"$SRC/extension/"}"
+        mkdir -p "$(dirname "$EXT_DIR/$rel")"
+        cp -f "$f" "$EXT_DIR/$rel"
+    done < <(find "$SRC/extension" -type f -print0 | sort -z)
+    glib-compile-schemas "$EXT_DIR/schemas" </dev/null \
+        || die "glib-compile-schemas failed for $EXT_DIR/schemas"
+    while IFS= read -r -d '' f; do
+        EXT_FILES+=("$(sha256sum "$f" | cut -d' ' -f1)  $f")
+    done < <(find "$EXT_DIR" -type f -print0 | sort -z)
+    after="$(printf '%s\n' "${EXT_FILES[@]}")"
+    write_manifest
+    note "GNOME Shell extension: $EXT_DIR"
+    if [ -n "${GLANCE_SKIP_GSETTINGS:-}" ]; then
+        note "not enabled (GLANCE_SKIP_GSETTINGS)"
+    elif ext_enabled_now; then
+        note "already enabled"
+    else
+        if ! gnome-extensions enable "$EXT_UUID" </dev/null >/dev/null 2>&1; then
+            # This session has not loaded it yet, so gnome-extensions cannot see it: list
+            # it in enabled-extensions (and take it off disabled-extensions, where an earlier
+            # uninstall or the user's own switch may have left it); the next login loads it.
+            gs_list enabled-extensions add "$EXT_UUID" \
+                || die "could not enable the GNOME Shell extension (gsettings failed)"
+            if gsettings get org.gnome.shell disabled-extensions 2>/dev/null </dev/null \
+                | grep -qF "'$EXT_UUID'"; then
+                gs_list disabled-extensions remove "$EXT_UUID" || true
+            fi
+        fi
+        EXT_ENABLED=1
+        write_manifest
+        note "enabled"
+    fi
+    if [ "$(gsettings get org.gnome.shell disable-user-extensions 2>/dev/null </dev/null)" = true ]; then
+        note "warning: GNOME has user extensions switched off; switch Extensions on in the" \
+            "Extensions app, or Glance cannot draw anything"
+    fi
+    if [ "$before" != "$after" ] || ! shell_extension_running; then
+        EXT_RELOGIN=1
+    fi
+}
+
+shell_extension_running() {
+    [ -z "${GLANCE_SKIP_GSETTINGS:-}" ] || return 1
+    gdbus call --session --dest io.github.btocode.GlanceShell \
+        --object-path /io/github/btocode/GlanceShell \
+        --method io.github.btocode.GlanceShell1.Ping '{}' </dev/null >/dev/null 2>&1
+}
+
 # ---------------------------------------------------------------------- step 7: doctor --fix
 
 # Asks on the terminal, not stdin (stdin is the script under curl | bash). No terminal: no.
@@ -622,6 +775,11 @@ if backend and backend.status != "ok":
         say ""
         say "Some checks above are still red (✗). Fix what they say, then run: glance doctor"
     fi
+    if [ "$EXT_RELOGIN" = 1 ]; then
+        say ""
+        say "Log out and log in again once: GNOME on Wayland loads a new or updated extension"
+        say "only in a new session. Until then Glance checks grammar but draws nothing."
+    fi
     say ""
     say "Glance is installed."
     say "    glance doctor    check the setup again at any time"
@@ -650,8 +808,31 @@ main() {
     fetch_harper                   # 4
     install_links                  # 5
     install_unit                   # 6
+    install_extension              # 6 (GNOME on Wayland)
     run_doctor                     # 7
     print_report                   # 8
 }
 
-{ main "$@"; exit $?; }
+# >>> macOS: everything above is Linux-only (and needs bash 4). On a Mac this hands off to
+# scripts/install-macos.sh: from the checkout, or fetched next to the source when piped.
+darwin_install() {
+    local here="" url tmp rc=0
+    here="$(script_dir)" || here=""
+    if [ -n "$here" ] && [ -f "$here/scripts/install-macos.sh" ]; then
+        exec bash "$here/scripts/install-macos.sh" "$@"
+    fi
+    url="${GLANCE_RAW_URL:-https://raw.githubusercontent.com/Btocode/glance/main}"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/glance-install.XXXXXX")"
+    curl -fsSL --retry 3 "$url/scripts/install-macos.sh" -o "$tmp" </dev/null \
+        || { rm -f "$tmp"; die "could not download $url/scripts/install-macos.sh"; }
+    bash "$tmp" "$@" || rc=$?
+    rm -f "$tmp"
+    exit "$rc"
+}
+main_or_darwin() {
+    if [ "${GLANCE_UNAME:-$(uname -s)}" = Darwin ]; then darwin_install "$@"; fi
+    main "$@"
+}
+# <<< macOS
+
+{ main_or_darwin "$@"; exit $?; }

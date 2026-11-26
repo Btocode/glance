@@ -54,6 +54,12 @@ _FOLD = str.maketrans({
 })
 
 
+def _why(detail: str) -> str:
+    """The engine's own reason (a fixed phrase, never the user's text) as a log token."""
+    head = detail.split(";")[0].strip().replace(" ", "_")
+    return "".join(ch for ch in head if ch.isalnum() or ch == "_")[:48]
+
+
 def normalize(text: str) -> str:
     """The form in which the text after a write is compared with the text intended."""
     text = unicodedata.normalize("NFC", text.translate(_FOLD))
@@ -210,7 +216,7 @@ class WriteBackEngine:
             # Said whatever else happened: the user's clipboard is not what it was.
             detail = f"{detail}; {_CLIP_LOST}" if detail else _CLIP_LOST
         log_event("writeback_apply", status=status, chars=len(req.edit.replacement),
-                  clipboard_lost=self._clip_lost)
+                  clipboard_lost=self._clip_lost, why=_why(detail))
         return ApplyResult(req.apply_id, status, detail)
 
     def _apply(self, req: ApplyRequest) -> tuple[str, str]:

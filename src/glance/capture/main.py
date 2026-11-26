@@ -156,6 +156,12 @@ class Serialized:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # >>> macOS: capture runs on the Accessibility API there (src/glance/platform/macos/capture.py)
+    if sys.platform == "darwin":
+        from glance.platform.macos.capture import main as macos_main
+
+        return macos_main(argv)
+    # <<< macOS
     ap = argparse.ArgumentParser(prog="glance-capture")
     ap.add_argument("--print", dest="print_mode", action="store_true",
                     help="print snapshot metadata to stdout instead of connecting to glanced")
@@ -203,18 +209,50 @@ def main(argv: list[str] | None = None) -> int:
         log_event("capture_config_invalid")
 
     watcher = ConfigWatcher(config_path(), clock, on_config, on_config_error)
-    port = AtspiPort()
+    from glance.session import GNOME_WAYLAND, session_kind
+
+    wayland = session_kind(os.environ) == GNOME_WAYLAND
+    bus: Any = None
+    if wayland:
+        # GNOME on Wayland: windows, keys and the clipboard come from Glance's shell extension
+        from glance.capture.windows_shell import ShellScreen
+        from glance.shellbus import CAPTURE_NAME, GioShellBus, ShellUnavailable, own_name
+
+        screens: list[Any] = []
+
+        def on_extension(available: bool) -> None:
+            if available and screens:
+                try:
+                    screens[0].on_state(bus.call("FocusedWindow"))
+                except ShellUnavailable:
+                    pass
+
+        bus = GioShellBus(on_change=on_extension)
+        # The extension serves only the owners of Glance's names, checked by uid and
+        # command line: take ours before the first call.
+        own_name(bus.connection, CAPTURE_NAME)
+        screens.append(ShellScreen(bus))
+        port = AtspiPort(screens[0])
+    else:
+        port = AtspiPort()
     gate = PrivacyGate(watcher.current)
     tracker = FocusTracker(port, gate, emit, clock)
 
     engine = keys = clip = None
     if not args.print_mode:
-        from glance.writeback.clipboard_xlib import XlibClipboard
         from glance.writeback.engine import WriteBackEngine
-        from glance.writeback.keys_xlib import XlibKeys
 
         try:
-            keys, clip = XlibKeys(), XlibClipboard()
+            if wayland:
+                from glance.writeback.clipboard_shell import ShellClipboard
+                from glance.writeback.keys_shell import ShellKeys
+
+                keys, clip = ShellKeys(bus), ShellClipboard(bus)
+            else:
+                from glance.writeback.clipboard_xlib import XlibClipboard
+                from glance.writeback.keys_xlib import XlibKeys
+
+                keys, clip = XlibKeys(), XlibClipboard()
         except Exception as e:  # noqa: BLE001 - capture is still useful read-only
             log_event("writeback_unavailable", kind=type(e).__name__)
         else:

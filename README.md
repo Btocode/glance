@@ -1,19 +1,20 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <img alt="Glance" src="docs/assets/logo-light.svg" width="256">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/glance-logo-on-dark.png">
+  <img alt="Glance — writing assistant" src="docs/assets/brand/glance-logo-on-light.png" width="360">
 </picture>
 
-**A system-wide writing assistant for Linux/X11.**<br>
+**A system-wide writing assistant for Linux: X11, and GNOME on Wayland.**<br>
 Offline grammar fixes, in place, in any app. No AI required.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-0e6b5c)](LICENSE)
-[![Platform: Linux X11](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11-0e6b5c?logo=linux&logoColor=white)](#requirements)
-[![Python 3.10 to 3.13](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-0e6b5c?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-0B7A52)](LICENSE)
+[![Platform: Linux X11 and GNOME Wayland](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11%20%C2%B7%20GNOME%20Wayland-0B7A52?logo=linux&logoColor=white)](#requirements)
+[![Python 3.10 to 3.14](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-0B7A52?logo=python&logoColor=white)](pyproject.toml)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-d9822b)](#status-and-known-limits)
 
 [Install](#install) ·
+[macOS](#macos) ·
 [Connect an AI](#connect-an-ai) ·
 [Usage](#usage) ·
 [Settings](#settings) ·
@@ -112,9 +113,11 @@ help. Grammar fixes work without one.
 
 ### Requirements
 
-- An X11 session ("Ubuntu on Xorg") on **x86_64**. Wayland is not supported.
+- On **x86_64**, either an X11 session ("Ubuntu on Xorg"), or **GNOME Shell 46 to 50 on
+  Wayland** (Ubuntu's default session). KDE Plasma, Sway and other Wayland desktops are not
+  supported yet; the installer says so and stops.
 - A running systemd user manager.
-- The system Python (`/usr/bin/python3`, 3.10 to 3.13) with GTK 3, AT-SPI and Wnck.
+- The system Python (`/usr/bin/python3`, 3.10 to 3.14) with GTK 3, AT-SPI and Wnck.
 
 If a system package is missing the installer prints the exact `sudo apt install …` line and
 stops; it never runs `sudo` itself unless you pass `--with-apt`:
@@ -146,6 +149,9 @@ runs the same, with no icon.
    to run `glance doctor`.
 6. When the `claude` CLI is installed and your login shell is zsh, it asks before adding the
    `claude` Ctrl+G wrapper to `.zshrc` (no terminal means no). It never changes `$EDITOR`.
+
+On GNOME Wayland it also installs Glance's GNOME Shell extension (see
+[GNOME on Wayland](#gnome-on-wayland)) and asks you to log out and in once.
 
 Running it again is safe.
 
@@ -215,6 +221,71 @@ the launcher files and `.zshrc` block still in place, and exits non-zero: re-run
 and then the uninstaller, or remove the listed files by hand.
 
 </details>
+
+## macOS
+
+Glance also runs on **macOS 13 or later** (Apple silicon and Intel). The same install line
+works: on a Mac `install.sh` hands off to `scripts/install-macos.sh`.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Btocode/glance/main/install.sh | bash
+```
+
+It needs no `sudo`, no Homebrew and no Xcode, and changes no shell file. It installs
+[uv](https://docs.astral.sh/uv/) under `~/.local/share/glance/uv` when uv is not already on
+your `PATH`, a uv-managed CPython 3.12 under `~/.local/share/glance/python` (never Apple's 3.9
+or Homebrew's), a venv with PyObjC, the pinned `harper-ls` for your CPU, links the commands into
+`~/.local/bin`, and a LaunchAgent (`~/Library/LaunchAgents/io.github.btocode.glance.plist`)
+that starts Glance at login and restarts it after a crash. Logs go to
+`~/Library/Logs/Glance/glanced.log`. Settings and data use the same paths as on Linux
+(`~/.config/glance/config.toml`, `~/.local/share/glance`); API keys go in your login Keychain.
+
+**The one-time Accessibility grant.** Glance reads and writes text fields through the macOS
+Accessibility API, which needs your permission once. The installer and `glance doctor` print the
+exact file to allow, for example
+`~/.local/share/glance/python/cpython-3.12.…-macos-aarch64-none/bin/python3.12`:
+
+1. System Settings → Privacy & Security → Accessibility → **+**.
+2. Press ⌘⇧G, paste the path, choose the file, and switch it on.
+3. Restart Glance: `launchctl kickstart -k gui/$(id -u)/io.github.btocode.glance`.
+
+`glance doctor --fix` opens that pane and shows macOS's own prompt. Input Monitoring is not
+needed. Glance lives in the menu bar (✦) with the same menu as the Linux tray.
+
+**Hotkeys on a Mac.** `Super` in `config.toml` means ⌘, `Alt` ⌥, `Ctrl` ⌃. Because ⌘⌥
+chords clash with app shortcuts, the defaults on macOS are ⌃⌥ chords:
+
+| Action | macOS |
+| --- | --- |
+| Open the strip and drawer | ⌃⌥G |
+| Use the suggestion (while the strip shows) | ⌥⏎ |
+| Fix all | ⌃⌥F |
+| Undo the last fix | ⌃⌥Z |
+| Pause / resume | ⌃⌥P |
+| Tone 1–4 | ⌃⌥1 … ⌃⌥4 |
+| Complete (autocomplete) | ⌃⌥⏎ |
+| Select-anything | ⌃⌥A |
+
+A chord you changed in `[general.hotkeys]` is used as you wrote it. Shortcuts macOS itself
+owns are left alone and reported.
+
+**Uninstall** with `~/.local/share/glance-src/uninstall.sh` (or `./uninstall.sh` in a checkout):
+it stops and removes the LaunchAgent, the links, the environment, the grammar engine, the logs
+and the source it downloaded, exactly as recorded at install. Remove the Accessibility entry
+yourself in System Settings.
+
+**Limits on macOS (first release):**
+
+- Developed on macOS 15.6 (Apple silicon) against a native AppKit test app; Safari, Chrome, Arc and
+  Electron apps are expected to work (their trees are switched on) but are not yet tested.
+- Safari's private windows carry no marker Glance can see: Safari is gated by URL and the deny
+  lists only. Chrome, Brave and Arc incognito windows are recognised by their title.
+- macOS cannot offer a paste to one app only; Glance's clipboard writes are marked concealed
+  and transient so clipboard managers skip them, and the clipboard is restored afterwards.
+- The Ctrl+G editor window and the "Connect an AI" window are not ported yet: use
+  `glance backend …` in Terminal or the menu bar's AI backend menu.
+- The Accessibility grant is on the Python interpreter (there is no signed app bundle yet);
+  a Python update by the installer may ask for the grant again.
 
 ## Connect an AI
 
@@ -444,6 +515,14 @@ flowchart LR
 - Once a day Glance asks github.com for the latest version (`git ls-remote`); nothing else is
   sent. Turn it off with `check_updates = false` under `[general]`.
 - `glance status` and the logs never contain any of your text.
+- On GNOME Wayland, Glance's shell extension can type into the focused window and read the
+  clipboard and the selection, which Wayland keeps from ordinary apps. It serves only
+  Glance: every call is refused unless the caller owns Glance's own bus name and the bus
+  reports it as a `glanced` / `glance-capture` process of your user (only "is the extension
+  there?" is open to all), and glanced in turn accepts calls only from GNOME Shell. What is
+  left: another unsandboxed program running as you could start a fake `glanced`; such a
+  program can already read your files and attach to your processes. Flatpak and snap apps
+  cannot reach Glance's bus names unless their sandbox is given `--talk-name` for them.
 - To make Glance never read an app, add its window class to `privacy.app_denylist` (setting the
   list replaces the built-in one, which already holds password managers and remote-desktop
   tools): that is the "never read" switch, and select-anything honours it, as it does private
@@ -452,10 +531,33 @@ flowchart LR
 
 Found a privacy leak? Please report it privately; see [SECURITY.md](SECURITY.md).
 
+## GNOME on Wayland
+
+Wayland does not let an ordinary app float a window over another app without taking the
+focus, grab global shortcuts, type into another app or read where its windows are. On GNOME,
+Glance therefore ships a small GNOME Shell extension, `glance@btocode.github.io`, that does
+exactly those parts and nothing else: it draws the status icon, the strip and the drawer
+inside the shell, binds the hotkeys, and types accepted fixes into the focused window with a
+virtual keyboard (only while that window still has the focus, and never while you hold a
+key). Everything else (checking, deciding, privacy) runs in Glance's own daemon, which talks
+to the extension over the local session bus; your text is never logged on either side.
+
+- The installer copies the extension to `~/.local/share/gnome-shell/extensions/`, enables it
+  and tells you to **log out and in once**: GNOME on Wayland loads a new extension only at
+  login. Until then Glance checks grammar and shows its tray icon, but draws nothing.
+- `glance doctor` has a `shell_extension` line (installed, enabled, running);
+  `glance doctor --fix` enables the extension and turns GNOME's accessibility switch on.
+- The tray icon needs GNOME's AppIndicator support (on by default on Ubuntu).
+- Fixes that cannot be typed (characters outside plain ASCII) are pasted through the
+  clipboard and your clipboard is put back afterwards. Unlike on X11, a clipboard manager can
+  see that one paste.
+- The uninstaller disables the extension and removes its files.
+
 ## Status and known limits
 
 > [!WARNING]
-> Glance is early software: only the automated tests on a private Xvfb have been run.
+> Glance is early software: it has been tested by automated tests (a private Xvfb on X11, a private
+> headless GNOME Shell on Wayland, a test app on a Mac), not yet in daily use on real desktops.
 
 - Not run yet: the live desktop checklist (real Slack, Discord, Gmail, claude.ai, ChatGPT in
   real profiles).
@@ -465,7 +567,13 @@ Found a privacy leak? Please report it privately; see [SECURITY.md](SECURITY.md)
 - Gemini and OpenCode never returned a verified reply in testing; treat them as experimental.
   Codex is experimental too (see [Connect an AI](#connect-an-ai)). Default model names are as
   configured, not re-verified.
-- Tested on Python 3.10 / Ubuntu 22.04 on X11 only. Wayland is unsupported; x86_64 only.
+- Tested on Python 3.10 / Ubuntu 22.04 on X11, and on Python 3.14 / Ubuntu 26.04 with GNOME
+  Shell 50 on Wayland (in a private headless GNOME Shell: icon, strip, Alt+Enter, following a
+  moved window, select-anything). x86_64 only.
+- Wayland: supported on GNOME Shell 46 to 50 through the extension; only GNOME 50 was tested.
+  KDE Plasma, Sway and other Wayland desktops are not supported yet.
+- macOS: first release, tested on macOS 15 (Apple Silicon) with a test app only; see
+  [Limits on macOS](#macos).
 - Details: [`docs/acceptance/report.md`](docs/acceptance/report.md).
 
 ## Contributing

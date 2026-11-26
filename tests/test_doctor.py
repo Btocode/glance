@@ -463,3 +463,110 @@ def test_default_healths_one_broken_backend_keeps_the_others(monkeypatch):
     monkeypatch.setattr(keystore.SecretKeyStore, "__init__", no_secret)
     out = checks_mod.default_healths()
     assert out["claude"] is True and out["api"] is False
+
+
+# ---------------------------------------------------------------- GNOME on Wayland
+
+WAYLAND = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0",
+           "XDG_CURRENT_DESKTOP": "ubuntu:GNOME"}
+
+
+def wayland_run(version="GNOME Shell 50.1", enabled="['glance@btocode.github.io']",
+                all_off="false", enable_rc=0, calls=None):
+    def run(argv, timeout=None):
+        if calls is not None:
+            calls.append(list(argv))
+        if argv[:2] == ["gnome-shell", "--version"]:
+            return 0, version + "\n"
+        if argv[:2] == ["gsettings", "get"] and argv[-1] == "enabled-extensions":
+            return 0, enabled + "\n"
+        if argv[:2] == ["gsettings", "get"] and argv[-1] == "disable-user-extensions":
+            return 0, all_off + "\n"
+        if argv[:2] == ["gnome-extensions", "enable"]:
+            return enable_rc, ""
+        if argv[:2] == ["gsettings", "get"]:
+            return 0, "true\n"
+        return 0, ""
+    return run
+
+
+def install_extension(home):
+    ext = home / ".local/share/gnome-shell/extensions/glance@btocode.github.io"
+    ext.mkdir(parents=True)
+    (ext / "metadata.json").write_text("{}")
+
+
+def test_gnome_wayland_session_is_ok_for_46_to_50(home):
+    r = by_id(run_checks(make_env(home, environ=WAYLAND, run=wayland_run()), CHECKS))["session"]
+    assert r.status == "ok" and "GNOME Shell 50" in r.detail
+    old = wayland_run(version="GNOME Shell 45.2")
+    r = by_id(run_checks(make_env(home, environ=WAYLAND, run=old), CHECKS))["session"]
+    assert r.status == "fail" and "46" in r.hint
+
+
+def test_other_wayland_desktops_fail_naming_what_is_supported(home):
+    env = {**WAYLAND, "XDG_CURRENT_DESKTOP": "KDE"}
+    r = by_id(run_checks(make_env(home, environ=env), CHECKS))["session"]
+    assert r.status == "fail" and "KDE" in r.detail and "GNOME Shell" in r.hint
+
+
+def test_shell_extension_is_not_needed_on_x11(home):
+    r = by_id(run_checks(make_env(home), CHECKS))["shell_extension"]
+    assert r.status == "ok"
+
+
+def test_shell_extension_states_on_wayland(home):
+    def check(**kw):
+        status = kw.pop("status", {"ok": True, "shell_extension": "running"})
+        env = make_env(home, environ=WAYLAND, run=wayland_run(**kw),
+                       ctl=lambda t, p: status if t == "status" else None)
+        return by_id(run_checks(env, CHECKS))["shell_extension"]
+
+    r = check()
+    assert r.status == "fail" and "not installed" in r.detail
+    install_extension(home)
+    assert check().status == "ok"
+    r = check(enabled="@as []")
+    assert r.status == "fail" and "doctor --fix" in r.hint
+    r = check(all_off="true")
+    assert r.status == "fail" and "Extensions" in r.hint
+    r = check(status={"ok": True, "shell_extension": "missing"})
+    assert r.status == "warn" and "log out" in r.hint
+
+
+def test_shell_extension_fix_enables_it_for_the_next_login(home, monkeypatch):
+    from glance.doctor.checks import ShellExtension
+
+    monkeypatch.delenv("GLANCE_SKIP_GSETTINGS", raising=False)
+    install_extension(home)
+    calls: list = []
+    env = make_env(home, environ=WAYLAND,
+                   run=wayland_run(enabled="['other@x']", enable_rc=2, calls=calls))
+    assert ShellExtension().fix(env)
+    assert ["gsettings", "set", "org.gnome.shell", "enabled-extensions",
+            "['other@x', 'glance@btocode.github.io']"] in calls
+    calls.clear()
+    env = make_env(home, environ=WAYLAND, run=wayland_run(calls=calls))
+    assert ShellExtension().fix(env)
+    assert calls == [["gnome-extensions", "enable", "glance@btocode.github.io"]]
+    assert not ShellExtension().fix(make_env(home))  # X11: nothing to do
+
+
+def test_shell_extension_in_disabled_extensions_is_not_enabled_and_fix_clears_it(home, monkeypatch):
+    from glance.doctor.checks import ShellExtension
+
+    monkeypatch.delenv("GLANCE_SKIP_GSETTINGS", raising=False)
+    install_extension(home)
+    calls: list = []
+    base = wayland_run(enable_rc=2, calls=calls)
+
+    def run(argv, timeout=None):
+        if argv[:2] == ["gsettings", "get"] and argv[-1] == "disabled-extensions":
+            calls.append(list(argv))
+            return 0, "['glance@btocode.github.io']\n"
+        return base(argv, timeout)
+
+    env = make_env(home, environ=WAYLAND, run=run)
+    assert by_id(run_checks(env, CHECKS))["shell_extension"].status == "fail"
+    assert ShellExtension().fix(env)
+    assert ["gsettings", "set", "org.gnome.shell", "disabled-extensions", "[]"] in calls

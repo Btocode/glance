@@ -86,6 +86,8 @@ class PrivacyCfg:
     terminal_wm_classes: tuple[str, ...] = (
         "com.mitchellh.ghostty", "ghostty", "kitty", "gnome-terminal-server", "xterm",
         "alacritty", "org.wezfurlong.wezterm", "konsole", "tilix",
+        # Wayland app ids (GNOME on Wayland reports these as the window class)
+        "org.gnome.terminal", "org.gnome.ptyxis", "org.gnome.console", "kgx",
     )
     terminal_allowlist: tuple[str, ...] = ()
 

@@ -1,0 +1,9 @@
+{
+  "uuid": "glance@btocode.github.io",
+  "name": "Glance",
+  "description": "The overlay, hotkeys and write-back keys of Glance, the system-wide writing assistant, on GNOME Wayland. It does only what Wayland forbids ordinary apps; all logic runs in Glance's own daemon. Text is exchanged with it only over the local session bus.",
+  "shell-version": ["46", "47", "48", "49", "50"],
+  "url": "https://github.com/Btocode/glance",
+  "settings-schema": "org.gnome.shell.extensions.glance",
+  "version-name": "0.1.0"
+}

@@ -318,6 +318,12 @@ def _doctor(args: argparse.Namespace) -> int:
         print(f"glance: not an app id: {bad[0]!r}", file=sys.stderr)
         return 2
     env = default_env()
+    # >>> macOS: its own checks (Accessibility, launchd, PyObjC); src/glance/platform/macos
+    if sys.platform == "darwin":
+        from glance.platform.macos.doctor import CHECKS, mac_env
+
+        env = mac_env()
+    # <<< macOS
     if args.undo:
         undo_all(env, CHECKS)
     if args.fix:

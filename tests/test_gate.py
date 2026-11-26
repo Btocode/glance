@@ -35,6 +35,8 @@ def reason(**change) -> str | None:
     ({"wm_class": "google-chrome", "url": None}, "url_unknown"),
     ({"wm_class": "com.mitchellh.ghostty"}, "terminal"),
     ({"wm_class": "gnome-terminal-server", "terminal_fg": "zsh"}, "terminal"),
+    ({"wm_class": "org.gnome.Ptyxis", "terminal_fg": "zsh"}, "terminal"),
+    ({"wm_class": "org.gnome.Terminal", "terminal_fg": "zsh"}, "terminal"),
     ({"text_len": 20001}, "too_long"),
     ({"states": frozenset({"focused"})}, "not_editable"),
 ])

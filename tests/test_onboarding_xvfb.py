@@ -1,6 +1,7 @@
 """The onboarding window and the tray's backend menu, on a private Xvfb (never the user's)."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,8 @@ import pytest
 from tests.test_xvfb import xvfb  # noqa: F401  (the private Xvfb fixture)
 
 PROBE = Path(__file__).parent / "desktop" / "onboarding_probe.py"
+
+pytestmark = pytest.mark.skipif(shutil.which("Xvfb") is None, reason="Xvfb is not installed")
 
 
 @pytest.fixture(scope="module")

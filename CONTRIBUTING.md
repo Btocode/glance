@@ -30,7 +30,7 @@ privacy problems go through [SECURITY.md](SECURITY.md), not public issues.
 ## Development setup
 
 You need the same things Glance needs at run time: an X11 session on x86_64 and the system
-Python (`/usr/bin/python3`, 3.10 to 3.13) with GTK 3, AT-SPI and Wnck bindings. The GTK
+Python (`/usr/bin/python3`, 3.10 to 3.14) with GTK 3, AT-SPI and Wnck bindings. The GTK
 bindings come from your distribution, which is why the venv is built on the system Python with
 `--system-site-packages`.
 
@@ -88,6 +88,7 @@ touches a real desktop or costs money:
 | `desktop` | needs the live X session and AT-SPI bus; presses hotkeys and types | **no**, see below |
 | `apps` | drives real third-party apps (browsers, editors) | **no**, see below |
 | `paid` | makes real, billed AI calls | costs money |
+| `macos` | on a Mac only (`GLANCE_MAC_TEST=1`): adapters, then glanced + a test app; clicks and ⌥⏎ in that app | on a Mac you are not typing on; skipped elsewhere |
 
 ```sh
 .venv/bin/pytest -m xvfb                   # slower end-to-end tests, private Xvfb
@@ -109,6 +110,21 @@ being redacted. A test that fails with `UnsafeLogValue` found a real leak; fix t
 not loosen the check.
 
 Lint with `.venv/bin/ruff check .` (line length 100, target Python 3.10).
+
+### macOS
+
+On a Mac, build the venv with a uv-managed Python and the `macos` extra, fetch the macOS
+harper-ls, and grant Accessibility to that Python (see the README's macOS section):
+
+```sh
+uv venv --python 3.12 .venv && uv pip install -e ".[macos,dev]"
+scripts/fetch-harper.sh
+GLANCE_MAC_TEST=1 .venv/bin/pytest -m macos tests/macos      # needs an unlocked console session
+.venv/bin/python tests/macos/render_overlay.py /tmp/shots   # off-screen PNGs of the overlay
+```
+
+The macOS code is in `src/glance/platform/macos/` (design:
+`docs/superpowers/specs/2026-11-26-glance-macos-design.md`); its pure parts are tested on Linux.
 
 ## Project layout
 

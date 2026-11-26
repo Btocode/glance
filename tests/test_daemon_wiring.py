@@ -263,6 +263,10 @@ def test_hotkeys_status_lists_configured_names_only():
 def test_session_problem():
     assert session_problem({"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}) is None
     assert session_problem({"XDG_SESSION_TYPE": "wayland", "DISPLAY": ":0"})
+    assert session_problem({"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0",
+                            "XDG_CURRENT_DESKTOP": "KDE"})
+    assert session_problem({"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0",
+                            "XDG_CURRENT_DESKTOP": "ubuntu:GNOME"}) is None
     assert session_problem({"XDG_SESSION_TYPE": "x11"})
 
 

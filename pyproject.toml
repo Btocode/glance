@@ -8,11 +8,20 @@ version = "0.1.0"
 description = "System-wide writing assistant for Linux/X11"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10,<3.15"
 dependencies = ["tomli>=2", "httpx>=0.27,<1", "tomlkit>=0.12,<1", "python-xlib>=0.29,<1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+# macOS: the AppKit overlay, AX capture, Quartz events and the Keychain. Platform markers keep
+# a Linux install exactly as it was.
+macos = [
+    "pyobjc-core>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-Security>=10.3; sys_platform == 'darwin'",
+]
 
 [project.scripts]
 glance = "glance.cli:main"
@@ -24,13 +33,15 @@ glance-edit = "glance.edit_shim.main:main"
 packages = ["src/glance"]
 
 [tool.pytest.ini_options]
-addopts = '-m "not desktop and not apps and not paid and not xvfb"'
+addopts = '-m "not desktop and not apps and not paid and not xvfb and not wayland"'
 pythonpath = ["."]
 markers = [
     "desktop: needs a live X session and AT-SPI bus",
     "apps: needs real third-party apps",
     "paid: calls a paid API",
     "xvfb: end to end on a private Xvfb + D-Bus session (never the user's display); slow, opt in with -m xvfb",
+    "wayland: end to end in a private headless GNOME Shell (GLANCE_WAYLAND_TEST=1, inside tests/wayland/private-session.sh)",
+    "macos: needs a Mac console session with Accessibility; skipped unless Darwin and GLANCE_MAC_TEST=1",
 ]
 
 [tool.ruff]

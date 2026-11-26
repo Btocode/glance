@@ -1,4 +1,5 @@
-"""AT-SPI adapter for the capture ports (needs a live X session and accessibility bus).
+"""AT-SPI adapter for the capture ports (needs an accessibility bus, and Wnck on X11 or Glance's
+GNOME Shell extension on Wayland for the windows).
 
 Facts this module encodes, from docs/superpowers/spike/findings.md:
 
@@ -49,6 +50,7 @@ EVENTS = ("object:state-changed:focused", "object:text-changed", "object:text-ca
           "object:visible-data-changed")
 EMBEDDED = "￼"
 _SCREEN = Atspi.CoordType.SCREEN
+_WINDOW = Atspi.CoordType.WINDOW
 _MAX_ANCESTORS = 64      # field -> application
 _MAX_EVENT_HOPS = 16     # event source -> owning field
 _MAX_LEAF_DEPTH = 8      # focused root -> block holding the caret
@@ -107,15 +109,15 @@ def _char_count(obj: Atspi.Accessible) -> int:
     return Atspi.Text.get_character_count(obj)
 
 
-def _rect(r: Any) -> Rect | None:
-    """A usable rectangle, or None for the toolkits' "no rectangle" values.
+def _rect(r: Any, dx: int = 0, dy: int = 0) -> Rect | None:
+    """A usable rectangle (moved by dx, dy), or None for the toolkits' "no rectangle" values.
 
     Height 0 means none (Chromium returns all zeros at the end of the text, S2.2); width 0
     with a real height is a valid GTK caret (S1.1).
     """
     if r is None or r.height <= 0 or r.width < 0:
         return None
-    return Rect(int(r.x), int(r.y), int(r.width), int(r.height))
+    return Rect(int(r.x) + dx, int(r.y) + dy, int(r.width), int(r.height))
 
 
 def pick_window(active: Any, stacked: list[Any], pid: int) -> Any:
@@ -243,17 +245,77 @@ class _AtspiField:
             self.members.add(node)
         return node
 
+    def _coords(self) -> tuple[Any, int, int]:
+        """The AT-SPI coordinate type to ask for, and what to add to its answers to get
+        screen coordinates. On Wayland clients do not know where their windows are: their
+        WINDOW coordinates are taken and the window's buffer origin (from the shell) added."""
+        if not getattr(self._port, "window_coords", False):
+            return _SCREEN, 0, 0
+        win = self._port.window_for(self.pid)
+        if win is None:
+            raise A11yTimeout("no window")
+        dx, dy = win.frame_origin() if self._frame_relative(win) else win.origin()
+        return _WINDOW, dx, dy
+
+    def _frame_relative(self, win: Any) -> bool:
+        """True when WINDOW coordinates start at the window's frame, False when at its
+        buffer (client-side shadow included). GTK 4 does the first, GTK 3 and Chromium the
+        second; the top-level accessible's own size says which (it is the size of the box
+        the coordinates are measured in)."""
+        cached = getattr(self, "_frame_rel", None)
+        if cached is not None:
+            return cached
+        e = _quiet(Atspi.Component.get_extents, self._frame, _WINDOW)
+        size = (int(e.width), int(e.height)) if e is not None else None
+        fw, fh = win.get_geometry()[2:]
+        bw, bh = win.buffer_size()
+        if size == (fw, fh) and size != (bw, bh):
+            cached = True
+        elif size == (bw, bh):
+            cached = False
+        else:
+            name = str(_quiet(self._app.get_toolkit_name) or "").casefold()
+            major = str(_quiet(self._app.get_toolkit_version) or "").split(".")[0]
+            cached = name == "gtk" and major.isdigit() and int(major) >= 4
+        self._frame_rel = cached
+        return cached
+
+    def _document_shift(self, coords: Any, caret: Any, field: Any) -> tuple[int, int]:
+        """Chromium on Wayland gives character extents relative to its web document, not
+        to the window like the rest: when the caret lies outside its field and moving it by
+        the document's origin puts it inside, that is the shift to apply."""
+        if coords is not _WINDOW or self._doc is None or caret is None or field is None:
+            return 0, 0
+
+        def inside(x: int, y: int) -> bool:
+            return (field.x - 2 <= x <= field.x + field.width + 2
+                    and field.y - 2 <= y <= field.y + field.height + 2)
+
+        cx, cy = int(caret.x) + int(caret.width) // 2, int(caret.y) + int(caret.height) // 2
+        if inside(cx, cy):
+            return 0, 0
+        doc = _quiet(Atspi.Component.get_extents, self._doc, _WINDOW)
+        if doc is None:
+            return 0, 0
+        dx, dy = int(doc.x), int(doc.y)
+        return (dx, dy) if inside(cx + dx, cy + dy) else (0, 0)
+
     def read(self) -> FieldRead:
         leaf = self._leaf()
         raw = self._raw_text(leaf)  # raises on a timeout; see the module docstring
         caret = int(_call(Atspi.Text.get_caret_offset, leaf))
+        coords, dx, dy = self._coords()
         caret_rect = prev_rect = None
+        field_raw = _opt(Atspi.Component.get_extents, self.obj, coords)
         if 0 <= caret <= len(raw):
             extents = Atspi.Text.get_character_extents
-            caret_rect = _rect(_opt(extents, leaf, caret, _SCREEN))
-            if caret > 0:
-                prev_rect = _rect(_opt(extents, leaf, caret - 1, _SCREEN))
-        field_rect = _rect(_opt(Atspi.Component.get_extents, self.obj, _SCREEN))
+            caret_raw = _opt(extents, leaf, caret, coords)
+            prev_raw = _opt(extents, leaf, caret - 1, coords) if caret > 0 else None
+            probe = caret_raw if _rect(caret_raw) is not None else prev_raw
+            sx, sy = self._document_shift(coords, probe if _rect(probe) else None, field_raw)
+            caret_rect = _rect(caret_raw, dx + sx, dy + sy)
+            prev_rect = _rect(prev_raw, dx + sx, dy + sy)
+        field_rect = _rect(field_raw, dx, dy)
         if caret_rect is not None and caret_rect == field_rect:
             caret_rect = None  # Gecko's answer for an empty textarea (S3.1)
         selection: tuple[int, int] | None = None
@@ -290,14 +352,18 @@ class _AtspiField:
 class AtspiPort:
     """A11yPort over AT-SPI events, with Wnck for the window a field belongs to."""
 
-    def __init__(self) -> None:
+    def __init__(self, screen: Any = None) -> None:
+        """`screen` stands in for Wnck's screen: on GNOME Wayland the extension's
+        `ShellScreen`, whose windows also give the origin of WINDOW coordinates."""
         # No client-side cache: role, states and names must be the application's current
         # answer, since the privacy gate is evaluated on them.
         os.environ.setdefault("ATSPI_NO_CACHE", "1")
-        Gdk.init([])
+        self.window_coords = screen is not None
+        if screen is None:
+            Gdk.init([])
         Atspi.init()
         Atspi.set_timeout(TIMEOUT_MS, TIMEOUT_MS)
-        self._screen = Wnck.Screen.get_default()
+        self._screen = Wnck.Screen.get_default() if screen is None else screen
         if self._screen is None:
             raise RuntimeError("no X11 screen")
         self._screen.force_update()

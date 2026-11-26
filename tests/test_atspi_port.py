@@ -259,3 +259,43 @@ def test_a_moved_or_resized_window_rereads_its_field():
     port._current = None
     cb(one)
     assert len(changed) == 1
+
+
+# ---------------------------------------------------------------- Wayland coordinates
+
+
+def wayland_field(monkeypatch, frame_size, doc_origin=None):
+    """A field whose port reads WINDOW coordinates (GNOME Wayland), with stub extents."""
+    from glance.capture.windows_shell import ShellWindow
+
+    win = ShellWindow({"id": "1", "pid": 4242, "frame": [100, 50, 700, 500],
+                       "buffer": [75, 25, 750, 550]})
+    field = _AtspiField.__new__(_AtspiField)
+    field.pid = 4242
+    field._port = SimpleNamespace(window_coords=True, window_for=lambda pid: win)
+    field._frame = "frame"
+    field._doc = "doc" if doc_origin else None
+    field._app = SimpleNamespace(get_toolkit_name=lambda: "", get_toolkit_version=lambda: "")
+    boxes = {"frame": SimpleNamespace(x=0, y=0, width=frame_size[0], height=frame_size[1]),
+             "doc": SimpleNamespace(x=(doc_origin or (0, 0))[0], y=(doc_origin or (0, 0))[1],
+                                    width=600, height=400)}
+    monkeypatch.setattr(atspi_port.Atspi.Component, "get_extents",
+                        lambda obj, coords: boxes[obj])
+    return field, win
+
+
+def test_window_coordinates_start_at_the_buffer_or_the_frame(monkeypatch):
+    field, _win = wayland_field(monkeypatch, (750, 550))  # GTK 3, Chromium: the buffer
+    assert field._coords()[1:] == (75, 25)
+    field, _win = wayland_field(monkeypatch, (700, 500))  # GTK 4: the frame
+    assert field._coords()[1:] == (100, 50)
+
+
+def test_chromium_caret_is_moved_by_the_document_origin_only_when_that_fits(monkeypatch):
+    field, _win = wayland_field(monkeypatch, (750, 550), doc_origin=(12, 100))
+    box = SimpleNamespace(x=52, y=140, width=500, height=96)
+    caret = SimpleNamespace(x=42, y=42, width=1, height=16)  # relative to the document
+    assert field._document_shift(atspi_port._WINDOW, caret, box) == (12, 100)
+    inside = SimpleNamespace(x=60, y=150, width=1, height=16)  # already in the field
+    assert field._document_shift(atspi_port._WINDOW, inside, box) == (0, 0)
+    assert field._document_shift(atspi_port._SCREEN, caret, box) == (0, 0)  # X11

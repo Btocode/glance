@@ -357,6 +357,12 @@ class _DesktopNotifier:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # >>> macOS: glanced runs on AppKit there (src/glance/platform/macos/daemon.py)
+    if sys.platform == "darwin":
+        from glance.platform.macos.daemon import main as macos_main
+
+        return macos_main(argv)
+    # <<< macOS
     argparse.ArgumentParser(
         prog="glanced", description="The Glance daemon. Control it with `glance`.",
     ).parse_args(argv)
@@ -395,17 +401,15 @@ def main(argv: list[str] | None = None) -> int:
     from glance.daemon.supervisor import ChildSupervisor
     from glance.grammar.harper import HarperClient
     from glance.ipc import Conn, JsonLineServer
+    from glance.session import GNOME_WAYLAND, session_kind
     from glance.ui.edit_window_gtk import gtk_edit_host
-    from glance.ui.ghost_gtk import GtkGhost
     from glance.ui.hotkeys import bind_hotkeys, system_shortcuts
-    from glance.ui.hotkeys_xlib import XlibHotkeys
     from glance.ui.onboarding_gtk import OnboardingWindow
-    from glance.ui.overlay_gtk import GtkOverlay
-    from glance.ui.selection_xlib import XlibSelection
     from glance.ui.tray_gtk import INSTALL_HINT, GtkTray
 
+    wayland = session_kind(os.environ) == GNOME_WAYLAND
     if not Gtk.init_check(None)[0]:
-        print("glanced: cannot open the X display", file=sys.stderr)
+        print("glanced: cannot open the display", file=sys.stderr)
         return 1
 
     clock = GLibClock()
@@ -437,9 +441,56 @@ def main(argv: list[str] | None = None) -> int:
 
     # The callbacks below name parts built further down; they only run once the main loop
     # does, when every part exists.
-    hotkeys = XlibHotkeys(clock.post)
-    gtk_overlay = GtkOverlay(on_chip_click=lambda: chip_clicked(),
-                             on_panel_action=lambda action, args: panels.action(action, args))
+    shell: Any = None
+    if wayland:
+        # GNOME on Wayland: the overlay, hotkeys and selection go through Glance's shell
+        # extension. Without it (not installed, or enabled only from the next login) they
+        # do nothing and grammar + tray keep working; it is picked up when it appears.
+        from glance.daemon.shell_link import ShellLink
+        from glance.shellbus import GioShellBus
+        from glance.ui.hotkeys_shell import ShellHotkeys
+        from glance.ui.overlay_shell import ShellOverlay
+        from glance.ui.selection_shell import ShellSelection
+        from glance.ui.theme import install as install_theme
+
+        def extension_changed(available: bool) -> None:
+            if available:
+                hotkeys.resync()
+            gtk_overlay.on_extension(available)
+            controller.refresh()
+
+        shell = GioShellBus(on_change=lambda up: clock.post(lambda: extension_changed(up)))
+        theme = install_theme()
+        hotkeys = ShellHotkeys(shell, clock.post)
+        gtk_overlay = ShellOverlay(
+            shell, clock.post, clock.call_later, lambda: theme.tokens,
+            on_chip_click=lambda: chip_clicked(),
+            on_panel_action=lambda action, args: panels.action(action, args),
+            use_key=lambda: watcher.current.ui.use_key)
+        theme.on_change(lambda: gtk_overlay.on_extension(True))
+        ghost: Any = gtk_overlay.ghost
+        selection_port: Any = ShellSelection(shell)
+        shell_link = ShellLink({
+            "ExtensionHello": lambda _p: extension_changed(True),
+            "WindowChanged": gtk_overlay.on_window,
+            "GeometryChanged": gtk_overlay.on_window,
+            "Clicked": gtk_overlay.on_clicked,
+            "Key": lambda p: hotkeys.on_key(str(p.get("name", ""))),
+            "Sized": gtk_overlay.on_sized,
+            "AskDone": gtk_overlay.on_ask_done,
+        }, shell.connection, lambda: shell.owner)
+        shell_link.start()
+    else:
+        from glance.ui.ghost_gtk import GtkGhost
+        from glance.ui.hotkeys_xlib import XlibHotkeys
+        from glance.ui.overlay_gtk import GtkOverlay
+        from glance.ui.selection_xlib import XlibSelection
+
+        hotkeys = XlibHotkeys(clock.post)
+        gtk_overlay = GtkOverlay(on_chip_click=lambda: chip_clicked(),
+                                 on_panel_action=lambda action, args: panels.action(action, args))
+        ghost = GtkGhost(watcher.current.ui.ghost_font_factor)
+        selection_port = XlibSelection()
     # `overlay` holds the Escape grab while any panel is up; the Controller draws through
     # `field_overlay`, which leaves select-anything's panel alone.
     overlay = PanelEscape(gtk_overlay, hotkeys, lambda: panels.escape(),
@@ -536,8 +587,8 @@ def main(argv: list[str] | None = None) -> int:
     features = attach_features(
         controller=controller, ai=ai, supervisor=ai_supervisor, cfg=current_config,
         grammar=harper, issue_filter=issue_filter,
-        ghost=GtkGhost(watcher.current.ui.ghost_font_factor), hotkeys=hotkeys, clock=clock,
-        run_ai=run_ai, language=detector.is_mixed, selection_port=XlibSelection(),
+        ghost=ghost, hotkeys=hotkeys, clock=clock,
+        run_ai=run_ai, language=detector.is_mixed, selection_port=selection_port,
         overlay=overlay, capture=link, notifier=notifier)
     panels = PanelRouter(controller, ai, overrides.set, features.selection, features.guard)
     ctl = CtlRouter(
@@ -649,6 +700,8 @@ def main(argv: list[str] | None = None) -> int:
         **hotkeys_status(hotkeys.grabbed(), bound_chords),
         "hotkeys_unavailable": ",".join(sorted(hotkey_problems)) or None,
         "tray": tray.available,
+        **({"shell_extension": "running" if shell.available else "missing"}
+           if shell is not None else {}),
         **reporter.status(),
     })
 
@@ -744,6 +797,9 @@ def main(argv: list[str] | None = None) -> int:
         ctl_server.stop()
         capture_server.stop()
         hotkeys.close()
+        if shell is not None:
+            shell_link.stop()
+            shell.close()
         ai_supervisor.cancel_all()
         for backend in (*backends.values(), *speculative.values()):
             stop = getattr(backend, "stop", None) or getattr(backend, "close", None)

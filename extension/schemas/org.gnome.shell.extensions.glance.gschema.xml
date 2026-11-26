@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Glance's hotkeys. glanced writes the chords of [general.hotkeys] here; the defaults are
+     the same as on X11. -->
+<schemalist>
+  <schema id="org.gnome.shell.extensions.glance" path="/org/gnome/shell/extensions/glance/">
+    <key name="panel" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;space']</default>
+      <summary>Glance: panel</summary>
+    </key>
+    <key name="fix-all" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;f']</default>
+      <summary>Glance: fix-all</summary>
+    </key>
+    <key name="revert" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;z']</default>
+      <summary>Glance: revert</summary>
+    </key>
+    <key name="pause" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;p']</default>
+      <summary>Glance: pause</summary>
+    </key>
+    <key name="tone1" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;1']</default>
+      <summary>Glance: tone1</summary>
+    </key>
+    <key name="tone2" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;2']</default>
+      <summary>Glance: tone2</summary>
+    </key>
+    <key name="tone3" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;3']</default>
+      <summary>Glance: tone3</summary>
+    </key>
+    <key name="tone4" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;4']</default>
+      <summary>Glance: tone4</summary>
+    </key>
+    <key name="complete" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;Return']</default>
+      <summary>Glance: complete</summary>
+    </key>
+    <key name="selection" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;a']</default>
+      <summary>Glance: selection</summary>
+    </key>
+  </schema>
+</schemalist>

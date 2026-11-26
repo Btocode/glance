@@ -1,0 +1,102 @@
+"""The overlay scene the GNOME Shell extension renders: views and places as JSON. Pure.
+
+Everything the extension needs to draw is decided here, in Python: which pieces show, their
+text (Pango markup, escaped here), their colours (the theme's tokens) and where they go. The
+extension only lays out widgets and moves them along with the window.
+"""
+from __future__ import annotations
+
+import dataclasses
+from enum import Enum
+from html import escape
+from typing import Any
+
+from glance.diffing import diff_markup
+from glance.grammar.harper import SPELL_RULE
+from glance.protocol import Rect
+from glance.ui.panel_model import PanelView
+from glance.ui.status_model import StatusView
+from glance.ui.strip_model import StripView
+
+USE_LABEL = "Use  Alt+⏎"
+ASK_PLACEHOLDER = "e.g. make it a bullet list"
+
+
+def _plain(value: Any) -> Any:
+    """Dataclasses, enums and tuples as JSON-ready values."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    return value
+
+
+def strip_markup(view: StripView, accent: str) -> str:
+    """The corrected sentence as Pango markup: the fixes bold in the accent colour."""
+    return "".join(
+        f'<span foreground="{accent}" weight="bold">{escape(s.text, quote=False)}</span>'
+        if s.changed else escape(s.text, quote=False) for s in view.segments)
+
+
+def use_label(use_key: str) -> str:
+    """"Use  Alt+⏎" for the default key; the configured chord otherwise."""
+    if use_key.replace(" ", "").casefold() in ("alt+return", "alt+enter"):
+        return USE_LABEL
+    return f"Use  {use_key}"
+
+
+def status_piece(view: StatusView, x: int, y: int) -> dict[str, Any]:
+    return {"state": view.state.value, "badge": view.badge, "spin": view.spin,
+            "message": view.message, "x": x, "y": y}
+
+
+def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
+                use_key: str) -> dict[str, Any]:
+    return {"view": _plain(view), "markup": strip_markup(view, tokens.get("accent", "#0e6b5c")),
+            "can_use": view.can_use, "use_label": use_label(use_key), "x": x, "y": y, "w": w}
+
+
+def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool) -> dict[str, Any]:
+    plain = _plain(view)
+    for row, issue in zip(plain["issues"], view.issues):
+        row["spelling"] = issue.rule == SPELL_RULE
+    return {"view": plain,
+            "preview_markup": None if view.preview is None else diff_markup(view.preview),
+            "x": x, "y": y, "w": w, "follow": follow}
+
+
+def ghost_piece(text: str, x: int, y: int, font_px: int, max_width: int) -> dict[str, Any]:
+    return {"text": text, "x": x, "y": y, "font_px": font_px, "max_width": max_width}
+
+
+def window_ref(window: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The focused window the places were computed against: its id and frame."""
+    if not window:
+        return None
+    return {"id": str(window.get("id", "")), "frame": list(window.get("frame") or [0, 0, 0, 0])}
+
+
+def scene(tokens: dict[str, str], window: dict[str, Any] | None, *,
+          status: dict[str, Any] | None = None, strip: dict[str, Any] | None = None,
+          panel: dict[str, Any] | None = None, ghost: dict[str, Any] | None = None,
+          sizes: dict[str, int] | None = None) -> dict[str, Any]:
+    return {"v": 1, "tokens": dict(tokens), "window": window_ref(window), "status": status,
+            "strip": strip, "panel": panel, "ghost": ghost, "sizes": dict(sizes or {}),
+            "ask_placeholder": ASK_PLACEHOLDER}
+
+
+def rects(raw: Any) -> list[Rect]:
+    """Monitors as the extension reports them ([[x, y, w, h], ...]); junk is dropped."""
+    out: list[Rect] = []
+    for r in raw or ():
+        try:
+            x, y, w, h = (int(v) for v in r)
+        except (TypeError, ValueError):
+            continue
+        if w > 0 and h > 0:
+            out.append(Rect(x, y, w, h))
+    return out

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from glance.backends.base import SIGN_IN
@@ -9,9 +10,11 @@ from glance.log import log_event
 from glance.ui.onboarding_model import ORDER, TITLES, BackendRow, headline
 
 INSTALL_HINT = "sudo apt install gir1.2-ayatanaappindicator3-0.1"
+# The brand mark as a flat white tray icon (packaging/icons/symbolic in the checkout).
+_BRAND_ICONS = Path(__file__).resolve().parents[3] / "packaging" / "icons" / "symbolic"
 # state -> (icon name, line shown at the top of the menu)
 _STATES = {
-    "active": ("tools-check-spelling-symbolic", "Glance is on"),
+    "active": ("glance-symbolic-white-22", "Glance is on"),
     "paused": ("media-playback-pause-symbolic", "Glance is paused"),
     "private": ("channel-secure-symbolic", "Private field: nothing is read"),
     "degraded": ("dialog-warning-symbolic", "Glance is restarting a helper"),
@@ -99,6 +102,10 @@ class GtkTray:
             return
         self._indicator = AppIndicator.Indicator.new(
             "glance", _STATES["active"][0], AppIndicator.IndicatorCategory.APPLICATION_STATUS)
+        if _BRAND_ICONS.is_dir():  # a checkout install ships the brand tray icon
+            self._indicator.set_icon_theme_path(str(_BRAND_ICONS))
+        else:
+            _STATES["active"] = ("tools-check-spelling-symbolic", _STATES["active"][1])
         self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self._indicator.set_title("Glance")
         menu = Gtk.Menu()

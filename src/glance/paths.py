@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
 
 def runtime_dir() -> Path:
     base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    # >>> macOS: there is no XDG_RUNTIME_DIR or /run/user; sockets live under the state dir
+    if sys.platform == "darwin" and not os.environ.get("XDG_RUNTIME_DIR"):
+        base = str(state_dir() / "run")
+        d = Path(base)
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        d.chmod(0o700)
+        return d
+    # <<< macOS
     d = Path(base) / "glance"
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
     d.chmod(0o700)

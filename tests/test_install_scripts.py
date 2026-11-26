@@ -74,12 +74,17 @@ class Sandbox:
             d.mkdir()
         for name in ("systemctl", "sudo", "gsettings", "gnome-extensions", "claude"):
             _script(self.shims / name, f'echo "{name} $*" >> "$SHIM_LOG"\nexit 0\n')
+        # GNOME on Wayland: the shell's version comes from FAKE_GNOME_SHELL; the extension
+        # never answers on the (absent) session bus
+        _script(self.shims / "gnome-shell",
+                'echo "gnome-shell $*" >> "$SHIM_LOG"\necho "GNOME Shell ${FAKE_GNOME_SHELL:-50.1}"\n')
+        _script(self.shims / "gdbus", 'echo "gdbus $*" >> "$SHIM_LOG"\nexit 1\n')
         self.log.write_text("")
         self.checkout.mkdir()
         for f in ("install.sh", "uninstall.sh", "pyproject.toml"):
             if (REPO / f).exists():
                 shutil.copy2(REPO / f, self.checkout / f)
-        for d in ("packaging", "scripts"):
+        for d in ("packaging", "scripts", "extension"):
             if (REPO / d).exists():
                 shutil.copytree(REPO / d, self.checkout / d)
         make_stub_venv(self.checkout / ".venv")
@@ -361,6 +366,64 @@ def test_refuses_outside_x11_and_writes_nothing(sb):
     assert tree(sb.home) == {} and sb.log.read_text() == ""
 
 
+WAYLAND = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0",
+           "XDG_CURRENT_DESKTOP": "ubuntu:GNOME"}
+EXT = ".local/share/gnome-shell/extensions/glance@btocode.github.io"
+
+
+@pytest.mark.parametrize("desktop", ["KDE", "sway", ""])
+def test_other_wayland_desktops_are_refused_naming_what_is_supported(sb, desktop):
+    p = sb.run("install.sh", env={**WAYLAND, "XDG_CURRENT_DESKTOP": desktop})
+    assert p.returncode != 0 and "GNOME Shell 46 to 50 on Wayland" in p.stderr
+    assert "KDE" in p.stderr and tree(sb.home) == {}
+
+
+def test_gnome_outside_46_to_50_is_refused(sb):
+    p = sb.run("install.sh", env={**WAYLAND, "FAKE_GNOME_SHELL": "45.3"})
+    assert p.returncode != 0 and "GNOME Shell 45" in p.stderr and tree(sb.home) == {}
+
+
+def test_gnome_wayland_installs_and_uninstalls_the_extension_exactly(sb):
+    # accessibility is already on, so doctor --fix has no gsettings to set
+    _script(sb.shims / "gsettings", 'echo "gsettings $*" >> "$SHIM_LOG"\n'
+            'case "$*" in *toolkit-accessibility) echo true;; esac\nexit 0\n')
+    p = sb.ok("install.sh", "--no-wrapper", env={**WAYLAND, "GLANCE_SKIP_GSETTINGS": ""})
+    assert "GNOME Shell 50 on Wayland" in p.stdout
+    assert "Log out and log in again" in p.stdout
+    ext = sb.home / EXT
+    shipped = sorted(str(f.relative_to(REPO / "extension"))
+                     for f in (REPO / "extension").rglob("*") if f.is_file())
+    for rel in shipped:
+        assert (ext / rel).read_bytes() == (REPO / "extension" / rel).read_bytes()
+    assert (ext / "schemas" / "gschemas.compiled").is_file()
+    doc = json.loads(sb.read(MANIFEST))
+    recorded = {line.split("  ", 1)[1]: line.split("  ", 1)[0] for line in doc["extension_files"]}
+    assert set(recorded) == {str(f) for f in ext.rglob("*") if f.is_file()}
+    for path, sha in recorded.items():
+        assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == sha
+    assert doc["extension_enabled"] is True
+    assert "gnome-extensions enable glance@btocode.github.io" in sb.calls("gnome-extensions")
+    assert sb.calls("gsettings set") == []
+
+    # the user's own file next to ours stays, and so does one of ours they edited
+    (ext / "mine.txt").write_text("mine")
+    (ext / "stylesheet.css").write_text("edited") if (ext / "stylesheet.css").exists() else None
+    sb.ok("uninstall.sh", env={**WAYLAND, "GLANCE_SKIP_GSETTINGS": ""})
+    assert "gnome-extensions disable glance@btocode.github.io" in sb.calls("gnome-extensions")
+    assert sorted(str(f.relative_to(ext)) for f in ext.rglob("*") if f.is_file()) == ["mine.txt"]
+    (ext / "mine.txt").unlink()
+
+
+def test_gnome_wayland_extension_files_are_all_removed(sb):
+    sb.ok("install.sh", "--no-wrapper", env=WAYLAND)  # GLANCE_SKIP_GSETTINGS: not enabled
+    assert json.loads(sb.read(MANIFEST))["extension_enabled"] is False
+    assert (sb.home / EXT / "extension.js").is_file()
+    sb.ok("install.sh", "--no-wrapper", env=WAYLAND)  # a re-run (an update) is fine
+    sb.ok("uninstall.sh", env=WAYLAND)
+    assert not (sb.home / ".local/share/gnome-shell").exists()
+    assert sb.calls("gnome-extensions disable") == []
+
+
 def _fake_python(sb: Sandbox, missing: str) -> dict[str, str]:
     """A system python that has the right version but lacks some GI modules."""
     fake = sb.tmp / "fakepy"
@@ -392,11 +455,11 @@ def test_old_python_is_refused(sb):
     assert p.returncode != 0 and "3.10" in p.stderr and tree(sb.home) == {}
 
 
-def test_python_314_is_refused_with_a_glance_message(sb):
-    fake = sb.tmp / "py314"
-    _script(fake, 'case "$2" in *version_info*) echo 3.14; exit 1;; esac\nexit 0\n')
+def test_python_315_is_refused_with_a_glance_message(sb):
+    fake = sb.tmp / "py315"
+    _script(fake, 'case "$2" in *version_info*) echo 3.15; exit 1;; esac\nexit 0\n')
     p = sb.run("install.sh", env={"GLANCE_SYSTEM_PYTHON": str(fake)})
-    assert p.returncode != 0 and "3.13" in p.stderr and "3.14" in p.stderr
+    assert p.returncode != 0 and "3.14" in p.stderr and "3.15" in p.stderr
     assert tree(sb.home) == {}
 
 
@@ -765,7 +828,7 @@ def test_unsupported_session_exits_78(tmp_path, session):
            "GDK_BACKEND": "wayland", **session}
     p = subprocess.run([sys.executable, "-m", "glance.daemon.main"], env=env, check=False,
                        capture_output=True, timeout=60)
-    assert p.returncode == 78 and b"X11" in p.stderr
+    assert p.returncode == 78 and b"X11" in p.stderr and b"GNOME" in p.stderr
 
 
 @pytest.mark.parametrize("script", ["install.sh", "uninstall.sh"])

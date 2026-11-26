@@ -9,7 +9,8 @@ from typing import Any
 from glance.log import log_event
 
 SESSION_EXIT = 78  # packaging/glance.service: RestartPreventExitStatus=78
-NEEDS_X11 = "glance: needs an X11 session; not starting"
+NEEDS_X11 = ("glance: needs an X11 session or GNOME on Wayland; not starting "
+             "(KDE, Sway and other Wayland desktops are not supported yet)")
 
 RunBg = Callable[[Callable[[], Any], Callable[[Any], None]], None]
 
@@ -35,8 +36,11 @@ def thread_runner(post: Callable[[Callable[[], None]], None], name: str) -> RunB
 
 
 def session_problem(env: Mapping[str, str]) -> str | None:
-    """Why glanced must not start in this session (Wayland, no display); None when it can."""
-    if env.get("XDG_SESSION_TYPE") != "x11" or not env.get("DISPLAY"):
+    """Why glanced must not start in this session (a Wayland desktop other than GNOME, no
+    display); None when it can."""
+    from glance.session import session_kind
+
+    if session_kind(env) is None:
         return NEEDS_X11
     return None
 
