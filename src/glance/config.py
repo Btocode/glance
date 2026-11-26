@@ -55,6 +55,7 @@ class GeneralCfg:
     min_chars_analyze: int = 25
     max_field_chars: int = 20000
     autocomplete_idle_ms: int = 600  # pause before a live completion is asked for
+    check_updates: bool = True  # once a day: ask github.com for the latest version
     hotkeys: dict[str, str] = field(default_factory=_default_hotkeys)
 
 

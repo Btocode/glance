@@ -53,6 +53,7 @@ class DoctorEnv:
     which: Callable[[str], str | None]
     healths: Callable[[], dict[str, bool]] = _no_healths  # backend name -> signed in
     install_override: Callable[[str], bool] | None = None  # tests inject; default: real override
+    update_status: Callable[[], str] = lambda: "unknown"  # default_env: the real lookup
     apps: tuple[str, ...] = field(default_factory=tuple)  # --app ids; set by apply_fixes
 
     @property
@@ -505,8 +506,23 @@ class ClipboardHistory(_Base):
         return self.ok("no clipboard-history extension")
 
 
+class Updates(_Base):
+    id, title = "updates", "Updates"
+
+    def run(self, env):
+        try:
+            status = env.update_status()
+        except Exception:  # noqa: BLE001 - never fail doctor over a version lookup
+            status = "unknown"
+        if status == "current":
+            return self.ok("up to date")
+        if status == "available":
+            return self.result("warn", "update available", "run `glance update`")
+        return self.ok("could not check (offline or not a git install)")
+
+
 CHECKS: list[Check] = [
     Session(), A11y(), PythonDeps(), Harper(), Tray(), ConfigCheck(), Daemon(), Hotkeys(),
     DesktopFlags(), RunningFlags(), Firefox(), OtherElectron(), Backend(), Wrapper(),
-    PathCheck(), Autostart(), ClipboardHistory(),
+    PathCheck(), Autostart(), ClipboardHistory(), Updates(),
 ]

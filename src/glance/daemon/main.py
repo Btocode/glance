@@ -28,10 +28,13 @@ from glance.daemon.wiring import (
     hotkeys_status,
     session_problem,
     set_suggestions,
+    thread_runner,
     tone_hotkeys,
 )
 from glance.log import log_event
+from glance.paths import update_log_path
 from glance.ui.ports import NotifierPort
+from glance.update import CHECK_EVERY_S, CHECK_FIRST_S, UpdateState, launch_update
 
 POLL_CHILDREN_MS = 100  # restart <= 2 s: a death is seen within 100 ms
 HARPER_MISSING = ("Glance: the grammar checker is not installed",
@@ -447,7 +450,8 @@ def main(argv: list[str] | None = None) -> int:
                    on_setup=lambda: setup.open(),
                    on_auto_suggest=lambda on: set_suggestions(
                        update_config, config_path(), on, watcher.reload),
-                   auto_suggest=watcher.current.ui.suggestions == "auto")
+                   auto_suggest=watcher.current.ui.suggestions == "auto",
+                   on_update=lambda: launch_update(notifier.notify, update_log_path()))
     if not tray.available:
         print(f"glanced: no tray icon; to get one run: {INSTALL_HINT}", file=sys.stderr)
 
@@ -680,6 +684,22 @@ def main(argv: list[str] | None = None) -> int:
         capture_server.stop()
         hotkeys.close()
         return 1
+    update_state = UpdateState()
+    run_update_check = thread_runner(clock.post, "glance-update-check")
+
+    def update_check() -> bool:  # main loop; the lookup runs on its own thread
+        if watcher.current.general.check_updates:
+            run_update_check(update_state.refresh,
+                             lambda _s: tray.set_update_available(update_state.status == "available"))
+        return GLib.SOURCE_CONTINUE
+
+    def first_update_check() -> bool:
+        update_check()
+        GLib.timeout_add_seconds(CHECK_EVERY_S, update_check)
+        return GLib.SOURCE_REMOVE
+
+    GLib.timeout_add_seconds(CHECK_FIRST_S, first_update_check)
+    controller.extra_status.append(lambda: {"update": update_state.status})
     rebind()
     session_events.start()
     watcher.start()

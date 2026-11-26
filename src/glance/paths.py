@@ -34,6 +34,15 @@ def data_dir(environ: Mapping[str, str] | None = None, home: Path | None = None)
     return Path(base) / "glance"
 
 
+def state_dir(environ: Mapping[str, str] | None = None) -> Path:
+    env = os.environ if environ is None else environ
+    return Path(env.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")) / "glance"
+
+
+def update_log_path() -> Path:
+    return state_dir() / "update.log"
+
+
 def dictionary_path() -> Path:
     return data_dir() / "dictionary.txt"
 

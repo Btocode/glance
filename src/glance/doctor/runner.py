@@ -67,6 +67,7 @@ def to_json(results: Sequence[CheckResult]) -> list[dict]:
 def default_env() -> DoctorEnv:
     """The real thing: the user's home, environment, processes and glanced."""
     from glance.cli import _request
+    from glance.update import update_status
 
     def run(argv: list[str], timeout: float | None = None) -> tuple[int, str]:
         try:
@@ -96,4 +97,4 @@ def default_env() -> DoctorEnv:
     dirs = environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
     environ["XDG_DATA_DIRS"] = dirs + ":/var/lib/snapd/desktop"  # snap launchers live there
     return DoctorEnv(home=Path.home(), environ=environ, run=run, procs=procs,
-                     ctl=_request, which=which)
+                     ctl=_request, which=which, update_status=update_status)

@@ -75,7 +75,8 @@ class GtkTray:
                  on_choose: Callable[[str], None] = lambda name: None,
                  on_setup: Callable[[], None] = lambda: None,
                  on_auto_suggest: Callable[[bool], None] = lambda on: None,
-                 auto_suggest: bool = False) -> None:
+                 auto_suggest: bool = False,
+                 on_update: Callable[[], None] = lambda: None) -> None:
         self._indicator = None
         self._on_auto_suggest = on_auto_suggest
         self._syncing = False
@@ -108,15 +109,23 @@ class GtkTray:
         self._auto = Gtk.CheckMenuItem(label="Show suggestions automatically")
         self._auto.set_active(auto_suggest)
         self._auto.connect("toggled", self._auto_toggled)
-        for item in (self._headline, Gtk.SeparatorMenuItem(), self._backends.item,
+        self._update = Gtk.MenuItem(label="Update available \u2014 Update now")
+        self._update.connect("activate", lambda _i: on_update())
+        for item in (self._headline, self._update, Gtk.SeparatorMenuItem(), self._backends.item,
                      self._auto, self._toggle, quit_item):
             menu.append(item)
         menu.show_all()
+        self._update.hide()
         self._indicator.set_menu(menu)
 
     @property
     def available(self) -> bool:
         return self._indicator is not None
+
+    def set_update_available(self, available: bool) -> None:
+        """Show or hide "Update available — Update now" (main thread)."""
+        if self._indicator is not None:
+            self._update.set_visible(available)
 
     def set_state(self, state: str) -> None:
         if self._indicator is None:

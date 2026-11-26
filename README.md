@@ -167,6 +167,13 @@ Running it again is safe.
 
 </details>
 
+### Updating
+
+Re-run the install line above, or run `glance update` (it runs that same installer). Your config,
+dictionary, API keys and the Ctrl+G wrapper are kept. `glance update --check` only says whether a
+newer version exists (exit 10 if so). Glance also checks once a day and, when an update is
+available, adds "Update available — Update now" to the tray menu.
+
 ### Doctor
 
 `glance doctor` checks the session, system packages, grammar engine, daemon, hotkeys, app
@@ -309,6 +316,7 @@ glance pause [30m|2h|45s]        # switch checking off (no duration: until resum
 glance resume                    # and on again
 glance rewrite --tone friendlier < draft.txt   # stdin to stdout through the chosen AI
 glance profile [show|set NAME|clear]           # the audience profile of the field you are in
+glance update [--check]          # update Glance; --check only compares versions
 ```
 
 `status`, `pause` and `resume` print `glanced is not running` and exit 3 when the daemon is
@@ -330,6 +338,8 @@ Claude Code then opens your prompt in Glance's editor window.
 Settings live in `~/.config/glance/config.toml`; Glance picks up changes while it runs.
 
 ```toml
+check_updates = true             # false: never look for a newer version
+
 [general.hotkeys]               # only the keys you set change; the rest keep their defaults
 panel = "Super+Alt+space"
 fix_all = "Super+Alt+f"
@@ -396,6 +406,8 @@ flowchart LR
 - Grammar checks run on your computer. Nothing is sent to an AI until you connect one.
 - Text sent to any backend is redacted first (keys, tokens, cards, private keys).
 - An API key lives in the system keyring (libsecret) only, never in the config or the logs.
+- Once a day Glance asks github.com for the latest version (`git ls-remote`); nothing else is
+  sent. Turn it off with `check_updates = false` under `[general]`.
 - `glance status` and the logs never contain any of your text.
 - To make Glance never read an app, add its window class to `privacy.app_denylist` (setting the
   list replaces the built-in one, which already holds password managers and remote-desktop

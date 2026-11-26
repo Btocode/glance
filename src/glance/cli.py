@@ -8,6 +8,7 @@
     glance backend list|use NAME|test [NAME]|set-key [--provider P]|model NAME [MODEL|--default]
     glance rewrite --tone TONE      stdin -> stdout, through the chosen AI
     glance profile [show|set NAME|clear]   the focused field's audience
+    glance update [--check]     run the published installer; --check only compares versions
 """
 
 from __future__ import annotations
@@ -284,6 +285,16 @@ def _doctor(args: argparse.Namespace) -> int:
     return exit_code(results)
 
 
+def _update(check_only: bool) -> int:
+    from glance import update
+
+    if not check_only:
+        return update.run_installer()
+    line, code = update.report(*update.check())
+    print(line)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="glance")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -322,6 +333,9 @@ def main(argv: list[str] | None = None) -> int:
     pr = sub.add_parser("profile", help="the focused field's audience profile")
     pr.add_argument("action", nargs="?", default="show", choices=["show", "set", "clear"])
     pr.add_argument("name", nargs="?")
+    up = sub.add_parser("update", help="update Glance by re-running the installer")
+    up.add_argument("--check", action="store_true",
+                    help="only say whether an update exists (exit 10 if so)")
     args = ap.parse_args(argv)
     if args.cmd in ("status", "pause", "resume"):
         try:
@@ -345,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
         if (args.action == "set") != (args.name is not None):
             ap.error("usage: glance profile [show | set NAME | clear]")
         return _profile(args.action, args.name)
+    if args.cmd == "update":
+        return _update(args.check)
     if args.cmd == "doctor":
         return _doctor(args)
     if args.cmd == "wrapper":

@@ -98,7 +98,7 @@ try:  # loaded in the parent: the child between fork and exec must only make one
     import ctypes
 
     _PRCTL = ctypes.CDLL(None, use_errno=True).prctl
-except Exception:  # noqa: BLE001, S110 - not Linux / no libc: idle processes just outlive a kill -9
+except Exception:  # noqa: BLE001 - not Linux / no libc: idle processes just outlive a kill -9
     _PRCTL = None
 
 
