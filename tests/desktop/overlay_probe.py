@@ -3,9 +3,10 @@
     overlay_probe.py [--shots DIR]
 
 Run by tests/test_xvfb.py against a private Xvfb server. It clicks with XTEST, so never
-point it at a display somebody is using. With --shots it saves the status icon in each state,
-the strip opened from it, the collapsed strip and the open drawer, light and dark, as PNGs in
-DIR.
+point it at a display somebody is using. With --shots it saves every piece in each state, light and dark, as
+v2-<state>-<theme>.png in DIR: the status icon (idle, working, ready, tone, muted), the strip,
+the strip a muted icon opens, the hover menu, the assistant panel, select-anything's panel,
+the ghost text and the "Keyboard shortcuts" window.
 """
 import argparse
 import json
@@ -24,16 +25,21 @@ from gi.repository import Gdk, GLib, Gtk
 from Xlib import X, display
 from Xlib.ext import xtest
 
+from glance.config import GeneralCfg
 from glance.grammar.issues import Issue
 from glance.protocol import Rect
+from glance.ui.ghost_gtk import GtkGhost
 from glance.ui.hover_menu import hover_menu
 from glance.ui.overlay_gtk import GAP, GtkOverlay, button_text
 from glance.ui.panel_model import PanelView, ToneChip, build_panel
 from glance.ui.placement import Anchor
+from glance.ui.shortcut_table import glance_shortcuts
+from glance.ui.shortcuts_gtk import ShortcutsWindow
 from glance.ui.status_model import NO_AI_LINE, StatusState, StatusView
 from glance.ui.strip_model import StripView, strip_fix
 
 TYPED = "hey team i think its fine to ship friday but we needs the tests fixed asap"
+GHOST_TYPED = "Hey team, I think it's fine to ship Friday"  # the ghost text's shot
 
 
 def _issue(word: str, repl: str, rule: str, safe: bool = True, alts: tuple = ()) -> Issue:
@@ -62,6 +68,9 @@ CHIPS = (ToneChip("friendlier", "Friendlier", 1, "Could someone pick this up? Th
                                                      None, "loading"),
          ToneChip("custom", "Rewrite as…", None))
 ROWS = build_panel(TYPED, ISSUES).issues
+SELECTION = PanelView(mode="selection", tone_chips=CHIPS, issues=ROWS[:2],
+                      banner="Copy the rewrite instead.", can_paste=True,
+                      profile_label="Email")
 DRAWER = PanelView(tone="Blunt", tone_reason="curt for a channel", tone_chips=CHIPS,
                    issues=ROWS, can_fix_all=True, profile_label="Team channel",
                    profiles=(("team_channel", "Team channel"), ("email", "Email")))
@@ -94,7 +103,8 @@ def walk(widget: Gtk.Widget) -> list[Gtk.Widget]:
 
 def find(window: Gtk.Window, text: str) -> Gtk.Button | None:
     for b in buttons(window):
-        if button_text(b) == text or button_text(b).startswith(text + " |"):
+        parts = button_text(b).split(" | ")
+        if button_text(b) == text or parts[0] == text or parts[-1] == text:
             return b
     return None
 
@@ -119,15 +129,25 @@ class scenery:
         label.set_margin_start(30)
         label.set_margin_top(20)
         label.set_valign(Gtk.Align.START)
+        self.label = label
         self.field.add(label)
         self.dark(False)
         for w in (self.page, self.field):
             w.show_all()  # above the focus holder, below the overlay: clicks pass through
             w.get_window().input_shape_combine_region(cairo.Region(), 0, 0)
 
+    def text_end(self) -> tuple[int, int, int]:
+        """(x, y, h) on the screen of the caret after the field's last character."""
+        layout = self.label.get_layout()
+        ox, oy = self.label.get_layout_offsets()
+        pos = layout.index_to_pos(len(self.label.get_text().encode()))
+        f = ANCHOR.field
+        k = 1024  # Pango units
+        return (f.x + ox + (pos.x + pos.width) // k, f.y + oy + pos.y // k, pos.height // k)
+
     def dark(self, on: bool) -> None:
-        page, box, ink, line = (("#2b2e2d", "#1e2120", "#e8ecea", "#3a403e") if on else
-                                ("#f4f5f2", "#ffffff", "#17191c", "#dfe3de"))
+        page, box, ink, line = (("#0f141a", "#1b222c", "#e6edf3", "#2a3340") if on else
+                                ("#eef1f4", "#ffffff", "#17191c", "#d8dee4"))
         self.css.load_from_data(f"""
             #page {{ background-color: {page}; }}
             #field {{ background-color: {box}; border: 1px solid {line}; }}
@@ -192,16 +212,29 @@ def main() -> int:
     def real(window: Gtk.Window) -> list[int]:
         return [*window.get_position(), *window.get_size()]
 
+    def grab(name: str, rects: list, pad: int = 24) -> None:
+        """The screen around `rects` ((x, y, w, h) each) as DIR/<name>.png."""
+        if not args.shots:
+            return
+        rects = [r for r in rects if r]
+        x0 = max(0, min(r[0] for r in rects) - pad)
+        y0 = max(0, min(r[1] for r in rects) - pad)
+        x1 = min(1280, max(r[0] + r[2] for r in rects) + pad)
+        y1 = min(800, max(r[1] + r[3] for r in rects) + pad)
+        pix = Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), x0, y0,
+                                         x1 - x0, y1 - y0)
+        pix.savev(str(Path(args.shots) / f"{name}.png"), "png", [], [])
+
+    def field() -> tuple:
+        f = ANCHOR.field
+        return (f.x, f.y, f.w, f.h)
+
     def shot(name: str) -> None:
-        if args.shots:
-            g = overlay.strip_geometry() or (0, 0, 1, 1)
-            p = overlay.panel_geometry()
-            x0, y0 = g[0] - 40, g[1] - 70
-            x1 = max(g[0] + g[2], p[0] + p[2] if p else 0) + 40
-            y1 = max(g[1] + g[3], p[1] + p[3] if p else 0) + 30
-            pix = Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), x0, y0,
-                                             x1 - x0, y1 - y0)
-            pix.savev(str(Path(args.shots) / f"{name}.png"), "png", [], [])
+        """The field and whatever of the overlay is up under it."""
+        xtest.fake_input(d, X.MotionNotify, x=5, y=5)  # no button hovered
+        d.sync()
+        pump(0.2)
+        grab(name, [field(), overlay.strip_geometry(), overlay.panel_geometry()])
 
     overlay._theme.force(False)
     page = scenery()
@@ -262,39 +295,65 @@ def main() -> int:
                           overlay._spin is not None]
     holder_clicks()
 
+    def selection_shot(theme: str) -> None:
+        overlay.hide_panel()
+        overlay.show_panel(SELECTION, 640, 160)
+        pump(0.4)
+        grab(f"v2-selection-{theme}", [overlay.panel_geometry()], pad=16)
+
     def icon_shots(theme: str) -> None:
-        """Each icon state, then the strip opened from it."""
+        """Each icon state, the strip a muted icon opens and the hover menu."""
         for name, view in (("idle", StatusView(StatusState.IDLE)),
                            ("working", StatusView(StatusState.WORKING, spin=True)),
-                           ("ready", StatusView(StatusState.READY, 3)),
+                           ("ready", StatusView(StatusState.READY, 6)),
                            ("tone", StatusView(StatusState.READY)),
                            ("muted", StatusView(StatusState.MUTED, message=NO_AI_LINE))):
             overlay.show_status(view, ANCHOR)
             pump(0.35)
-            icon_shot(f"status-{name}-{theme}")
-        overlay.show_status(StatusView(StatusState.READY, STRIP.n_fixes), ANCHOR)
-        overlay.show_strip(replace(STRIP, on_demand=True), ANCHOR)
-        pump(0.4)
-        icon_shot(f"status-strip-{theme}", strip=True)
+            icon_shot(f"v2-icon-{name}-{theme}")
         overlay.show_strip(StripView(note=NO_AI_LINE, on_demand=True), ANCHOR)
         overlay.show_status(StatusView(StatusState.MUTED, message=NO_AI_LINE), ANCHOR)
         pump(0.4)
-        icon_shot(f"status-muted-strip-{theme}", strip=True)
+        shot(f"v2-muted-strip-{theme}")
         overlay.hide_strip()
+        overlay.show_status(StatusView(StatusState.READY, 6), ANCHOR)
+        pump(0.3)
+        ix, iy, iw, ih = overlay.status_geometry()
+        xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
+        d.sync()
+        pump(0.7)
+        menu = [*overlay._menu.get_position(), *overlay._menu.get_size()] \
+            if overlay._menu.get_visible() else None
+        grab(f"v2-menu-{theme}", [field(), menu])
+        xtest.fake_input(d, X.MotionNotify, x=5, y=5)
+        d.sync()
+        pump(0.7)
         overlay.hide_status()
         pump(0.2)
 
-    def icon_shot(name: str, strip: bool = False) -> None:
-        if not args.shots:
-            return
+    def icon_shot(name: str) -> None:
         f = ANCHOR.field
-        x0, y0 = (f.x - 20, f.y - 20) if strip else (f.x + f.w - 300, f.y - 16)
-        x1 = f.x + f.w + 40
-        y1 = (max(f.y + f.h, *(g[1] + g[3] for g in [overlay.strip_geometry()] if g)) + 20
-              if strip else f.y + f.h + 16)
-        pix = Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), x0, y0,
-                                         x1 - x0, y1 - y0)
-        pix.savev(str(Path(args.shots) / f"{name}.png"), "png", [], [])
+        grab(name, [(f.x + f.w - 240, f.y, 240, 50)], pad=12)
+
+    def extra_shots(theme: str) -> None:
+        """The ghost text after the field's last word, and the shortcuts window."""
+        ghost = GtkGhost()
+        page.label.set_text(GHOST_TYPED)
+        pump(0.2)
+        x, y, h = page.text_end()
+        f = ANCHOR.field
+        ghost.show(" and we can demo it Monday", x, y, round(h * 0.81), f.x + f.w - 12 - x)
+        pump(0.4)
+        grab(f"v2-ghost-{theme}", [field(), ghost.geometry()])
+        ghost.hide()
+        page.label.set_text(TYPED)
+        win = ShortcutsWindow()
+        win.show(glance_shortcuts(GeneralCfg().hotkeys))
+        pump(0.6)
+        grab(f"v2-shortcuts-{theme}", [[*win.window.get_position(), *win.window.get_size()]],
+             pad=10)
+        win.window.destroy()
+        pump(0.2)
 
     icon_shots("light")
 
@@ -310,12 +369,15 @@ def main() -> int:
                         for w in (overlay.status_window, overlay.strip_window,
                                   overlay.panel_window)]
     # theme: light unless told otherwise
-    shot("strip-collapsed-light")
+    overlay.show_status(StatusView(StatusState.READY, STRIP.n_fixes), ANCHOR)
+    pump(0.3)
+    shot("v2-strip-light")
+    overlay.hide_status()
     sx, sy, _sw, sh = overlay.strip_geometry()
     holder_clicks()
     click(sx + 60, sy + sh // 2)  # on the sentence: not a button, so it goes through
     out["click_through_sentence"] = holder_clicks()
-    press(overlay.strip_window, "Use  Alt+⏎")
+    press(overlay.strip_window, "Alt+Enter")
     press(overlay.strip_window, "⋯")
     out["clicks_on_strip_reach_holder"] = holder_clicks()
     out["focus_after_strip_clicks"] = focused()
@@ -349,16 +411,15 @@ def main() -> int:
     overlay.show_strip(StripView(STRIP.segments, STRIP.n_fixes, expanded=True), ANCHOR)
     overlay.show_panel(DRAWER, 0, 0, anchor=ANCHOR)
     pump(0.5)
-    out["strip_open"] = list(overlay.strip_geometry())
+    out["strip_open"] = overlay.strip_geometry()  # the panel shows the text itself
     out["panel"] = real(overlay.panel_window)
     out["panel_reported"] = list(overlay.panel_geometry())
     out["panel_override_redirect"] = override_redirect(overlay.panel_window)
     out["focus_with_panel"] = focused()
     out["drawer_buttons"] = [button_text(b) for b in buttons(overlay.panel_window)]
-    shot("strip-expanded-light")
-    for text in ("Shorter", "Rewrite as…", "Fix all", "hey → Hey", "its → it's"):
-        press(overlay.panel_window, {"Rewrite as…": "e.g. make it a bullet list"}.get(
-            text, text))
+    shot("v2-panel-light")
+    for text in ("Shorter", "Rewrite as…", "Fix All", "hey → Hey", "its → it's"):
+        press(overlay.panel_window, text)
     press(overlay.panel_window, "6 fixes")  # every fix, with its other choices
     pump(0.3)
     out["details_buttons"] = [button_text(b) for b in buttons(overlay.panel_window)]
@@ -387,30 +448,34 @@ def main() -> int:
     overlay.hide_panel()
     overlay.show_strip(STRIP, ANCHOR)
     pump(0.4)
-    shot("strip-collapsed-dark")
+    overlay.show_status(StatusView(StatusState.READY, STRIP.n_fixes), ANCHOR)
+    pump(0.3)
+    shot("v2-strip-dark")
+    overlay.hide_status()
     overlay.show_strip(StripView(STRIP.segments, STRIP.n_fixes, expanded=True), ANCHOR)
     overlay.show_panel(DRAWER, 0, 0, anchor=ANCHOR)
     pump(0.5)
     out["dark_panel"] = overlay.panel_geometry()
     out["dark_strip"] = overlay.strip_geometry()
-    shot("strip-expanded-dark")
+    shot("v2-panel-dark")
     overlay.hide_panel()
     overlay.hide_strip()
     icon_shots("dark")
+    extra_shots("dark")
+    selection_shot("dark")
+    overlay.hide_panel()
     overlay._theme.force(False)
     page.dark(False)
     pump(0.3)
+    extra_shots("light")
 
     # ---- select-anything's panel, at a point
-    view = PanelView(mode="selection", tone_chips=CHIPS[:4], issues=ROWS[:2],
-                     banner="Copy the rewrite instead.", can_paste=True,
-                     profile_label="Email")
     overlay.hide_panel()
-    overlay.show_panel(view, 5000, 5000)
+    overlay.show_panel(SELECTION, 5000, 5000)
     pump(0.4)
     out["selection"] = real(overlay.panel_window)
     out["selection_buttons"] = [button_text(b) for b in buttons(overlay.panel_window)]
-    shot("selection-light")
+    selection_shot("light")
     overlay.show_panel(PanelView(), 100, 100, anchor=ANCHOR)  # nothing at all to say
     pump(0.3)
     out["empty_panel"] = real(overlay.panel_window)

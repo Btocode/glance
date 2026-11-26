@@ -10,6 +10,7 @@ from glance.log import log_event
 from glance.ui.onboarding_model import ORDER, TITLES, BackendRow, headline
 
 INSTALL_HINT = "sudo apt install gir1.2-ayatanaappindicator3-0.1"
+SHORTCUTS_LABEL = "Keyboard shortcuts…"
 # The brand mark as a flat white tray icon (packaging/icons/symbolic in the checkout).
 _BRAND_ICONS = Path(__file__).resolve().parents[3] / "packaging" / "icons" / "symbolic"
 # state -> (icon name, line shown at the top of the menu)
@@ -78,7 +79,8 @@ class GtkTray:
 
     Menu: status line, "AI backend ▸", "Check: on shortcut / while typing" (two radio items:
     `[general] check`), "Show suggestions automatically" (a check item: on is
-    `[ui] suggestions = "auto"`), Pause/Resume, Quit. `set_backends` takes rows built by the
+    `[ui] suggestions = "auto"`), "Keyboard shortcuts…" (a window listing them), Pause/Resume,
+    Quit. `set_backends` takes rows built by the
     caller (never a blocking health check here)."""
 
     def __init__(self, on_pause: Callable[[], None], on_resume: Callable[[], None],
@@ -91,7 +93,8 @@ class GtkTray:
                  on_usage_open: Callable[[], None] = lambda: None,
                  on_usage_details: Callable[[], None] = lambda: None,
                  on_check_mode: Callable[[str], None] = lambda mode: None,
-                 check_mode: str = "shortcut", check_hint: str = "") -> None:
+                 check_mode: str = "shortcut", check_hint: str = "",
+                 on_shortcuts: Callable[[], None] = lambda: None) -> None:
         self._indicator = None
         self._on_check_mode = on_check_mode
         self._check_items: dict[str, Any] = {}
@@ -149,9 +152,11 @@ class GtkTray:
             refresh.connect("show" if refresh is menu else "select", lambda _w: on_usage_open())
         self._on_usage_details, self._gtk = on_usage_details, Gtk
         self.set_usage(())
+        shortcuts = Gtk.MenuItem(label=SHORTCUTS_LABEL)
+        shortcuts.connect("activate", lambda _i: on_shortcuts())
         for item in (self._headline, self._update, Gtk.SeparatorMenuItem(), self._backends.item,
                      self._usage_item, Gtk.SeparatorMenuItem(), *check_items,
-                     self._auto, Gtk.SeparatorMenuItem(), self._toggle, quit_item):
+                     self._auto, shortcuts, Gtk.SeparatorMenuItem(), self._toggle, quit_item):
             menu.append(item)
         menu.show_all()
         self._update.hide()

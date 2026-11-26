@@ -17,7 +17,15 @@ from pathlib import Path
 
 import pytest
 
-from tests.wayland.harness import TYPING, Glance, GtkApp, Shell, private_root, wait_for
+from tests.wayland.harness import (
+    TYPING,
+    Glance,
+    GtkApp,
+    Shell,
+    gsettings,
+    private_root,
+    wait_for,
+)
 
 pytestmark = [
     pytest.mark.wayland,
@@ -52,9 +60,20 @@ def desk():
 
 
 def shot(shell: Shell, name: str) -> None:
-    if SHOTS:
-        Path(SHOTS).mkdir(parents=True, exist_ok=True)
-        shell.screenshot(Path(SHOTS) / f"wayland-{name}.png")
+    """With $GLANCE_WAYLAND_SHOTS: the screen with the private session switched to light
+    (wayland-<name>-light.png) and to dark (wayland-<name>-dark.png), then set back."""
+    if not SHOTS:
+        return
+    Path(SHOTS).mkdir(parents=True, exist_ok=True)
+    for theme, scheme, gtk in (("light", "prefer-light", "Adwaita"),
+                               ("dark", "prefer-dark", "Adwaita-dark")):
+        gsettings("set", "org.gnome.desktop.interface", "color-scheme", scheme)
+        gsettings("set", "org.gnome.desktop.interface", "gtk-theme", gtk)
+        time.sleep(1.0)  # glanced follows it and sends the scene again
+        shell.screenshot(Path(SHOTS) / f"wayland-{name}-{theme}.png")
+    gsettings("set", "org.gnome.desktop.interface", "color-scheme", "default")
+    gsettings("reset", "org.gnome.desktop.interface", "gtk-theme")
+    time.sleep(1.0)
 
 
 def target_still_focused(shell: Shell, app: GtkApp) -> bool:

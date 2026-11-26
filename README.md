@@ -25,8 +25,8 @@ Offline grammar fixes, in place, in any app. No AI required.
 <br>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-expanded-dark.png">
-  <img alt="Glance's suggestion strip under a chat field: the corrected sentence with a Use button, and below it tone rewrites (Friendlier, More direct, Shorter, Professional), a Rewrite as… box and the list of fixes." src="docs/assets/screenshots/strip-expanded-light.png" width="740">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
+  <img alt="The Glance Assistant panel under a typed message: the corrected text under Suggested with each change tinted green and an Apply (Alt+Enter) button, four tone chips (Friendlier, More direct, Shorter, Professional) with their number keys, a Rewrite as… box, and the line of fixes with Fix All." src="docs/assets/screenshots/panel-light.png" width="708">
 </picture>
 
 </div>
@@ -54,15 +54,15 @@ editor, Claude Code in a terminal) and quietly shows the corrected text right un
 **Check on a shortcut**<br>
 Glance stays quiet while you type. Press <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> (⌃⌥G on a
 Mac) or click the Glance icon: a strip under the field shows the whole message corrected.
-<kbd>Alt</kbd>+<kbd>Enter</kbd> (or its **Use** button) puts the corrected text in. Prefer
+<kbd>Alt</kbd>+<kbd>Enter</kbd> (or a click on that chip in the strip) puts the corrected text in. Prefer
 checks as you type? Switch to **Check: while typing** in the tray menu.
 
 </td>
 <td width="50%">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-collapsed-dark.png">
-  <img alt="The collapsed strip: the corrected sentence with a Use Alt+Enter button." src="docs/assets/screenshots/strip-collapsed-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-dark.png">
+  <img alt="The suggestion strip under the field: the Glance mark, the corrected sentence with the fixes in green, an Alt+Enter chip and a ⋯ button; the Glance icon with a 6 badge at the end of the line." src="docs/assets/screenshots/strip-light.png">
 </picture>
 
 </td>
@@ -71,16 +71,17 @@ checks as you type? Switch to **Check: while typing** in the tray menu.
 <td valign="top">
 
 **Tone and rewrites**<br>
-"⋯" (or <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>) opens the tone rewrites,
+"⋯" (or <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>) opens the Glance Assistant panel:
+the corrected text with every change tinted, the tone chips (<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd>),
 "Rewrite as…" and the list of fixes. The tone chips follow the audience profile of the field
-you are in. Needs a connected AI.
+you are in. Tones need a connected AI.
 
 </td>
 <td>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-expanded-dark.png">
-  <img alt="The expanded strip with four tone rewrites and the list of fixes." src="docs/assets/screenshots/strip-expanded-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/panel-dark.png">
+  <img alt="The Glance Assistant panel: the suggested text with its changes tinted, Apply (Alt+Enter), four tone chips with number keys, Rewrite as… and the fixes with Fix All." src="docs/assets/screenshots/panel-light.png">
 </picture>
 
 </td>
@@ -95,14 +96,35 @@ Copy is the default; "Paste over selection" is optional and absent in terminals.
 </td>
 <td>
 
-<img alt="The select-anything panel: tone rewrites for the selected text, its grammar issues, and Copy rewrite / Paste over selection buttons." src="docs/assets/screenshots/selection-light.png">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/selection-dark.png">
+  <img alt="The select-anything panel: Glance Assistant for the selected text, four tone chips, Rewrite as…, a note to copy the rewrite, the text's grammar issues, and Paste over selection / Copy rewrite buttons." src="docs/assets/screenshots/selection-light.png">
+</picture>
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Ghost-text autocomplete**<br>
+<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> asks for a completion; it appears after the
+caret in green italics, and <kbd>Tab</kbd> takes it.
+
+</td>
+<td>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/ghost-dark.png">
+  <img alt="A completion after the caret in green italics, with a small Tab key hint after it." src="docs/assets/screenshots/ghost-light.png">
+</picture>
 
 </td>
 </tr>
 </table>
 
-Also: ghost-text autocomplete, a Ctrl+G editor window for [Claude Code](#claude-code-ctrlg), a
-tray icon, and `glance doctor`, which checks everything and fixes what Glance owns.
+Also: a Ctrl+G editor window for [Claude Code](#claude-code-ctrlg), a tray icon (its
+**Keyboard shortcuts…** lists every chord), and `glance doctor`, which checks everything and
+fixes what Glance owns.
 
 ## Install
 
@@ -252,7 +274,7 @@ exact file to allow, for example
 3. Restart Glance: `launchctl kickstart -k gui/$(id -u)/io.github.btocode.glance`.
 
 `glance doctor --fix` opens that pane and shows macOS's own prompt. Input Monitoring is not
-needed. Glance lives in the menu bar (✦) with the same menu as the Linux tray.
+needed. Glance lives in the menu bar (the Glance mark) with the same menu as the Linux tray.
 
 **Hotkeys on a Mac.** `Super` in `config.toml` means ⌘, `Alt` ⌥, `Ctrl` ⌃. Because ⌘⌥
 chords clash with app shortcuts, the defaults on macOS are ⌃⌥ chords:
@@ -380,12 +402,12 @@ another field closes the strip. **Typing** mode is how Glance worked before: it 
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/status-ready-dark.png">
-  <img alt="The Glance icon at the end of a typed line, showing 3 fixes ready." src="docs/assets/screenshots/status-ready-light.png">
+  <img alt="The Glance icon at the end of a typed line: the Glance mark in an emerald ring with a 6 badge, six fixes ready." src="docs/assets/screenshots/status-ready-light.png">
 </picture>
 &nbsp;&nbsp;
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/status-strip-dark.png">
-  <img alt="After clicking the icon: the suggestion strip under the field with the corrected sentence and a Use Alt+Enter button." src="docs/assets/screenshots/status-strip-light.png" width="600">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/strip-dark.png">
+  <img alt="After clicking the icon: the suggestion strip under the field with the corrected sentence, an Alt+Enter chip and a ⋯ button." src="docs/assets/screenshots/strip-light.png" width="600">
 </picture>
 </p>
 
@@ -405,7 +427,13 @@ None of these is a GNOME, Ubuntu, KDE, Xfce or macOS system shortcut;
 | <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | ⌃⌥A | rewrite the selected text in any app |
 | <kbd>Esc</kbd> | Esc | close the strip and the panel |
 
-Plain <kbd>Enter</kbd> is never taken, so it still sends in chat apps.
+Plain <kbd>Enter</kbd> is never taken, so it still sends in chat apps. The tray's
+**Keyboard shortcuts…** shows the chords as they are set on this computer:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/shortcuts-dark.png">
+  <img alt="The Keyboard shortcuts window: each of Glance's chords as keycaps (Alt + Enter, Super + Alt + G, Super + Alt + Space and so on) next to what it does." src="docs/assets/screenshots/shortcuts-light.png" width="640">
+</picture>
 
 ### Command line
 
@@ -514,15 +542,20 @@ While you write in a text field, a small round Glance icon sits at the end of th
 
 | Icon | Meaning |
 |---|---|
-| Plain outline | Watching this field, nothing to suggest (in shortcut mode: ready to check) |
-| Ring (turns during an AI call) | Checking |
-| Filled, with a number | That many fixes are ready (a dot instead of a number: a tone note) |
-| Grey | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
+| The Glance mark, quiet | Watching this field, nothing to suggest (in shortcut mode: ready to check) |
+| An emerald arc (turns during an AI call) | Checking |
+| An emerald ring with a number | That many fixes are ready (an amber dot instead of a number: a tone note) |
+| Faded grey | Paused, a private field, or no AI connected (spelling and grammar fixes still work without one) |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/menu-dark.png">
+  <img alt="The icon's hover menu next to the Glance icon: Check spelling & grammar, Check tone, Rewrite…, Shorter, More professional, and Super Alt G to check as keycaps." src="docs/assets/screenshots/menu-light.png" width="640">
+</picture>
 
 Click the icon to see the corrected text (in shortcut mode the click checks first); click
 again or press <kbd>Esc</kbd> to close it. Resting the pointer on the icon opens its menu
 (not while you are typing): **Check spelling & grammar**, **Check tone**, **Rewrite…**,
-**Shorter**, **More professional**, and the check shortcut. When Glance is paused, the field is
+**Shorter**, **More professional**, and the check shortcut as keycaps. When Glance is paused, the field is
 private or no AI is connected, the menu shows why and what to do instead (**Resume**,
 **Connect an AI…**). <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens it with the rewrite options. In typing mode, to have the suggestion appear by itself instead, tick **Show suggestions automatically** in the tray menu, or set:
 

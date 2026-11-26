@@ -100,3 +100,54 @@ MAC_RESERVED: tuple[tuple[str, str], ...] = (
 )
 # Not chords, so not in the table: Globe/fn+E (emoji), double-press Fn (dictation), and
 # VoiceOver, which takes every ⌃⌥ chord as its VO key while VoiceOver is running.
+
+
+# ---------------------------------------------------------------------- Glance's own
+
+# What each of Glance's chords does, in the order the "Keyboard shortcuts" window lists them.
+GLANCE_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("use", "Apply the suggestion"),
+    ("check", "Check the field now"),
+    ("panel", "Open the panel and tones"),
+    ("fix_all", "Fix all safe grammar"),
+    ("tones", "Apply tone 1–4"),
+    ("complete", "Complete the text (ghost text)"),
+    ("accept", "Take the completion"),
+    ("selection", "Rewrite the selection in any app"),
+    ("revert", "Undo Glance's last change"),
+    ("pause", "Pause / resume"),
+    ("close", "Close the strip or panel"),
+)
+
+
+def glance_shortcuts(hotkeys: dict[str, str], use_key: str = "Alt+Return",
+                     mac: bool = False) -> list[tuple[list[str], str]]:
+    """Glance's shortcuts as (keycaps, what it does) rows for this platform: the chords as
+    configured (`[general.hotkeys]`, `[ui] use_key`); on a Mac the chords it binds there."""
+    from glance.ui.look import chord_keys
+
+    if mac:
+        from glance.platform.macos.hotkeys_mac import mac_hotkeys
+
+        hotkeys = mac_hotkeys(hotkeys)
+    rows: list[tuple[list[str], str]] = []
+    for name, what in GLANCE_ACTIONS:
+        if name == "use":
+            keys = chord_keys(use_key, mac)
+        elif name == "accept":
+            keys = ["⇥" if mac else "Tab"]
+        elif name == "close":
+            keys = ["Esc"]
+        elif name == "tones":
+            one, four = hotkeys.get("tone1", ""), hotkeys.get("tone4", "")
+            if not (one and four):
+                continue
+            keys = chord_keys(one, mac)
+            keys[-1] = f"{keys[-1]}…{chord_keys(four, mac)[-1]}"
+        else:
+            chord = hotkeys.get(name, "")
+            if not chord:
+                continue
+            keys = chord_keys(chord, mac)
+        rows.append((keys, what))
+    return rows

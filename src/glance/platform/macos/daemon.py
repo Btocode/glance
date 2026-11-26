@@ -201,7 +201,8 @@ def main(argv: list[str] | None = None) -> int:
                        update_config, config_path(), mode, watcher.reload),
                    check_mode=watcher.current.general.check,
                    check_hint=check_label(
-                       mac_hotkeys(watcher.current.general.hotkeys).get("check", ""), mac=True))
+                       mac_hotkeys(watcher.current.general.hotkeys).get("check", ""), mac=True),
+                   on_shortcuts=lambda: show_shortcuts())
 
     link = CaptureLink(clock.post)
     grammar_client = make_grammar_client(harper_bin(), dictionary_path())
@@ -269,6 +270,17 @@ def main(argv: list[str] | None = None) -> int:
             usage_window[0].show(text)
 
         run_ai(lambda: render_report(ai_supervisor.usage_report()), show)
+
+    shortcuts_window: list[Any] = []
+
+    def show_shortcuts() -> None:  # main thread: the menu's "Keyboard shortcuts…"
+        from glance.platform.macos.shortcuts import ShortcutsWindow
+        from glance.ui.shortcut_table import glance_shortcuts
+
+        if not shortcuts_window:
+            shortcuts_window.append(ShortcutsWindow())
+        cfg = watcher.current
+        shortcuts_window[0].show(glance_shortcuts(cfg.general.hotkeys, cfg.ui.use_key, mac=True))
 
     refresh_usage()
     features = attach_features(

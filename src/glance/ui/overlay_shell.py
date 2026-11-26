@@ -282,26 +282,29 @@ class ShellOverlay:
                     status["menu"] = menu_piece(self._menu)
                 placed["status"] = (x + ICON_X, y + ICON_Y, ICON, ICON)
         field_drawer = self._panel is not None and self._panel_anchor is not None
-        if (self._strip is not None or field_drawer) and anchor is not None:
+        # While the field's panel is open it shows the corrected text itself ("Suggested"):
+        # the strip is not drawn on its own then.
+        shown_strip = None if field_drawer else self._strip
+        if (shown_strip is not None or field_drawer) and anchor is not None:
             first = place_strip(anchor, 1, mons)
             if first is not None:
                 mon = next((m for m in mons if m.x <= first.x < m.x + m.w),
                            mons[0] if mons else None)
-                strip_h = self._sizes["strip_h"] if self._strip is not None else 0
+                strip_h = self._sizes["strip_h"] if shown_strip is not None else 0
                 card_w = first.w
                 card_h = 0
                 if field_drawer:
                     card_w = min(max(first.w, DRAWER_MIN_W), mon.w if mon else first.w)
                     card_h = self._sizes["panel_h"]
-                gap = GAP if self._strip is not None and field_drawer else 0
+                gap = GAP if shown_strip is not None and field_drawer else 0
                 p = place_strip(anchor, strip_h + gap + card_h, mons)
                 if p is not None:
                     if p.above:
                         card_y, strip_y = p.y, p.y + card_h + gap
                     else:
                         strip_y, card_y = p.y, p.y + strip_h + gap
-                    if self._strip is not None:
-                        strip = sc.strip_piece(self._strip, p.x, strip_y, p.w, tokens,
+                    if shown_strip is not None:
+                        strip = sc.strip_piece(shown_strip, p.x, strip_y, p.w, tokens,
                                                self._use_key(),
                                                scroll_max_h(mons, p.x, strip_y))
                         placed["strip"] = (p.x, strip_y, p.w, strip_h)
@@ -310,7 +313,11 @@ class ShellOverlay:
                         card_x = p.x
                         if mon is not None:
                             card_x = max(mon.x, min(card_x, mon.x + mon.w - card_w))
-                        panel = sc.panel_piece(self._panel, card_x, card_y, card_w, True)
+                        s = self._strip
+                        suggested = sc.suggested_piece(s, tokens, self._use_key()) \
+                            if s is not None and s.segments else None
+                        panel = sc.panel_piece(self._panel, card_x, card_y, card_w, True,
+                                               suggested, s.note if s is not None else None)
                         placed["panel"] = (card_x, card_y, card_w, card_h)
         if self._panel is not None and self._panel_anchor is None:
             x, y = clamp_to_monitor(*self._panel_point, (SEL_W, self._sizes["panel_h"]), mons)

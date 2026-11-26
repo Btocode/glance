@@ -1,8 +1,10 @@
 // The overlay: status icon, strip, drawer / select-anything panel, ghost text and the
 // "Rewrite as…" entry, rendered from the scene glanced sends. No decisions are made here:
-// what to show, the text, the colours and the places all come from Python.
+// what to show, the text, the colours (ui/theme.py's tokens), the brand mark's files, the line
+// glyphs and the places all come from Python.
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Pango from 'gi://Pango';
@@ -11,18 +13,19 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const FONT = "Inter, Cantarell, 'Noto Sans', 'DejaVu Sans', sans-serif";
+const MONO = "'JetBrains Mono', 'DejaVu Sans Mono', 'Noto Sans Mono', monospace";
 const ICON = 22;
 const ICON_X = 1, ICON_Y = 5;
 const ICON_BOX = [30, 28];
-const BADGE_C = [23, 7], BADGE_R = 6.5;
+const BADGE_C = [23, 7], BADGE_R = 7;
+const MARK_PX = 16;
+const GHOST_GAP = 6;
 const SPIN_MS = 125;
 const HOVER_MS = 350;
 // The status icon's hover menu (glance/ui/hover_menu.py: OPEN_MS, CLOSE_MS).
 const MENU_OPEN_MS = 250;
 const MENU_CLOSE_MS = 400;
 const ASK_RETURN_MS = 1500;
-const SPARKLE = [[12, 3], [13.8, 7.7], [18.5, 9.5], [13.8, 11.3], [12, 16], [10.2, 11.3],
-    [5.5, 9.5], [10.2, 7.7]];
 const LINE_FIXES = 3;
 const MAX_CHOICES = 5;
 
@@ -130,6 +133,8 @@ export class Overlay {
         this._cb = cb;
         this._scene = null;
         this._t = {};
+        this._look = {};
+        this._surfaces = new Map();  // the brand mark's PNGs, for the status icon
         this._named = new Map();
         this._keys = {status: '', strip: '', panel: '', ghost: '', menu: ''};
         this._phase = 0;
@@ -156,7 +161,7 @@ export class Overlay {
         this._menu.connect('notify::hover', () => this._menuHover());
         this._strip = new St.Bin({reactive: true});
         this._panel = new St.Bin({reactive: true});
-        this._ghost = new St.Label({reactive: false});
+        this._ghost = new St.BoxLayout({reactive: false, style: `spacing: ${GHOST_GAP}px;`});
         for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu]) {
             actor.hide();
             Main.layoutManager.addTopChrome(actor);
@@ -188,6 +193,7 @@ export class Overlay {
     render(scene) {
         this._scene = scene;
         this._t = scene.tokens || {};
+        this._look = scene.look || {};
         this._resizing = false;
         const tokensKey = JSON.stringify(this._t);
         this._renderStatus(scene.status, tokensKey);
@@ -261,7 +267,11 @@ export class Overlay {
     // ------------------------------------------------------------------ styles
 
     _font(px = 14, extra = '') {
-        return `font-family: ${FONT}; font-size: ${px}px; ${extra}`;
+        return `font-family: ${this._look?.font ?? FONT}; font-size: ${px}px; ${extra}`;
+    }
+
+    _mono(px = 11, extra = '') {
+        return `font-family: ${this._look?.mono ?? MONO}; font-size: ${px}px; ${extra}`;
     }
 
     _label(text, colour, px = 13, extra = '', wrap = true) {
@@ -278,21 +288,43 @@ export class Overlay {
         return label;
     }
 
+    // A keycap: Alt+Enter, Esc, 1-4, the return key, Tab.
+    _kbd(text) {
+        const t = this._t;
+        const label = new St.Label({text, y_align: Clutter.ActorAlign.CENTER});
+        label.style = this._mono(11, `color: ${t.keycap_text}; background-color: ${t.keycap_bg}; ` +
+            `border: 1px solid ${t.keycap_border}; border-radius: 4px; padding: 0 5px;`);
+        return label;
+    }
+
+    _keycaps(keys) {
+        const row = hbox({style: 'spacing: 4px;', y_align: Clutter.ActorAlign.CENTER});
+        for (const key of keys)
+            row.add_child(this._kbd(key));
+        return row;
+    }
+
     _button(label, kind, onClick, name = null) {
         const t = this._t;
         const styles = {
-            primary: [`background-color: ${t.accent}; color: ${t.on_accent}; border-radius: 7px; ` +
-                'padding: 6px 10px; font-weight: 600;', `background-color: ${t.accent_hover};`, 12],
-            quiet: [`background-color: transparent; color: ${t.body}; border-radius: 7px; padding: 4px 8px;`,
-                `background-color: ${t.hover};`, 14],
+            primary: [`background-color: ${t.accent_fill}; color: ${t.on_accent}; border-radius: 7px; ` +
+                'padding: 7px 14px; font-weight: 600;', `background-color: ${t.accent_fill_hover};`, 13],
+            use: [`background-color: ${t.highlight_rgba}; color: ${t.accent}; border: 1px solid ` +
+                `${t.strip_border}; border-radius: 5px; padding: 2px 7px; font-weight: 600; ` +
+                `font-family: ${this._look?.mono ?? MONO};`,
+            `background-color: ${t.accent_fill}; color: ${t.on_accent};`, 11.5],
+            quiet: [`background-color: transparent; color: ${t.muted}; border-radius: 6px; ` +
+                'padding: 2px 7px; font-weight: 600;', `background-color: ${t.hover}; color: ${t.text};`, 15],
+            item: [`background-color: transparent; color: ${t.body}; border-radius: 6px; padding: 6px 10px;`,
+                `background-color: ${t.hover}; color: ${t.text};`, 13],
             link: [`background-color: transparent; color: ${t.muted}; padding: 1px 4px; border-radius: 6px;`,
                 `color: ${t.accent};`, 12],
             strong: [`background-color: transparent; color: ${t.accent}; font-weight: 600; padding: 1px 4px;`,
                 `color: ${t.accent_hover};`, 12],
             secondary: [`background-color: ${t.card}; color: ${t.text}; border: 1px solid ${t.card_border}; ` +
                 'border-radius: 7px; padding: 5px 10px;', `border-color: ${t.accent};`, 12],
-            on: [`background-color: ${t.hover}; color: ${t.body}; border-radius: 7px; padding: 4px 8px;`,
-                '', 14],
+            on: [`background-color: ${t.hover}; color: ${t.text}; border-radius: 6px; padding: 2px 7px; ` +
+                'font-weight: 600;', '', 15],
         };
         const [base, hover, px] = styles[kind] ?? styles.link;
         const button = textButton(label, {y_align: Clutter.ActorAlign.CENTER});
@@ -307,19 +339,76 @@ export class Overlay {
         return button;
     }
 
+    // A box that changes its style while the pointer is on it (a chip, the input, Close).
+    _hoverBox(params, base, hover) {
+        const box = new St.Bin(params);
+        box.style = base;
+        box.connect('notify::hover', () => {
+            box.style = box.hover ? `${base} ${hover}` : base;
+        });
+        return box;
+    }
+
     _act(action, args = {}) {
         return () => this._cb.clicked('action', {action, args});
     }
 
-    _sparkle(warn, size = 16) {
-        const area = new St.DrawingArea({width: size, height: size,
+    // The brand mark's file for `px` logical pixels at the screen's scale: never scaled up.
+    _markPath(px) {
+        const look = this._look;
+        if (!look?.mark_dir)
+            return null;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor || 1;
+        const sizes = look.mark_sizes ?? [];
+        const size = sizes.find(s => s >= px * scale) ?? sizes[sizes.length - 1];
+        return `${look.mark_dir}/glance-mark-${size}.png`;
+    }
+
+    _mark(px) {
+        const path = this._markPath(px);
+        if (!path)
+            return new St.Widget({width: px, height: px});
+        return new St.Icon({gicon: Gio.FileIcon.new(Gio.File.new_for_path(path)), icon_size: px,
             y_align: Clutter.ActorAlign.CENTER});
+    }
+
+    _markSurface(px) {
+        const path = this._markPath(px);
+        if (!path)
+            return null;
+        if (!this._surfaces.has(path)) {
+            try {
+                this._surfaces.set(path, Cairo.ImageSurface.createFromPNG(path));
+            } catch (_e) {
+                this._surfaces.set(path, null);
+            }
+        }
+        return this._surfaces.get(path);
+    }
+
+    _glyphPath(cr, name, x, y, px) {
+        const k = px / 16;
+        for (const [cmd, ...p] of this._look?.glyphs?.[name] ?? []) {
+            if (cmd === 'M')
+                cr.moveTo(x + p[0] * k, y + p[1] * k);
+            else if (cmd === 'L')
+                cr.lineTo(x + p[0] * k, y + p[1] * k);
+            else if (cmd === 'C')
+                cr.curveTo(x + p[0] * k, y + p[1] * k, x + p[2] * k, y + p[3] * k, x + p[4] * k, y + p[5] * k);
+            else
+                cr.closePath();
+        }
+    }
+
+    // A line glyph (heart, lines, bolt, briefcase, pen, spark) in the colour `token`.
+    _glyph(name, px = 14, token = 'accent') {
+        const area = new St.DrawingArea({width: px, height: px, y_align: Clutter.ActorAlign.CENTER});
         area.connect('repaint', a => {
             const cr = a.get_context();
-            cr.scale(size / 24, size / 24);
-            this._path(cr);
-            cr.setSourceRGB(...rgb(this._t[warn ? 'warn_text' : 'accent']));
-            cr.setLineWidth(2);
+            this._glyphPath(cr, name, 0.5, 0.5, px - 1);
+            cr.setSourceRGB(...rgb(this._t[token]));
+            cr.setLineWidth(1.5);
+            cr.setLineCap(Cairo.LineCap.ROUND);
             cr.setLineJoin(Cairo.LineJoin.ROUND);
             cr.stroke();
             cr.$dispose();
@@ -327,11 +416,8 @@ export class Overlay {
         return area;
     }
 
-    _path(cr) {
-        cr.moveTo(...SPARKLE[0]);
-        for (const p of SPARKLE.slice(1))
-            cr.lineTo(...p);
-        cr.closePath();
+    _word(key, fallback) {
+        return this._look?.words?.[key] ?? fallback;
     }
 
     // ------------------------------------------------------------------ the hover menu
@@ -394,19 +480,30 @@ export class Overlay {
         if (!menu)
             return;
         const t = this._t;
-        const box = vbox({style: `background-color: ${t.strip}; border: 1px solid ${t.strip_border}; ` +
-            'border-radius: 10px; padding: 6px; spacing: 2px;'});
+        const box = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
+            `border-radius: 10px; padding: 6px; spacing: 1px; box-shadow: 0 4px 14px ${t.shadow};`});
         if (menu.note)
-            box.add_child(this._label(menu.note, 'muted', 12, 'max-width: 260px;'));
+            box.add_child(this._label(menu.note, 'muted', 12, 'max-width: 260px; padding: 4px 8px 6px 8px;'));
         for (const item of menu.items) {
             const name = `menu:${item.action}${item.args?.key ? `:${item.args.key}` : ''}`;
-            const button = this._button(item.label, 'quiet', this._act(item.action, item.args || {}),
+            const button = this._button(item.label, 'item', this._act(item.action, item.args || {}),
                 name);
             button.x_expand = true;
+            button.get_child().x_expand = true;
             box.add_child(button);
         }
-        if (menu.hint)
-            box.add_child(this._label(menu.hint, 'muted', 12, 'padding: 2px 8px;', false));
+        if (menu.hint) {
+            // "Super+Alt+G to check": the chord as keycaps, the rest muted
+            const at = menu.hint.indexOf(' ');
+            const chord = at < 0 ? menu.hint : menu.hint.slice(0, at);
+            const rest = at < 0 ? '' : menu.hint.slice(at + 1);
+            const hint = hbox({style: `spacing: 6px; padding: 6px 8px 2px 8px; ` +
+                `border-top: 1px solid ${t.hairline};`});
+            hint.add_child(this._keycaps(chord.split('+')));
+            if (rest)
+                hint.add_child(this._label(rest, 'muted', 12, '', false));
+            box.add_child(hint);
+        }
         this._menu.set_child(box);
     }
 
@@ -439,6 +536,8 @@ export class Overlay {
         }
     }
 
+    // The brand mark on a small disc: quiet when idle, a turning emerald arc while working,
+    // an emerald ring and count badge when ready, faded when muted.
     _drawIcon(area) {
         const cr = area.get_context();
         const st = this._scene?.status;
@@ -448,55 +547,47 @@ export class Overlay {
         }
         const t = this._t;
         const r = ICON / 2, cx = ICON_X + r, cy = ICON_Y + r, tau = 2 * Math.PI;
-        const [fill, ring, mark] = {
-            ready: ['accent', 'accent', 'on_accent'],
-            muted: ['card', 'card_border', 'dot_quiet'],
-        }[st.state] ?? ['strip', 'strip_border', 'muted'];
         cr.arc(cx, cy, r, 0, tau);
-        cr.setSourceRGB(...rgb(t[fill]));
+        cr.setSourceRGB(...rgb(t[st.state === 'muted' ? 'card' : 'surface']));
         cr.fill();
-        cr.arc(cx, cy, r - 0.75, 0, tau);
-        cr.setSourceRGB(...rgb(t[ring]));
-        cr.setLineWidth(1.5);
+        cr.arc(cx, cy, r - 0.6, 0, tau);
+        cr.setSourceRGB(...rgb(t[st.state === 'ready' ? 'strip_border' : 'hairline']));
+        cr.setLineWidth(1.2);
         cr.stroke();
         if (st.state === 'working') {
             const start = this._phase * tau / 12;
-            cr.arc(cx, cy, r - 1.25, start, start + tau / 4);
-            cr.setSourceRGB(...rgb(t.accent));
-            cr.setLineWidth(2.5);
+            cr.arc(cx, cy, r - 1.2, start, start + tau / 4);
+            cr.setSourceRGB(...rgb(t.accent_fill));
+            cr.setLineWidth(2.2);
             cr.setLineCap(Cairo.LineCap.ROUND);
             cr.stroke();
         }
-        cr.save();
-        const k = 18 / 24;
-        cr.translate(cx - 12 * k, cy - 9.5 * k);
-        cr.scale(k, k);
-        this._path(cr);
-        cr.restore();
-        cr.setSourceRGB(...rgb(t[st.state === 'working' ? 'accent' : mark]));
-        cr.setLineWidth(1.6);
-        cr.setLineJoin(Cairo.LineJoin.ROUND);
-        cr.stroke();
+        const surface = this._markSurface(MARK_PX);
+        if (surface) {
+            const k = MARK_PX / surface.getWidth();
+            cr.save();
+            cr.translate(cx - MARK_PX / 2, cy - MARK_PX / 2);
+            cr.scale(k, k);
+            cr.setSourceSurface(surface, 0, 0);
+            cr.paintWithAlpha({idle: 0.8, working: 0.9, muted: 0.4}[st.state] ?? 1);
+            cr.restore();
+        }
         const badge = st.badge;
         if (badge) {
             const [bx, by] = BADGE_C;
-            cr.arc(bx, by, BADGE_R, 0, tau);
+            const dot = badge === '•';
+            cr.arc(bx, by, BADGE_R, 0, tau);  // a cut-out ring around it
             cr.setSourceRGB(...rgb(t.surface));
             cr.fill();
-            cr.arc(bx, by, BADGE_R - 0.5, 0, tau);
-            cr.setSourceRGB(...rgb(t.accent));
-            cr.setLineWidth(1);
-            cr.stroke();
-            if (badge === '•') {
-                cr.arc(bx, by, 2.2, 0, tau);
-                cr.setSourceRGB(...rgb(t.dot_warn));
-                cr.fill();
-            } else {
+            cr.arc(bx, by, dot ? 4 : BADGE_R - 1.2, 0, tau);
+            cr.setSourceRGB(...rgb(t[dot ? 'dot_warn' : 'accent_fill']));
+            cr.fill();
+            if (!dot) {
                 cr.selectFontFace('Sans', Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
                 cr.setFontSize(badge.length === 1 ? 8.5 : 7);
                 const ext = cr.textExtents(badge);
                 cr.moveTo(bx - ext.width / 2 - ext.xBearing, by - ext.height / 2 - ext.yBearing);
-                cr.setSourceRGB(...rgb(t.accent));
+                cr.setSourceRGB(...rgb(t.on_accent));
                 cr.showText(badge);
             }
         }
@@ -517,11 +608,14 @@ export class Overlay {
             return;
         const v = strip.view, t = this._t;
         const warn = v.guard !== null && v.guard !== undefined && v.segments.length === 0;
+        const plain = !warn && v.segments.length === 0;
+        const border = warn ? t.warn_border : plain ? t.hairline : t.strip_border;
+        const glow = warn || plain ? '' : `box-shadow: inset 0 0 12px ${t.glow};`;
         const row = hbox({style: `background-color: ${t[warn ? 'warn_bg' : 'strip']}; ` +
-            `border: 1px solid ${t[warn ? 'warn_border' : 'strip_border']}; border-radius: 9px; ` +
-            'padding: 8px 10px; spacing: 10px;'});
+            `border: 1px solid ${border}; border-radius: 10px; padding: 7px 8px 7px 10px; ` +
+            `spacing: 10px; ${glow}`});
         row.set_width(strip.w);
-        row.add_child(this._sparkle(warn));
+        row.add_child(this._mark(16));
         const text = vbox({x_expand: true, y_align: Clutter.ActorAlign.CENTER, style: 'spacing: 2px;'});
         if (v.segments.length > 0) {
             const sentence = this._label('', 'body', 14);
@@ -547,17 +641,18 @@ export class Overlay {
             text.add_child(this._label(v.note, 'muted', 13));
         row.add_child(text);
         if (strip.can_use)
-            row.add_child(this._button(strip.use_label, 'primary', this._act('use'), 'use'));
+            row.add_child(this._button(strip.use_label, 'use', this._act('use'), 'use'));
         if (v.menu)
             row.add_child(this._button('⋯', v.expanded ? 'on' : 'quiet', this._act('more'), 'more'));
         this._strip.set_child(row);
     }
 
-    // ------------------------------------------------------------------ the drawer
+    // ------------------------------------------------------------------ the panel
 
     _renderPanel(panel, tokensKey) {
-        const key = panel ? JSON.stringify([panel.view, panel.preview_markup, panel.w,
-            this._details, this._profiles, tokensKey]) : '';
+        // everything but the place: a move alone does not build it again
+        const key = panel ? JSON.stringify([{...panel, x: 0, y: 0}, this._details, this._profiles,
+            tokensKey]) : '';
         if (key === this._keys.panel)
             return;
         if (!panel) {
@@ -575,7 +670,7 @@ export class Overlay {
             return;
         const t = this._t;
         const card = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
-            `border-radius: 12px; padding: 14px 16px; spacing: 10px; box-shadow: 0 6px 18px ${t.shadow};`});
+            `border-radius: 12px; padding: 14px 16px; spacing: 14px; box-shadow: 0 8px 24px ${t.shadow};`});
         card.set_width(panel.w);
         if (panel.view.mode === 'selection')
             this._fillSelection(card, panel);
@@ -593,20 +688,21 @@ export class Overlay {
         }
     }
 
-    _header(v, title) {
-        const header = hbox({style: 'spacing: 6px;'});
-        if (title)
-            header.add_child(this._label(title, 'text', 14, 'font-weight: 600;', false));
-        if (v.tone) {
-            let line = `Reads ${v.tone.toLowerCase()}`;
-            if (v.tone_reason)
-                line += ` — ${v.tone_reason}`;
-            const tone = this._label(line, 'muted', 12);
-            tone.x_expand = true;
-            header.add_child(tone);
-        } else {
-            header.add_child(new St.Widget({x_expand: true}));
-        }
+    _section(text) {
+        return this._label(text, 'muted', 12, 'font-weight: 600;', false);
+    }
+
+    // The brand mark, "Glance Assistant" and what is at work; who it is for; Esc Close.
+    _header(panel) {
+        const v = panel.view, t = this._t;
+        const header = hbox({style: 'spacing: 10px;'});
+        header.add_child(this._mark(22));
+        const titles = vbox({x_expand: true, y_align: Clutter.ActorAlign.CENTER, style: 'spacing: 1px;'});
+        titles.add_child(this._label(panel.title ?? 'Glance Assistant', 'text', 14, 'font-weight: 600;', false));
+        titles.add_child(this._label(panel.subline ?? '', 'muted', 12, '', false));
+        if (panel.tone_line && !v.tone_chips.length)
+            titles.add_child(this._label(panel.tone_line, 'muted', 12));
+        header.add_child(titles);
         if (v.profile_label) {
             if (v.mode === 'selection') {
                 header.add_child(this._label(`For ${v.profile_label}`, 'muted', 12, '', false));
@@ -617,27 +713,34 @@ export class Overlay {
                 }, 'profiles'));
             }
         }
-        header.add_child(this._button('Close', 'link', this._act('close'), 'close'));
+        const close = this._hoverBox({y_align: Clutter.ActorAlign.CENTER},
+            'background-color: transparent; border-radius: 6px; padding: 2px 4px;',
+            `background-color: ${t.hover};`);
+        const inner = hbox({style: 'spacing: 6px;'});
+        inner.add_child(this._kbd(this._word('esc', 'Esc')));
+        inner.add_child(this._label(this._word('close', 'Close'), 'muted', 12, '', false));
+        close.set_child(inner);
+        clickable(close, this._act('close'));
+        this._named.set('close', close);
+        header.add_child(close);
         return header;
     }
 
+    // A tone chip: its glyph and number key, its name, one line of its rewrite once known.
     _card(chip, action) {
         const t = this._t;
-        const base = `background-color: ${t.card}; border: 1px solid ${t.card_border}; ` +
-            'border-radius: 9px; padding: 9px 10px;';
-        const button = new St.Bin({x_expand: true});
-        button.style = base;
-        const box = vbox({style: 'spacing: 3px;'});
-        const top = hbox({style: 'spacing: 6px;'});
-        const title = this._label(chip.label, 'text', 13, 'font-weight: 600;', false);
-        title.x_expand = true;
-        top.add_child(title);
-        if (chip.hotkey !== null && chip.hotkey !== undefined) {
-            top.add_child(this._label(String(chip.hotkey), 'muted', 11,
-                `border: 1px solid ${t.card_border}; border-radius: 4px; padding: 0 4px; ` +
-                `background-color: ${t.surface};`, false));
-        }
+        const button = this._hoverBox({x_expand: true},
+            `background-color: ${t.card}; border: 1px solid ${t.card_border}; ` +
+            'border-radius: 8px; padding: 8px 10px;',
+            `border-color: ${t.accent}; background-color: ${t.hover};`);
+        const box = vbox({style: 'spacing: 3px;', x_expand: true});
+        const top = hbox({style: 'spacing: 6px; padding-bottom: 2px;', x_expand: true});
+        top.add_child(this._glyph(chip.glyph ?? 'spark', 15));
+        top.add_child(new St.Widget({x_expand: true}));
+        if (chip.hotkey !== null && chip.hotkey !== undefined)
+            top.add_child(this._kbd(String(chip.hotkey)));
         box.add_child(top);
+        box.add_child(this._label(chip.label, 'text', 13, 'font-weight: 600;', false));
         let line = 'Hover to preview';
         if (chip.state === 'loading' && !chip.preview)
             line = 'Rewriting…';
@@ -648,7 +751,6 @@ export class Overlay {
         box.add_child(this._label(line, 'muted', 12, '', false));
         button.set_child(box);
         button.connect('notify::hover', () => {
-            button.style = button.hover ? `${base} border-color: ${t.accent};` : base;
             this._cancelHover();
             if (button.hover) {
                 this._hover = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOVER_MS, () => {
@@ -677,22 +779,78 @@ export class Overlay {
         return row;
     }
 
+    // "Rewrite as… e.g. make it a bullet list" with the return key: a click opens the entry.
     _rewriteAs() {
         const t = this._t;
-        const row = hbox({style: 'spacing: 8px;'});
-        row.add_child(this._label('Rewrite as…', 'muted', 12, '', false));
-        const base = `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
-            'border-radius: 8px; padding: 7px 10px;';
-        const field = new St.Bin({x_expand: true});
-        field.style = base;
-        field.set_child(this._label(this._scene?.ask_placeholder ?? '', 'muted', 13, '', false));
-        field.connect('notify::hover', () => {
-            field.style = field.hover ? `${base} border-color: ${t.accent};` : base;
-        });
+        const field = this._hoverBox({x_expand: true},
+            `background-color: ${t.card}; border: 1px solid ${t.card_border}; ` +
+            'border-radius: 8px; padding: 6px 8px 6px 10px;', `border-color: ${t.accent};`);
+        const inner = hbox({style: 'spacing: 8px;', x_expand: true});
+        inner.add_child(this._glyph('pen', 14, 'muted'));
+        inner.add_child(this._label(this._word('rewrite', 'Rewrite as…'), 'body', 13, '', false));
+        const hint = this._label(this._scene?.ask_placeholder ?? '', 'muted', 13, '', false);
+        hint.x_expand = true;
+        inner.add_child(hint);
+        inner.add_child(this._kbd(this._word('return_key', '↵')));
+        field.set_child(inner);
         clickable(field, this._act('tone', {key: 'custom'}));
         this._named.set('rewrite-as', field);
-        row.add_child(field);
-        return row;
+        return field;
+    }
+
+    // The "Tone" section: how the text reads, the chips, "Rewrite as…".
+    _tones(panel, action) {
+        const v = panel.view;
+        const cards = v.tone_chips.filter(c => c.key !== 'custom');
+        const custom = v.tone_chips.some(c => c.key === 'custom');
+        if (!cards.length && !custom)
+            return null;
+        const box = vbox({style: 'spacing: 8px;'});
+        const head = hbox({style: 'spacing: 8px;'});
+        head.add_child(this._section(this._word('tone', 'Tone')));
+        if (panel.tone_line) {
+            const reads = this._label(panel.tone_line, 'muted', 12, '', false);
+            reads.x_expand = true;
+            head.add_child(reads);
+        }
+        box.add_child(head);
+        if (cards.length)
+            box.add_child(this._cards(cards, action));
+        if (custom)
+            box.add_child(this._rewriteAs());
+        return box;
+    }
+
+    // The strip's corrected text, in the panel: every changed word tinted; "Apply (Alt+Enter)".
+    _suggested(s) {
+        const t = this._t;
+        const box = vbox({style: 'spacing: 6px;'});
+        box.add_child(this._section(this._word('suggested', 'Suggested')));
+        const text = this._label('', 'text', 14);
+        text.clutter_text.set_markup(s.markup);
+        text.x_expand = true;
+        this._named.set('suggested-text', text);
+        const frame = new St.Bin({x_expand: true, style: `background-color: ${t.card}; border: 1px solid ` +
+            `${t.card_border}; border-radius: 8px; padding: 10px 12px;`});
+        if (s.scroll) {
+            const inner = vbox({x_expand: true});
+            inner.add_child(text);
+            frame.set_child(this._scroll(inner, 200));
+        } else {
+            frame.set_child(text);
+        }
+        box.add_child(frame);
+        if (s.lines.length || s.can_use) {
+            const bottom = hbox({style: 'spacing: 8px;'});
+            const notes = vbox({x_expand: true, y_align: Clutter.ActorAlign.CENTER, style: 'spacing: 2px;'});
+            for (const line of s.lines)
+                notes.add_child(this._label(line, 'muted', 12));
+            bottom.add_child(notes);
+            if (s.can_use)
+                bottom.add_child(this._button(s.apply_label, 'primary', this._act('use'), 'apply'));
+            box.add_child(bottom);
+        }
+        return box;
     }
 
     _banner(text) {
@@ -705,10 +863,11 @@ export class Overlay {
         return box;
     }
 
-    _fixLine(v) {
+    _fixLine(panel) {
+        const v = panel.view;
         const line = hbox({style: 'spacing: 2px;'});
         const n = v.issues.length;
-        line.add_child(this._button(`${n} fix${n === 1 ? '' : 'es'}`, 'link', () => {
+        line.add_child(this._button(panel.fixes_label ?? `${n} fixes`, 'link', () => {
             this._details = !this._details;
             this._rerender();
         }, 'details'));
@@ -729,7 +888,7 @@ export class Overlay {
         }
         line.add_child(new St.Widget({x_expand: true}));
         if (v.can_fix_all)
-            line.add_child(this._button('Fix all', 'strong', this._act('fix_all'), 'fix_all'));
+            line.add_child(this._button(this._word('fix_all', 'Fix All'), 'strong', this._act('fix_all'), 'fix_all'));
         return line;
     }
 
@@ -765,7 +924,7 @@ export class Overlay {
     }
 
     _fillDrawer(card, panel) {
-        const v = panel.view;
+        const v = panel.view, t = this._t;
         if (v.guard) {
             const banner = this._banner(v.guard);
             banner.add_child(this._button("Don't warn about this here", 'link',
@@ -773,18 +932,20 @@ export class Overlay {
             banner.add_child(this._button('Never', 'link', this._act('guard_silence', {scope: 'global'})));
             card.add_child(banner);
         }
-        card.add_child(this._header(v, null));
+        card.add_child(this._header(panel));
         if (v.profile_label && v.profiles.length && this._profiles) {
             const menu = hbox({style: 'spacing: 6px;'});
             for (const [name, label] of v.profiles)
                 menu.add_child(this._button(label, 'secondary', this._act('profile', {name})));
             card.add_child(menu);
         }
-        const cards = v.tone_chips.filter(c => c.key !== 'custom');
-        if (cards.length)
-            card.add_child(this._cards(cards, 'tone_apply'));
-        if (v.tone_chips.some(c => c.key === 'custom'))
-            card.add_child(this._rewriteAs());
+        if (panel.suggested)
+            card.add_child(this._suggested(panel.suggested));
+        else if (panel.note && !v.tone)
+            card.add_child(this._label(panel.note, 'muted', 12));
+        const tones = this._tones(panel, 'tone_apply');
+        if (tones)
+            card.add_child(tones);
         if (v.banner)
             card.add_child(this._banner(v.banner));
         if (v.copy_offer !== null && v.copy_offer !== undefined) {
@@ -799,34 +960,37 @@ export class Overlay {
             card.add_child(offer);
         }
         if (v.issues.length) {
-            card.add_child(this._fixLine(v));
+            const footer = vbox({style: `spacing: 10px; border-top: 1px solid ${t.hairline}; padding-top: 10px;`});
+            footer.add_child(this._fixLine(panel));
             if (this._details) {
                 const rows = vbox({style: 'spacing: 10px;'});
                 for (const row of v.issues)
                     rows.add_child(this._issueRow(row));
-                card.add_child(this._scroll(rows, 240));
+                footer.add_child(this._scroll(rows, 240));
             }
+            card.add_child(footer);
         } else if (!(v.banner || (v.copy_offer !== null && v.copy_offer !== undefined) ||
-                     v.tone_chips.length || v.guard)) {
+                     v.tone_chips.length || v.guard || panel.suggested)) {
             card.add_child(this._label('Nothing to fix here.', 'muted', 12));
         }
     }
 
     _fillSelection(card, panel) {
         const v = panel.view, t = this._t;
-        card.add_child(this._header(v, 'Selected text'));
-        const cards = v.tone_chips.filter(c => c.key !== 'custom');
-        if (cards.length)
-            card.add_child(this._cards(cards, 'tone'));
-        if (v.tone_chips.some(c => c.key === 'custom'))
-            card.add_child(this._rewriteAs());
+        card.add_child(this._header(panel));
+        const tones = this._tones(panel, 'tone');
+        if (tones)
+            card.add_child(tones);
         if (panel.preview_markup !== null && panel.preview_markup !== undefined) {
+            const section = vbox({style: 'spacing: 6px;'});
+            section.add_child(this._section('Rewrite'));
             const label = this._label('', 'body', 13);
             label.clutter_text.set_markup(panel.preview_markup);
             const box = new St.Bin({style: `background-color: ${t.card}; border: 1px solid ` +
-                `${t.card_border}; border-radius: 9px; padding: 8px 10px;`, x_expand: true});
+                `${t.card_border}; border-radius: 8px; padding: 8px 10px;`, x_expand: true});
             box.set_child(label);
-            card.add_child(this._scroll(box, 150));
+            section.add_child(this._scroll(box, 150));
+            card.add_child(section);
         }
         if (v.preview_state === 'loading')
             card.add_child(this._label('Rewriting…', 'muted', 12));
@@ -852,20 +1016,29 @@ export class Overlay {
     }
 
     // ------------------------------------------------------------------ the ghost
+    // The completion in emerald italics after the caret, with a small "Tab" keycap: Tab takes it.
 
     _renderGhost(ghost, tokensKey) {
         const key = ghost ? JSON.stringify([ghost.text, ghost.font_px, ghost.max_width, tokensKey]) : '';
         if (key === this._keys.ghost)
             return;
         this._keys.ghost = key;
+        this._ghost.destroy_all_children();
         if (!ghost)
             return;
-        this._ghost.text = ghost.text;
-        this._ghost.style = this._font(ghost.font_px, `color: ${this._t.ghost};`);
-        this._ghost.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        this._ghost.set_width(-1);
-        if (ghost.max_width > 0 && this._ghost.get_preferred_width(-1)[1] > ghost.max_width)
-            this._ghost.set_width(ghost.max_width);
+        const t = this._t;
+        const text = new St.Label({text: ghost.text, y_align: Clutter.ActorAlign.CENTER});
+        text.style = this._font(ghost.font_px, `color: ${t.ghost}; font-style: italic;`);
+        text.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        const kbd = new St.Label({text: this._word('accept_key', 'Tab'), y_align: Clutter.ActorAlign.CENTER});
+        kbd.style = this._mono(Math.max(8, Math.round(ghost.font_px * 0.7)),
+            `color: ${t.keycap_text}; background-color: ${t.keycap_bg}; ` +
+            `border: 1px solid ${t.keycap_border}; border-radius: 4px; padding: 0 5px;`);
+        this._ghost.add_child(text);
+        this._ghost.add_child(kbd);
+        const hintW = kbd.get_preferred_width(-1)[1] + GHOST_GAP;
+        if (ghost.max_width > 0 && text.get_preferred_width(-1)[1] + hintW > ghost.max_width)
+            text.set_width(Math.max(1, ghost.max_width - hintW));
     }
 
     // ------------------------------------------------------------------ "Rewrite as…"

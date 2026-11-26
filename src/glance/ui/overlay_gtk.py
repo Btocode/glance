@@ -22,12 +22,14 @@ import cairo
 import gi
 
 gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 
 from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
 from glance.protocol import Rect
+from glance.ui import look
 from glance.ui.chip_model import ChipView
 from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
 from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
@@ -36,13 +38,13 @@ from glance.ui.panel_model import IssueRow, PanelView, ToneChip
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
 from glance.ui.strip_model import StripView, scroll_max_h
-from glance.ui.theme import install, rgb
+from glance.ui.theme import install, mark_path, rgb
 
 ICON = 22  # the status icon's circle
 # Its window: the circle at (ICON_X, ICON_Y), with room above and right for the count badge.
 ICON_X, ICON_Y = 1, 5
 ICON_BOX = (30, 28)
-BADGE_C, BADGE_R = (23.0, 7.0), 6.5
+BADGE_C, BADGE_R = (23.0, 7.0), 7.0  # the badge's cut-out disc
 SPIN_MS = 125  # the working ring's frame time: 8 frames a second, only while working
 DRAWER_MIN_W = 520
 SEL_W = 460  # select-anything's panel
@@ -59,9 +61,9 @@ _ASK_POLL_MS = 20
 SETTLE_MS = 150  # a resizing window is still for this long: show the strip again
 RESHOW_MS = 400  # no fresh field rectangles by then: show it where it was, moved along
 ASK_PLACEHOLDER = "e.g. make it a bullet list"
-# The sparkle of the mockup, in a 24 px box: M12 3 l1.8 4.7 L18.5 9.5 ... z
-_SPARKLE = ((12, 3), (13.8, 7.7), (18.5, 9.5), (13.8, 11.3), (12, 16), (10.2, 11.3),
-            (5.5, 9.5), (10.2, 7.7))
+MARK_PX = 16  # the brand mark inside the status icon's circle
+_SUGGEST_MAX_H = 200  # the panel's suggested text scrolls past this
+_PIXBUFS: dict[tuple[str, bool], GdkPixbuf.Pixbuf] = {}
 
 
 def _popup(type_hint: Gdk.WindowTypeHint) -> Gtk.Window:
@@ -164,6 +166,77 @@ def _escape(text: str) -> str:
     return GLib.markup_escape_text(text, -1)
 
 
+def _pixbuf(path: str, grey: bool = False) -> GdkPixbuf.Pixbuf:
+    key = (path, grey)
+    if key not in _PIXBUFS:
+        pb = GdkPixbuf.Pixbuf.new_from_file(path)
+        if grey:
+            flat = pb.copy()
+            pb.saturate_and_pixelate(flat, 0.0, False)
+            pb = flat
+        _PIXBUFS[key] = pb
+    return _PIXBUFS[key]
+
+
+def paint_mark(cr: Any, widget: Gtk.Widget, x: float, y: float, px: int,
+               alpha: float = 1.0, grey: bool = False) -> None:
+    """The brand mark, `px` wide at (x, y): the file for the screen's scale, so it is crisp."""
+    scale = max(1, widget.get_scale_factor())
+    pb = _pixbuf(mark_path(px * scale), grey)
+    cr.save()
+    cr.translate(x, y)
+    cr.scale(px / pb.get_width(), px / pb.get_height())
+    Gdk.cairo_set_source_pixbuf(cr, pb, 0, 0)
+    cr.get_source().set_filter(cairo.FILTER_GOOD)
+    cr.paint_with_alpha(alpha)
+    cr.restore()
+
+
+def glyph_path(cr: Any, name: str, x: float, y: float, px: float) -> None:
+    """One of `look.GLYPHS` as the current path, `px` square at (x, y)."""
+    k = px / 16
+    for cmd, *pts in look.GLYPHS[name]:
+        xy = [(x + pts[i] * k, y + pts[i + 1] * k) for i in range(0, len(pts), 2)]
+        if cmd == "M":
+            cr.move_to(*xy[0])
+        elif cmd == "L":
+            cr.line_to(*xy[0])
+        elif cmd == "C":
+            cr.curve_to(*xy[0], *xy[1], *xy[2])
+        else:
+            cr.close_path()
+
+
+def _mark(px: int) -> Gtk.Widget:
+    area = Gtk.DrawingArea()
+    area.set_size_request(px, px)
+    area.set_valign(Gtk.Align.CENTER)
+
+    def draw(w: Gtk.Widget, cr: Any) -> bool:
+        paint_mark(cr, w, 0, 0, px)
+        return True
+
+    area.connect("draw", draw)
+    return area
+
+
+def _kbd(text: str) -> Gtk.Label:
+    """A keycap: a small bordered label (Alt+Enter, Esc, 1-4, the return key, Tab)."""
+    label = _classes(Gtk.Label(label=text, selectable=False), "glance-kbd")
+    label.set_valign(Gtk.Align.CENTER)
+    return label
+
+
+def _keycaps(keys: list[str], plus: bool = False) -> Gtk.Widget:
+    """A chord as keycaps, one per key (with a "+" between them when `plus`)."""
+    row = Gtk.Box(spacing=4)
+    for i, key in enumerate(keys):
+        if i and plus:
+            row.pack_start(_classes(Gtk.Label(label="+"), "glance-plus"), False, False, 0)
+        row.pack_start(_kbd(key), False, False, 0)
+    return row
+
+
 def button_text(button: Gtk.Button) -> str:
     """What a button says: its label, or the text of the labels inside it (tone cards)."""
     if button.get_label():
@@ -191,8 +264,10 @@ class GtkOverlay:
 
     def __init__(self, on_chip_click: Callable[[], None],
                  on_panel_action: Callable[[str, dict[str, Any]], None],
-                 hover_menu: Callable[[], HoverMenu | None] = lambda: None) -> None:
+                 hover_menu: Callable[[], HoverMenu | None] = lambda: None,
+                 use_key: Callable[[], str] = lambda: "Alt+Return") -> None:
         self._on_chip_click = on_chip_click
+        self._use_key = use_key
         self._hover_menu = hover_menu  # the icon's hover menu now (None: not now)
         self._menu_view: HoverMenu | None = None
         self._menu_open_src: int | None = None
@@ -306,6 +381,8 @@ class GtkOverlay:
         if rebuilt:
             self._strip_view = view
             self._build_strip(view)
+            if self._field_drawer() and self._panel_view is not None:
+                self._rebuild_panel(self._panel_view)  # it shows the corrected text
         self._anchor = anchor
         self._layout(force=rebuilt)
 
@@ -315,8 +392,9 @@ class GtkOverlay:
         self._strip_rect = None
         if self._strip.get_visible():
             self._strip.hide()
-        if had and self._panel_anchor is not None:
-            self._layout()  # the drawer moves up into the strip's place
+        if had and self._field_drawer() and self._panel_view is not None:
+            self._rebuild_panel(self._panel_view)  # without the corrected text now
+            self._layout(force=True)
 
     def show_panel(self, view: PanelView, x: int, y: int, anchor: Anchor | None = None) -> None:
         mode_changed = (anchor is None) != (self._panel_anchor is None) \
@@ -387,7 +465,7 @@ class GtkOverlay:
         region = _rounded(ICON_X, ICON_Y, ICON, ICON, ICON // 2)
         view = self._status_view
         if view is not None and view.badge is not None:
-            d = int(BADGE_R * 2) + 1
+            d = int(BADGE_R * 2)
             region.union(_rounded(int(BADGE_C[0] - BADGE_R), int(BADGE_C[1] - BADGE_R),
                                   d, d, d // 2))
         gdk_window.input_shape_combine_region(region, 0, 0)
@@ -423,11 +501,17 @@ class GtkOverlay:
 
         The drawer goes under the strip; when the two do not fit below the line they go
         above it, the strip nearest the line. Nothing is shown while the window resizes.
+        While the field's panel is open it shows the strip's corrected text itself
+        ("Suggested"): the strip is not shown on its own then.
         """
         mons = self.monitors()
         if self._panel_view is not None and self._panel_anchor is None:
             self._place_selection(mons)
-        strip, drawer = self._strip_view is not None, self._field_drawer()
+        drawer = self._field_drawer()
+        strip = self._strip_view is not None and not drawer
+        if drawer and self._strip.get_visible():
+            self._strip.hide()
+            self._strip_rect = None
         anchor = self._anchor
         if not (strip or drawer) or anchor is None:
             return
@@ -794,11 +878,14 @@ class GtkOverlay:
         self._strip.queue_draw()
         if self._strip_view is not None:
             self._build_strip(self._strip_view)
+        if self._panel_view is not None:
+            self._rebuild_panel(self._panel_view)  # its inline colours (the tint)
+        if self._strip_view is not None or self._panel_view is not None:
             self._layout(force=True)
 
     def _draw_icon(self, widget: Gtk.Widget, cr: Any) -> bool:
-        """The round Glance mark: a muted outline when idle, a turning accent arc while
-        working, accent-filled with a count badge when ready, grey when muted."""
+        """The brand mark on a small disc: quiet when idle, a turning emerald arc while
+        working, an emerald ring and count badge when ready, faded grey when muted."""
         _clear(widget, cr)
         view = self._status_view
         if view is None:
@@ -808,59 +895,43 @@ class GtkOverlay:
         r = ICON / 2
         cx, cy = ICON_X + r, ICON_Y + r
         tau = 6.2832
-        fill, ring, mark = {
-            StatusState.READY: ("accent", "accent", "on_accent"),
-            StatusState.MUTED: ("card", "card_border", "dot_quiet"),
-        }.get(st, ("strip", "strip_border", "muted"))
         cr.arc(cx, cy, r, 0, tau)
-        cr.set_source_rgb(*rgb(t, fill))
+        cr.set_source_rgb(*rgb(t, "card" if st is StatusState.MUTED else "surface"))
         cr.fill()
-        cr.arc(cx, cy, r - 0.75, 0, tau)
-        cr.set_source_rgb(*rgb(t, ring))
-        cr.set_line_width(1.5)
+        ready = st is StatusState.READY
+        cr.arc(cx, cy, r - 0.6, 0, tau)
+        cr.set_source_rgb(*rgb(t, "strip_border" if ready else "hairline"))
+        cr.set_line_width(1.2)
         cr.stroke()
         if st is StatusState.WORKING:
             start = self._phase * tau / 12
-            cr.arc(cx, cy, r - 1.25, start, start + tau / 4)
-            cr.set_source_rgb(*rgb(t, "accent"))
-            cr.set_line_width(2.5)
+            cr.arc(cx, cy, r - 1.2, start, start + tau / 4)
+            cr.set_source_rgb(*rgb(t, "accent_fill"))
+            cr.set_line_width(2.2)
             cr.set_line_cap(cairo.LINE_CAP_ROUND)
             cr.stroke()
-        # the sparkle, in an 18 px box, centred
-        cr.save()
-        k = 18 / 24
-        cr.translate(cx - 12 * k, cy - 9.5 * k)
-        cr.scale(k, k)
-        cr.move_to(*_SPARKLE[0])
-        for point in _SPARKLE[1:]:
-            cr.line_to(*point)
-        cr.close_path()
-        cr.restore()
-        cr.set_source_rgb(*rgb(t, "accent" if st is StatusState.WORKING else mark))
-        cr.set_line_width(1.6)
-        cr.set_line_join(cairo.LINE_JOIN_ROUND)
-        cr.stroke()
+        alpha = {StatusState.IDLE: 0.8, StatusState.WORKING: 0.9,
+                 StatusState.MUTED: 0.5}.get(st, 1.0)
+        paint_mark(cr, widget, cx - MARK_PX / 2, cy - MARK_PX / 2, MARK_PX, alpha,
+                   grey=st is StatusState.MUTED)
         badge = view.badge
         if badge is not None:
             bx, by = BADGE_C
-            cr.arc(bx, by, BADGE_R, 0, tau)
+            dot = badge == "•"
+            br = 4.0 if dot else BADGE_R - 1.2
+            cr.arc(bx, by, BADGE_R + 0.6, 0, tau)  # a cut-out ring around it
             cr.set_source_rgb(*rgb(t, "surface"))
             cr.fill()
-            cr.arc(bx, by, BADGE_R - 0.5, 0, tau)
-            cr.set_source_rgb(*rgb(t, "accent"))
-            cr.set_line_width(1)
-            cr.stroke()
-            if badge == "•":
-                cr.arc(bx, by, 2.2, 0, tau)
-                cr.set_source_rgb(*rgb(t, "dot_warn"))
-                cr.fill()
-            else:
+            cr.arc(bx, by, br, 0, tau)
+            cr.set_source_rgb(*rgb(t, "dot_warn" if dot else "accent_fill"))
+            cr.fill()
+            if not dot:
                 cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
                 cr.set_font_size(8.5 if len(badge) == 1 else 7)
                 ext = cr.text_extents(badge)
                 cr.move_to(bx - ext.width / 2 - ext.x_bearing,
                            by - ext.height / 2 - ext.y_bearing)
-                cr.set_source_rgb(*rgb(t, "accent"))
+                cr.set_source_rgb(*rgb(t, "on_accent"))
                 cr.show_text(badge)
         return True
 
@@ -925,17 +996,16 @@ class GtkOverlay:
         if old is not None:
             self._menu.remove(old)
             old.destroy()
-        box = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2),
-                       "glance-strip", "glance-menu")
+        box = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1), "glance-menu")
         if menu.note:
             box.pack_start(_label(menu.note, "glance-note", chars=34), False, False, 0)
         for item in menu.items:
-            button = self._button(item.label, item.action, "glance-quiet", **item.args)
+            button = self._button(item.label, item.action, "glance-item", **item.args)
             button.get_child().set_xalign(0)
             button.connect("clicked", lambda _b: self._hide_menu())
             box.pack_start(button, False, False, 0)
         if menu.hint:
-            box.pack_start(_label(menu.hint, "glance-note", wrap=False), False, False, 0)
+            box.pack_start(self._hint(menu.hint), False, False, 0)
         fit = _Fit()
         fit.pack_start(box, True, True, 0)
         fit.show_all()
@@ -963,20 +1033,26 @@ class GtkOverlay:
         return None if v is None or not self._menu.get_visible() else \
             [i.label for i in v.items]
 
-    def _sparkle(self, warn: bool) -> Gtk.Widget:
+    def _hint(self, hint: str) -> Gtk.Widget:
+        """"Super+Alt+G to check" as keycaps and the muted rest."""
+        chord, _sep, rest = hint.partition(" ")
+        row = _classes(Gtk.Box(spacing=6), "glance-hint")
+        row.pack_start(_keycaps(chord.split("+")), False, False, 0)
+        if rest:
+            row.pack_start(_label(rest, "glance-meta", wrap=False), False, False, 0)
+        return row
+
+    def _glyph(self, name: str, px: int = 14, token: str = "accent") -> Gtk.Widget:
+        """A line glyph (`look.GLYPHS`) in the colour `token`."""
         area = Gtk.DrawingArea()
-        area.set_size_request(16, 16)
+        area.set_size_request(px, px)
         area.set_valign(Gtk.Align.CENTER)
 
         def draw(_w: Gtk.Widget, cr: Any) -> bool:
-            t = self._theme.tokens
-            cr.scale(16 / 24, 16 / 24)
-            cr.move_to(*_SPARKLE[0])
-            for point in _SPARKLE[1:]:
-                cr.line_to(*point)
-            cr.close_path()
-            cr.set_source_rgb(*rgb(t, "warn_text" if warn else "accent"))
-            cr.set_line_width(2)
+            glyph_path(cr, name, 0.5, 0.5, px - 1)
+            cr.set_source_rgb(*rgb(self._theme.tokens, token))
+            cr.set_line_width(1.5 if px >= 14 else 1.3)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
             cr.set_line_join(cairo.LINE_JOIN_ROUND)
             cr.stroke()
             return True
@@ -1004,8 +1080,9 @@ class GtkOverlay:
         t = self._theme.tokens
         warn = view.guard is not None and not view.segments
         scroller: Gtk.Widget | None = None
-        row = _classes(Gtk.Box(spacing=10), "glance-strip", *(("glance-warn",) if warn else ()))
-        row.pack_start(self._sparkle(warn), False, False, 0)
+        look_class = "glance-warn" if warn else "glance-plain" if not view.segments else None
+        row = _classes(Gtk.Box(spacing=10), "glance-strip", *((look_class,) if look_class else ()))
+        row.pack_start(_mark(16), False, False, 0)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         text.set_valign(Gtk.Align.CENTER)
         if view.segments:
@@ -1015,9 +1092,7 @@ class GtkOverlay:
             if not scroll:
                 sentence.set_lines(5)
                 sentence.set_ellipsize(Pango.EllipsizeMode.END)
-            sentence.set_markup("".join(
-                f'<span foreground="{t["accent"]}" weight="600">{_escape(s.text)}</span>'
-                if s.changed else _escape(s.text) for s in view.shown))
+            sentence.set_markup(look.strip_markup(view.shown, t["accent"]))
             _classes(sentence, "glance-sentence")
             if scroll:
                 rect = self._strip_rect
@@ -1037,8 +1112,9 @@ class GtkOverlay:
         # Clicks go through the strip but on these; the scrolling text takes the wheel.
         self._strip_buttons = [] if scroller is None else [scroller]
         if view.can_use:
-            use = self._button("Use  Alt+⏎", "use", "glance-primary")
-            use.set_tooltip_text("Replace with this (Alt+Enter)")
+            chord = look.chord_text(self._use_key())
+            use = self._button(chord, "use", "glance-use")
+            use.set_tooltip_text(f"Use this ({chord})")
             use.set_valign(Gtk.Align.CENTER)
             row.pack_start(use, False, False, 0)
             self._strip_buttons.append(use)
@@ -1081,22 +1157,20 @@ class GtkOverlay:
         button.connect("leave-notify-event", leave)
 
     def _card(self, chip: ToneChip, action: str) -> Gtk.Button:
-        """A tone: its name and, once known, one line of its rewrite."""
+        """A tone chip: its glyph, its name, its number key and, once known, one line of
+        its rewrite."""
         button = _classes(_pointer(Gtk.Button(can_focus=False, focus_on_click=False)),
                           "glance-card")
         button.set_name(f"card:{chip.key}")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        top = Gtk.Box(spacing=6)
+        glyph = self._glyph(look.tone_glyph(chip.key), 15)
+        glyph.set_halign(Gtk.Align.START)
+        glyph.set_margin_bottom(3)
+        box.pack_start(glyph, False, False, 0)
         title = _label(chip.label, "glance-card-title", wrap=False)
         title.set_ellipsize(Pango.EllipsizeMode.END)
-        title.set_width_chars(6)
-        top.pack_start(title, True, True, 0)
-        if chip.hotkey is not None:  # the same small key hint on every card that has one
-            kbd = _label(str(chip.hotkey), "glance-kbd", wrap=False)
-            kbd.set_tooltip_text(f"Super+Alt+{chip.hotkey}")
-            kbd.set_valign(Gtk.Align.CENTER)
-            top.pack_end(kbd, False, False, 0)
-        box.pack_start(top, False, False, 0)
+        title.set_width_chars(5)
+        box.pack_start(title, False, False, 0)
         if chip.state == "loading" and not chip.preview:
             line = "Rewriting…"
         elif chip.state == "failed":
@@ -1109,7 +1183,15 @@ class GtkOverlay:
         preview.set_ellipsize(Pango.EllipsizeMode.END)
         preview.set_width_chars(8)
         box.pack_start(preview, False, False, 0)
-        button.add(box)
+        layers = Gtk.Overlay()
+        layers.add(box)
+        if chip.hotkey is not None:  # its number key, top right, on every card that has one
+            kbd = _kbd(str(chip.hotkey))
+            kbd.set_tooltip_text(f"Super+Alt+{chip.hotkey}")
+            kbd.set_halign(Gtk.Align.END)
+            kbd.set_valign(Gtk.Align.START)
+            layers.add_overlay(kbd)
+        button.add(layers)
         if chip.preview:
             button.set_tooltip_text(chip.preview)
         button.connect("clicked", lambda _b: self._act(action, {"key": chip.key}))
@@ -1123,23 +1205,77 @@ class GtkOverlay:
         return row
 
     def _rewrite_as(self) -> Gtk.Widget:
-        row = Gtk.Box(spacing=8)
-        row.pack_start(_label("Rewrite as…", "glance-meta", wrap=False), False, False, 0)
+        """"Rewrite as… e.g. make it a bullet list" with the return key: a click opens the
+        entry over it."""
         field = _classes(_pointer(Gtk.Button(can_focus=False, focus_on_click=False)),
                          "glance-input")
         field.set_name("rewrite-as")
-        field.add(_label(ASK_PLACEHOLDER, wrap=False))
+        inner = Gtk.Box(spacing=8)
+        inner.pack_start(self._glyph("pen", 14, "muted"), False, False, 0)
+        inner.pack_start(_label(look.REWRITE_LEAD, "glance-input-lead", wrap=False),
+                         False, False, 0)
+        hint = _label(ASK_PLACEHOLDER, wrap=False)
+        hint.set_ellipsize(Pango.EllipsizeMode.END)
+        inner.pack_start(hint, True, True, 0)
+        inner.pack_end(_kbd(look.RETURN_KEY), False, False, 0)
+        field.add(inner)
         field.connect("clicked", lambda _b: self._act("tone", {"key": "custom"}))
-        row.pack_start(field, True, True, 0)
         self._ask_input = field
-        return row
+        return field
+
+    def _tones(self, view: PanelView, action: str) -> Gtk.Widget | None:
+        """The "Tone" section: how the text reads, the chips, "Rewrite as…"."""
+        cards = tuple(c for c in view.tone_chips if c.key != "custom")
+        custom = any(c.key == "custom" for c in view.tone_chips)
+        if not (cards or custom):
+            return None
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        head = Gtk.Box(spacing=8)
+        head.pack_start(_label(look.TONE, "glance-section", wrap=False), False, False, 0)
+        line = look.tone_line(view.tone, view.tone_reason)
+        if line:
+            reads = _label(line, "glance-meta", wrap=False)
+            reads.set_ellipsize(Pango.EllipsizeMode.END)
+            head.pack_start(reads, True, True, 0)
+        box.pack_start(head, False, False, 0)
+        if cards:
+            box.pack_start(self._cards(cards, action), False, False, 0)
+        if custom:
+            box.pack_start(self._rewrite_as(), False, False, 0)
+        return box
+
+    def _suggested(self, strip: StripView) -> Gtk.Widget:
+        """The strip's corrected text, in the panel: "Suggested", the text with every changed
+        word tinted, and "Apply (Alt+Enter)"."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.pack_start(_label(look.SUGGESTED, "glance-section", wrap=False), False, False, 0)
+        text = Gtk.Label(xalign=0, wrap=True, selectable=False)
+        text.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        text.set_markup(look.suggested_markup(strip.shown, self._theme.tokens))
+        frame = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), "glance-suggest")
+        frame.pack_start(self._scroller(text, _SUGGEST_MAX_H) if strip.compact else text,
+                         False, False, 0)
+        box.pack_start(frame, False, False, 0)
+        lines = [x for x in (strip.summary, strip.meta) if x]
+        if lines or strip.can_use:
+            bottom = Gtk.Box(spacing=8)
+            notes = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            notes.set_valign(Gtk.Align.CENTER)
+            for line in lines:
+                notes.pack_start(_label(line, "glance-meta"), False, False, 0)
+            bottom.pack_start(notes, True, True, 0)
+            if strip.can_use:
+                apply = self._button(look.apply_label(self._use_key()), "use", "glance-primary")
+                apply.set_valign(Gtk.Align.CENTER)
+                bottom.pack_end(apply, False, False, 0)
+            box.pack_start(bottom, False, False, 0)
+        return box
 
     def _fix_line(self, view: PanelView) -> Gtk.Widget:
         """"3 fixes · its → it's · needs → need": a click applies that one fix."""
         line = Gtk.Box(spacing=2)
         n = len(view.issues)
-        count = self._local_button(f"{n} fix{'' if n == 1 else 'es'}", self._toggle_details,
-                                   "glance-link")
+        count = self._local_button(look.fixes_label(n), self._toggle_details, "glance-link")
         count.set_tooltip_text("Show each one, with more choices")
         line.pack_start(count, False, False, 0)
         shown = [r for r in view.issues if r.replacements][:_LINE_FIXES]
@@ -1157,8 +1293,8 @@ class GtkOverlay:
             line.pack_start(self._local_button(f"+{rest} more", self._toggle_details,
                                                "glance-link"), False, False, 0)
         if view.can_fix_all:
-            line.pack_end(self._button("Fix all", "fix_all", "glance-link", "glance-strong"),
-                          False, False, 0)
+            line.pack_end(self._button(look.FIX_ALL, "fix_all", "glance-link",
+                                       "glance-strong"), False, False, 0)
         return line
 
     def _local_button(self, label: str, fn: Callable[[], None], *classes: str) -> Gtk.Button:
@@ -1217,18 +1353,29 @@ class GtkOverlay:
                                   "glance-link", scope="app"), False, False, 0)
         return box
 
-    def _header(self, view: PanelView, title: str | None) -> Gtk.Widget:
-        header = Gtk.Box(spacing=6)
-        if title:
-            header.pack_start(_label(title, "glance-title", wrap=False), False, False, 0)
-        tone = None
-        if view.tone:
-            tone = f"Reads {view.tone.lower()}"
-            if view.tone_reason:
-                tone += f" — {view.tone_reason}"
-        if tone:
-            header.pack_start(_label(tone, "glance-meta"), True, True, 0)
-        header.pack_end(self._button("Close", "close", "glance-link"), False, False, 0)
+    def _header(self, view: PanelView) -> Gtk.Widget:
+        """The brand mark, "Glance Assistant" and what is at work; who it is for; Esc Close."""
+        header = Gtk.Box(spacing=10)
+        header.pack_start(_mark(22), False, False, 0)
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        titles.set_valign(Gtk.Align.CENTER)
+        has_tones = bool(view.tone_chips)
+        titles.pack_start(_label(look.TITLE, "glance-title", wrap=False), False, False, 0)
+        titles.pack_start(_label(look.subline(view.mode, has_tones), "glance-meta", wrap=False),
+                          False, False, 0)
+        line = None if has_tones else look.tone_line(view.tone, view.tone_reason)
+        if line:  # no tone chips to put it over
+            titles.pack_start(_label(line, "glance-meta"), False, False, 0)
+        header.pack_start(titles, True, True, 0)
+        close = _classes(_pointer(Gtk.Button(can_focus=False, focus_on_click=False)),
+                         "glance-close")
+        inner = Gtk.Box(spacing=6)
+        inner.pack_start(_kbd(look.ESC_KEY), False, False, 0)
+        inner.pack_start(_label(look.CLOSE, wrap=False), False, False, 0)
+        close.add(inner)
+        close.set_valign(Gtk.Align.CENTER)
+        close.connect("clicked", lambda _b: self._act("close", {}))
+        header.pack_end(close, False, False, 0)
         if view.profile_label:
             if view.mode == "selection":
                 header.pack_end(_label(f"For {view.profile_label}", "glance-meta", wrap=False),
@@ -1237,24 +1384,29 @@ class GtkOverlay:
                 audience = self._local_button(f"For {view.profile_label} ▾",
                                               self._toggle_profiles, "glance-link")
                 audience.set_tooltip_text("Who this is written for")
+                audience.set_valign(Gtk.Align.CENTER)
                 header.pack_end(audience, False, False, 0)
         return header
 
     def _fill_drawer(self, card: Gtk.Box, view: PanelView) -> None:
         if view.guard:
             card.pack_start(self._guard_banner(view.guard), False, False, 0)
-        card.pack_start(self._header(view, None), False, False, 0)
+        card.pack_start(self._header(view), False, False, 0)
         if view.profile_label and view.profiles and self._profiles_open:
             menu = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=6,
                                row_spacing=6, max_children_per_line=5)
             for name, label in view.profiles:
                 menu.add(self._button(label, "profile", "glance-secondary", name=name))
             card.pack_start(menu, False, False, 0)
-        cards = tuple(c for c in view.tone_chips if c.key != "custom")
-        if cards:
-            card.pack_start(self._cards(cards, "tone_apply"), False, False, 0)
-        if any(c.key == "custom" for c in view.tone_chips):
-            card.pack_start(self._rewrite_as(), False, False, 0)
+        strip = self._strip_view  # shown here while the panel is open, not on its own
+        suggested = strip is not None and bool(strip.segments)
+        if suggested:
+            card.pack_start(self._suggested(strip), False, False, 0)
+        elif strip is not None and strip.note and not view.tone:
+            card.pack_start(_label(strip.note, "glance-meta"), False, False, 0)
+        tones = self._tones(view, "tone_apply")
+        if tones is not None:
+            card.pack_start(tones, False, False, 0)
         if view.banner:
             card.pack_start(_classes(_label(view.banner), "glance-banner"), False, False, 0)
         if view.copy_offer is not None:
@@ -1267,7 +1419,9 @@ class GtkOverlay:
                                         "glance-secondary"), False, False, 0)
             card.pack_start(offer, False, False, 0)
         if view.issues:
-            card.pack_start(self._fix_line(view), False, False, 0)
+            footer = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10),
+                              "glance-footer")
+            footer.pack_start(self._fix_line(view), False, False, 0)
             if self._details_open:
                 rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
                 for i, row in enumerate(view.issues):
@@ -1275,27 +1429,29 @@ class GtkOverlay:
                     if i:
                         _classes(item, "glance-row")
                     rows.pack_start(item, False, False, 0)
-                card.pack_start(self._scroller(rows, _LIST_MAX_H), False, False, 0)
+                footer.pack_start(self._scroller(rows, _LIST_MAX_H), False, False, 0)
+            card.pack_start(footer, False, False, 0)
         elif not (view.banner or view.copy_offer is not None or view.tone_chips
-                  or view.guard):
+                  or view.guard or suggested):
             card.pack_start(_label("Nothing to fix here.", "glance-meta"), False, False, 0)
 
     def _fill_selection(self, card: Gtk.Box, view: PanelView) -> None:
-        """Select-anything: issues read-only, tone cards, a preview, and the two actions.
+        """Select-anything: issues read-only, tone chips, a preview, and the two actions.
         "Copy rewrite" is the primary one; "Paste over selection" is hidden where
         `can_paste` is false (terminals)."""
-        card.pack_start(self._header(view, "Selected text"), False, False, 0)
-        cards = tuple(c for c in view.tone_chips if c.key != "custom")
-        if cards:
-            card.pack_start(self._cards(cards, "tone"), False, False, 0)
-        if any(c.key == "custom" for c in view.tone_chips):
-            card.pack_start(self._rewrite_as(), False, False, 0)
+        card.pack_start(self._header(view), False, False, 0)
+        tones = self._tones(view, "tone")
+        if tones is not None:
+            card.pack_start(tones, False, False, 0)
         if view.preview is not None:
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            box.pack_start(_label("Rewrite", "glance-section", wrap=False), False, False, 0)
             label = Gtk.Label(xalign=0, wrap=True, max_width_chars=52, selectable=False)
             label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
             label.set_markup(diff_markup(view.preview))  # escaped there: the user's text
-            card.pack_start(_classes(self._scroller(label, _PREVIEW_MAX_H), "glance-preview"),
-                            False, False, 0)
+            box.pack_start(_classes(self._scroller(label, _PREVIEW_MAX_H), "glance-preview"),
+                           False, False, 0)
+            card.pack_start(box, False, False, 0)
         if view.preview_state == "loading":
             card.pack_start(_label("Rewriting…", "glance-meta"), False, False, 0)
         if view.banner:
@@ -1325,7 +1481,7 @@ class GtkOverlay:
         if old is not None:
             self._panel.remove(old)
             old.destroy()
-        card = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10),
+        card = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14),
                         "glance-drawer")
         if view.mode == "selection":
             self._fill_selection(card, view)

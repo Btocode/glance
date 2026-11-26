@@ -1,14 +1,16 @@
 """MacTray: the TrayPort as an NSStatusItem with the Linux tray's menu.
 
 Menu: status line, "Update available — Update now", AI backend ▸, AI usage ▸, "Check: on
-shortcut / while typing", "Show suggestions automatically", Pause/Resume, Quit Glance. Main
-thread only. Needs PyObjC.
+shortcut / while typing", "Show suggestions automatically", "Keyboard shortcuts…",
+Pause/Resume, Quit Glance. The menu bar shows the brand mark (a template image). Main thread
+only. Needs PyObjC.
 """
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
-from AppKit import NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength
+from AppKit import NSImage, NSImageRep, NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength
 
 from glance.backends.base import SIGN_IN
 from glance.platform.macos.appkit_util import Target
@@ -22,6 +24,21 @@ _STATES = {
     "no_ai": ("✦", "Connect an AI"),
 }
 INSTALL_HINT = ""
+# The brand mark as a flat menu bar icon (packaging/icons/symbolic in the checkout).
+_BRAND = Path(__file__).resolve().parents[4] / "packaging" / "icons" / "symbolic"
+
+
+def _brand_image() -> object | None:
+    """The mark as a template image (macOS tints it for the menu bar), or None."""
+    img = NSImage.alloc().initWithSize_((18, 18))
+    for px in (22, 48):
+        rep = NSImageRep.imageRepWithContentsOfFile_(str(_BRAND / f"glance-symbolic-black-{px}.png"))
+        if rep is None:
+            return None
+        rep.setSize_((18, 18))
+        img.addRepresentation_(rep)
+    img.setTemplate_(True)
+    return img
 
 
 class MacTray:
@@ -35,8 +52,9 @@ class MacTray:
                  on_usage_open: Callable[[], None] = lambda: None,
                  on_usage_details: Callable[[], None] = lambda: None,
                  on_check_mode: Callable[[str], None] = lambda mode: None,
-                 check_mode: str = "shortcut", check_hint: str = "") -> None:
-        from glance.ui.tray_gtk import check_mode_labels
+                 check_mode: str = "shortcut", check_hint: str = "",
+                 on_shortcuts: Callable[[], None] = lambda: None) -> None:
+        from glance.ui.tray_gtk import SHORTCUTS_LABEL, check_mode_labels
 
         self._on_pause, self._on_resume = on_pause, on_resume
         self._on_check_mode = on_check_mode
@@ -51,6 +69,7 @@ class MacTray:
         self._t.on_menu_open = on_usage_open
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(
             NSVariableStatusItemLength)
+        self._brand = _brand_image() if _BRAND.is_dir() else None
         self._item.button().setTitle_(_STATES["active"][0])
         self._item.button().setToolTip_("Glance")
         self._menu = NSMenu.alloc().initWithTitle_("Glance")
@@ -76,6 +95,7 @@ class MacTray:
         self.set_check_mode(check_mode)
         self._auto = self._add(self._menu, "Show suggestions automatically", self._auto_clicked)
         self._auto.setState_(1 if auto_suggest else 0)
+        self._add(self._menu, SHORTCUTS_LABEL, on_shortcuts)
         self._toggle = self._add(self._menu, "Pause", self._toggle_clicked)
         self._menu.addItem_(NSMenuItem.separatorItem())
         self._add(self._menu, "Quit Glance", on_quit)
@@ -145,7 +165,13 @@ class MacTray:
         icon, line = _STATES[self._state]
         if self._state == "active" and self._ai_line is not None:
             line = self._ai_line
-        self._item.button().setTitle_(icon)
+        button = self._item.button()
+        if self._brand is not None and icon == "✦":  # the mark, not the sparkle
+            button.setImage_(self._brand)
+            button.setTitle_("")
+        else:
+            button.setImage_(None)
+            button.setTitle_(icon)
         self._headline.setTitle_(line)
         self._toggle.setTitle_("Resume" if self._paused else "Pause")
 

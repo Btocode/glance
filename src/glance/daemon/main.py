@@ -558,7 +558,8 @@ def main(argv: list[str] | None = None) -> int:
         hotkeys = XlibHotkeys(clock.post)
         gtk_overlay = GtkOverlay(on_chip_click=lambda: chip_clicked(),
                                  on_panel_action=lambda action, args: panels.action(action, args),
-                                 hover_menu=lambda: hover_menu())
+                                 hover_menu=lambda: hover_menu(),
+                                 use_key=lambda: watcher.current.ui.use_key)
         ghost = GtkGhost(watcher.current.ui.ghost_font_factor)
         selection_port = XlibSelection()
     # `overlay` holds the Escape grab while any panel is up; the Controller draws through
@@ -581,7 +582,8 @@ def main(argv: list[str] | None = None) -> int:
                    on_check_mode=lambda mode: set_check_mode(
                        update_config, config_path(), mode, watcher.reload),
                    check_mode=watcher.current.general.check,
-                   check_hint=check_label(watcher.current.general.hotkeys.get("check", "")))
+                   check_hint=check_label(watcher.current.general.hotkeys.get("check", "")),
+                   on_shortcuts=lambda: show_shortcuts())
     if not tray.available:
         print(f"glanced: no tray icon; to get one run: {INSTALL_HINT}", file=sys.stderr)
 
@@ -657,6 +659,17 @@ def main(argv: list[str] | None = None) -> int:
             usage_window[0].show(text)
 
         run_ai(lambda: render_report(ai_supervisor.usage_report()), show)
+
+    shortcuts_window: list[Any] = []
+
+    def show_shortcuts() -> None:  # main loop: the tray's "Keyboard shortcuts…"
+        from glance.ui.shortcut_table import glance_shortcuts
+        from glance.ui.shortcuts_gtk import ShortcutsWindow
+
+        if not shortcuts_window:
+            shortcuts_window.append(ShortcutsWindow())
+        cfg = watcher.current
+        shortcuts_window[0].show(glance_shortcuts(cfg.general.hotkeys, cfg.ui.use_key))
 
     refresh_usage()
     features = attach_features(

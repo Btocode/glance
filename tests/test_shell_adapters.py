@@ -105,10 +105,14 @@ def test_dispatch_hands_the_decoded_payload_and_survives_a_bad_handler():
 def test_scene_serializes_views_and_escapes_the_text():
     view = StripView((Segment("a <b> ", False), Segment("it's", True)), 1)
     piece = sc.strip_piece(view, 1, 2, 300, LIGHT, "Alt+Return")
-    assert piece["markup"] == 'a &lt;b&gt; <span foreground="#0e6b5c" weight="bold">it\'s</span>'
-    assert piece["can_use"] and piece["use_label"] == sc.USE_LABEL
+    assert piece["markup"] == 'a &lt;b&gt; <span foreground="#0B7A52" weight="600">it\'s</span>'
+    assert piece["can_use"] and piece["use_label"] == sc.USE_LABEL == "Alt+Enter"
     assert piece["view"]["segments"][1] == {"text": "it's", "changed": True}
-    assert sc.use_label("Ctrl+Return") == "Use  Ctrl+Return"
+    assert sc.use_label("Ctrl+Return") == "Ctrl+Enter"
+    suggested = sc.suggested_piece(view, LIGHT, "Alt+Return")
+    assert suggested["markup"] == (f'a &lt;b&gt; <span background="{LIGHT["highlight"]}" '
+                                   f'foreground="{LIGHT["text"]}">it\'s</span>')
+    assert suggested["can_use"] and suggested["apply_label"] == "Apply (Alt+Enter)"
 
 
 def test_panel_piece_marks_spelling_rows():
@@ -120,7 +124,13 @@ def test_panel_piece_marks_spelling_rows():
     piece = sc.panel_piece(view, 0, 0, 520, True)
     assert [r["spelling"] for r in piece["view"]["issues"]] == [True, False]
     assert piece["view"]["tone_chips"][0]["label"] == "Friendlier"
+    assert piece["view"]["tone_chips"][0]["glyph"] == "heart"
     assert piece["preview_markup"] is None
+    assert (piece["title"], piece["subline"], piece["fixes_label"]) == (
+        "Glance Assistant", "Local grammar · AI tones", "2 fixes")
+    scene = sc.scene(LIGHT, None, panel=piece)
+    assert scene["look"]["glyphs"]["heart"][0] == ["M", 8, 13.2]
+    assert scene["look"]["words"]["fix_all"] == "Fix All"
 
 
 def test_rects_drop_junk():
@@ -210,15 +220,20 @@ def test_a_window_move_moves_the_anchor_and_a_resize_reshows_later():
     assert bus.methods().count("Render") == renders + 1
 
 
-def test_drawer_goes_under_the_strip_and_selection_panel_does_not_follow():
+def test_the_open_panel_shows_the_strip_s_text_in_its_place():
     bus = bus_with_monitors()
     ov, run, *_ = make_overlay(bus)
     ov.on_window({"reason": "focus", "focus": WINDOW})
     ov.show_strip(StripView((Segment("Fixed.", True),), 1), ANCHOR)
+    run()
+    strip_y = last_scene(bus)["strip"]["y"]
     ov.show_panel(PanelView(), 0, 0, ANCHOR)
     run()
     scene = last_scene(bus)
-    assert scene["panel"]["y"] > scene["strip"]["y"] and scene["panel"]["follow"]
+    # the strip is not drawn on its own: the panel shows its text, where the strip was
+    assert scene["strip"] is None and ov.strip_text() is None
+    assert scene["panel"]["y"] == strip_y and scene["panel"]["follow"]
+    assert scene["panel"]["suggested"]["markup"].endswith(">Fixed.</span>")
     assert scene["panel"]["w"] >= 520
     ov.hide_strip()
     ov.show_panel(PanelView(mode="selection"), 500, 400)

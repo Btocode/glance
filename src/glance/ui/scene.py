@@ -1,24 +1,26 @@
 """The overlay scene the GNOME Shell extension renders: views and places as JSON. Pure.
 
 Everything the extension needs to draw is decided here, in Python: which pieces show, their
-text (Pango markup, escaped here), their colours (the theme's tokens) and where they go. The
-extension only lays out widgets and moves them along with the window.
+text (Pango markup, escaped here), their colours (the theme's tokens), the brand mark's files,
+the line glyphs and where everything goes. The extension only lays out widgets and moves them
+along with the window.
 """
 from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from html import escape
 from typing import Any
 
 from glance.diffing import diff_markup
 from glance.grammar.harper import SPELL_RULE
 from glance.protocol import Rect
+from glance.ui import look
 from glance.ui.panel_model import PanelView
 from glance.ui.status_model import StatusView
 from glance.ui.strip_model import StripView
+from glance.ui.theme import ASSETS, MARK_SIZES
 
-USE_LABEL = "Use  Alt+⏎"
+USE_LABEL = "Alt+Enter"
 ASK_PLACEHOLDER = "e.g. make it a bullet list"
 
 
@@ -37,17 +39,13 @@ def _plain(value: Any) -> Any:
 
 def strip_markup(view: StripView, accent: str) -> str:
     """The corrected text as Pango markup (the compact view, or the whole text once expanded:
-    `view.shown`): the fixes bold in the accent colour."""
-    return "".join(
-        f'<span foreground="{accent}" weight="bold">{escape(s.text, quote=False)}</span>'
-        if s.changed else escape(s.text, quote=False) for s in view.shown)
+    `view.shown`): the fixes semibold in the emerald ink."""
+    return look.strip_markup(view.shown, accent)
 
 
 def use_label(use_key: str) -> str:
-    """"Use  Alt+⏎" for the default key; the configured chord otherwise."""
-    if use_key.replace(" ", "").casefold() in ("alt+return", "alt+enter"):
-        return USE_LABEL
-    return f"Use  {use_key}"
+    """The strip's keycap chip: the use key as it is pressed, "Alt+Enter" by default."""
+    return look.chord_text(use_key)
 
 
 def status_piece(view: StatusView, x: int, y: int) -> dict[str, Any]:
@@ -65,12 +63,31 @@ def strip_piece(view: StripView, x: int, y: int, w: int, tokens: dict[str, str],
             "scroll": scroll_h if view.expanded and view.compact else None}
 
 
-def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool) -> dict[str, Any]:
+def suggested_piece(view: StripView, tokens: dict[str, str], use_key: str) -> dict[str, Any]:
+    """The strip's corrected text as the open panel shows it ("Suggested")."""
+    return {"markup": look.suggested_markup(view.shown, tokens),
+            "lines": [x for x in (view.summary, view.meta) if x],
+            "can_use": view.can_use, "apply_label": look.apply_label(use_key),
+            "scroll": view.compact}
+
+
+def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool,
+                suggested: dict[str, Any] | None = None,
+                note: str | None = None) -> dict[str, Any]:
+    """`suggested`: the corrected text while the field's panel is open (the strip is not
+    drawn on its own then); `note`: the strip's line when it has no text to show."""
     plain = _plain(view)
     for row, issue in zip(plain["issues"], view.issues):
         row["spelling"] = issue.rule == SPELL_RULE
+    for chip in plain["tone_chips"]:
+        chip["glyph"] = look.tone_glyph(chip["key"])
+    has_tones = bool(view.tone_chips)
     return {"view": plain,
             "preview_markup": None if view.preview is None else diff_markup(view.preview),
+            "title": look.TITLE, "subline": look.subline(view.mode, has_tones),
+            "tone_line": look.tone_line(view.tone, view.tone_reason),
+            "fixes_label": look.fixes_label(len(view.issues)),
+            "suggested": suggested, "note": None if suggested else note,
             "x": x, "y": y, "w": w, "follow": follow}
 
 
@@ -91,7 +108,18 @@ def scene(tokens: dict[str, str], window: dict[str, Any] | None, *,
           sizes: dict[str, int] | None = None) -> dict[str, Any]:
     return {"v": 1, "tokens": dict(tokens), "window": window_ref(window), "status": status,
             "strip": strip, "panel": panel, "ghost": ghost, "sizes": dict(sizes or {}),
-            "ask_placeholder": ASK_PLACEHOLDER}
+            "ask_placeholder": ASK_PLACEHOLDER, "look": LOOK}
+
+
+# What the extension draws with besides the tokens: the brand mark's files (it picks the size
+# for the screen's scale), the line glyphs and the fixed words.
+LOOK: dict[str, Any] = {
+    "mark_dir": str(ASSETS), "mark_sizes": list(MARK_SIZES),
+    "glyphs": {name: [list(c) for c in path] for name, path in look.GLYPHS.items()},
+    "words": {"suggested": look.SUGGESTED, "tone": look.TONE, "rewrite": look.REWRITE_LEAD,
+              "return_key": look.RETURN_KEY, "esc": look.ESC_KEY, "close": look.CLOSE,
+              "accept_key": look.ACCEPT_KEY, "fix_all": look.FIX_ALL},
+}
 
 
 def rects(raw: Any) -> list[Rect]:

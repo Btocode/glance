@@ -40,7 +40,8 @@ def pump(seconds: float) -> None:
 
 
 def find_button(widget: Gtk.Widget, label: str) -> Gtk.Button | None:
-    if isinstance(widget, Gtk.Button) and button_text(widget).startswith(label):
+    if isinstance(widget, Gtk.Button) and (button_text(widget).startswith(label)
+                                           or label in button_text(widget).split(" | ")):
         return widget
     if isinstance(widget, Gtk.Container):
         for child in widget.get_children():
@@ -117,7 +118,7 @@ def main() -> int:
     move("Close", HOVER_MS / 1000 + 0.2)
     out["after_passing_over"] = list(events)
     move("Shorter", HOVER_MS / 1000 + 0.3)
-    move("e.g. make it", HOVER_MS / 1000 + 0.3)
+    move("Rewrite as…", HOVER_MS / 1000 + 0.3)
     move("Close", 0.1)
     out["after_resting"] = list(events)
     events.clear()
@@ -137,7 +138,7 @@ def main() -> int:
         Gdk.pixbuf_get_from_window(Gdk.get_default_root_window(), 0, 0, w, h).savev(
             args.screenshot, "png", [], [])
     click("Shorter")
-    click("e.g. make it")
+    click("Rewrite as…")
     click("For Team channel")  # opens the audience list
     out["profiles_open"] = labels()
     click("Email")

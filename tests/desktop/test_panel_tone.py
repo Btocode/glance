@@ -330,13 +330,13 @@ def probe():
         _stop(xvfb)
 
 
-CARDS = ["Friendlier | 1 | Hover to preview", "More direct | 2 | Hover to preview",
-         "Shorter | 3 | Hover to preview", "Professional | 4 | Hover to preview",
-         "e.g. make it a bullet list"]
+CARDS = ["Friendlier | Hover to preview | 1", "More direct | Hover to preview | 2",
+         "Shorter | Hover to preview | 3", "Professional | Hover to preview | 4",
+         "Rewrite as… | e.g. make it a bullet list | ↵"]
 
 
 def test_drawer_shows_the_profile_and_the_tone_cards_with_their_hotkeys(probe):
-    assert probe["chips_only"] == ["For Team channel ▾", "Close", *CARDS]
+    assert probe["chips_only"] == ["For Team channel ▾", "Esc | Close", *CARDS]
     # a card click applies: there is no separate Apply button, loading or ready
     assert probe["loading"] == probe["chips_only"] == probe["ready"]
 
@@ -353,7 +353,7 @@ def test_drawer_clicks_reach_the_tone_actions(probe):
         ["tone", {"key": "custom"}],
         ["profile", {"name": "email"}],
     ]
-    assert probe["profiles_open"] == ["For Team channel ▾", "Close", "Team channel",
+    assert probe["profiles_open"] == ["For Team channel ▾", "Esc | Close", "Team channel",
                                       "Direct message", "Email", *CARDS]
     assert probe["profiles_closed"] == probe["ready"]
 

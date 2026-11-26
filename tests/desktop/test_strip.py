@@ -316,7 +316,7 @@ def test_alt_enter_uses_the_suggestion_in_one_undo_step(s):
 def test_use_button_applies(s):
     x, y, w, h = _strip(s)
     assert s.overlay()["strip_text"] == FIXED
-    _click(s, x + w - 80, y + h // 2)  # "Use  Alt+⏎", left of the "⋯"
+    _click(s, x + w - 80, y + h // 2)  # the "Alt+Enter" chip, left of the "⋯"
     assert _wait(lambda: s.buffer() == FIXED, 5.0), (s.buffer(), s.overlay())
     assert s.screen.active()[0] == s.app.pid
 

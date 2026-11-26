@@ -245,7 +245,7 @@ def test_status_icon_hover_menu(probe):
 def test_collapsed_strip_shows_only_the_corrected_sentence(probe):
     assert probe["strip_text"] == ("Hey team I think it's fine to ship Friday, but we need "
                                    "the tests fixed ASAP.")
-    assert probe["strip_buttons"] == ["Use  Alt+⏎", "⋯"]
+    assert probe["strip_buttons"] == ["Alt+Enter", "⋯"]
     # under the caret line, aligned with the field and as wide as it
     assert probe["strip"] == [300, 324, 660, probe["strip"][3]] == probe["strip_reported"]
     assert 30 <= probe["strip"][3] <= 80
@@ -264,20 +264,24 @@ def test_strip_flips_above_the_line_near_the_bottom(probe):
     assert y + h <= 770 and x == 300  # never over the line being typed
 
 
-def test_drawer_opens_under_the_strip(probe):
-    sx, sy, sw, sh = probe["strip_open"]
+def test_drawer_opens_in_the_strips_place(probe):
+    # The open panel shows the corrected text itself ("Suggested"): the strip is not shown
+    # on its own, and the panel takes its place under the caret line.
+    assert probe["strip_open"] is None
+    sx, sy, sw, _sh = probe["strip"]
     px, py, pw, ph = probe["panel"]
     left, top, _right, _bottom = probe["consts"]["shadow"]
-    assert (px + left, py + top) == (sx, sy + sh + probe["consts"]["gap"])
-    assert pw >= sw and 120 < ph < 400
+    assert (px + left, py + top) == (sx, sy)
+    assert pw >= sw and 200 < ph < 480
     assert probe["panel"] == probe["panel_reported"]
-    assert probe["drawer_buttons"][:7] == [
-        "For Team channel ▾", "Close", "Friendlier | 1 | Could someone pick this up? Thanks!",
-        "More direct | 2 | Ship Friday once tests pass.", "Shorter | 3 | Hover to preview",
-        "Professional | 4 | Rewriting…", "e.g. make it a bullet list"]
+    assert probe["drawer_buttons"][:8] == [
+        "For Team channel ▾", "Esc | Close", "Apply (Alt+Enter)",
+        "Friendlier | Could someone pick this up? Thanks! | 1",
+        "More direct | Ship Friday once tests pass. | 2", "Shorter | Hover to preview | 3",
+        "Professional | Rewriting… | 4", "Rewrite as… | e.g. make it a bullet list | ↵"]
     # the same six issues as the strip's sentence: count and fixes agree with it
-    assert probe["drawer_buttons"][7:] == ["6 fixes", "hey → Hey", "i → I", "its → it's",
-                                           "+3 more", "Fix all"]
+    assert probe["drawer_buttons"][8:] == ["6 fixes", "hey → Hey", "i → I", "its → it's",
+                                           "+3 more", "Fix All"]
 
 
 def test_drawer_clicks_reach_the_callbacks(probe):
@@ -318,13 +322,12 @@ def test_strip_moves_fast_and_hides(probe):
 def test_dark_theme_and_screenshots(probe):
     assert probe["dark"] is True
     shots = Path(probe["shots_dir"])
-    names = ["strip-collapsed-light", "strip-expanded-light", "strip-collapsed-dark",
-             "strip-expanded-dark", "selection-light"]
-    names += [f"status-{state}-{theme}" for theme in ("light", "dark")
-              for state in ("idle", "working", "ready", "tone", "muted", "strip",
-                            "muted-strip")]
-    for name in names:
-        assert (shots / f"{name}.png").stat().st_size > 2000, name
+    states = [f"icon-{s}" for s in ("idle", "working", "ready", "tone", "muted")]
+    states += ["muted-strip", "menu", "strip", "panel", "selection", "ghost", "shortcuts"]
+    for state in states:
+        for theme in ("light", "dark"):
+            name = f"v2-{state}-{theme}"
+            assert (shots / f"{name}.png").stat().st_size > 2000, name
 
 
 # ---------------------------------------------------------------- the whole daemon
