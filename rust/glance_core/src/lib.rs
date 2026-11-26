@@ -218,13 +218,17 @@ mod python {
         #[new]
         fn new(py: Python<'_>, detection: PathBuf, recognition: PathBuf) -> PyResult<Self> {
             let r = py.detach(|| {
-                catch_unwind(AssertUnwindSafe(|| crate::ocr::Ocr::load(&detection, &recognition)))
+                catch_unwind(AssertUnwindSafe(|| {
+                    crate::ocr::Ocr::load(&detection, &recognition)
+                }))
             });
             match r {
                 Ok(Ok(inner)) => Ok(Ocr { inner }),
                 Ok(Err(e)) => Err(PyOSError::new_err(e.to_string())),
-                Err(p) => Err(GrammarPanic::new_err(format!("ocrs panicked: {}",
-                                                            panic_message(p.as_ref())))),
+                Err(p) => Err(GrammarPanic::new_err(format!(
+                    "ocrs panicked: {}",
+                    panic_message(p.as_ref())
+                ))),
             }
         }
 
@@ -238,8 +242,10 @@ mod python {
                     Err(PyValueError::new_err(e.to_string()))
                 }
                 Ok(Err(e)) => Err(PyRuntimeError::new_err(e.to_string())),
-                Err(p) => Err(GrammarPanic::new_err(format!("ocrs panicked: {}",
-                                                            panic_message(p.as_ref())))),
+                Err(p) => Err(GrammarPanic::new_err(format!(
+                    "ocrs panicked: {}",
+                    panic_message(p.as_ref())
+                ))),
             }
         }
     }

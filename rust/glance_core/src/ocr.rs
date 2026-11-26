@@ -149,12 +149,18 @@ mod tests {
 
     #[test]
     fn rejects_garbage() {
-        assert!(matches!(decode_png(b"not a png"), Err(OcrFailure::Image(_))));
+        assert!(matches!(
+            decode_png(b"not a png"),
+            Err(OcrFailure::Image(_))
+        ));
     }
 
     #[test]
     fn missing_models_are_a_model_error() {
-        let r = Ocr::load(Path::new("/nonexistent/det.onnx"), Path::new("/nonexistent/rec.onnx"));
+        let r = Ocr::load(
+            Path::new("/nonexistent/det.onnx"),
+            Path::new("/nonexistent/rec.onnx"),
+        );
         assert!(matches!(r, Err(OcrFailure::Model(_))));
     }
 
@@ -162,13 +168,18 @@ mod tests {
     /// and GLANCE_OCR_IMAGE=<png>, prints what it reads (a manual accuracy check).
     #[test]
     fn reads_an_image_when_models_are_given() {
-        let (Ok(dir), Ok(img)) = (std::env::var("GLANCE_OCR_MODELS"), std::env::var("GLANCE_OCR_IMAGE"))
-        else {
+        let (Ok(dir), Ok(img)) = (
+            std::env::var("GLANCE_OCR_MODELS"),
+            std::env::var("GLANCE_OCR_IMAGE"),
+        ) else {
             return;
         };
         let dir = Path::new(&dir);
-        let ocr = Ocr::load(&dir.join("text-detection.onnx"), &dir.join("text-recognition.onnx"))
-            .unwrap();
+        let ocr = Ocr::load(
+            &dir.join("text-detection.onnx"),
+            &dir.join("text-recognition.onnx"),
+        )
+        .unwrap();
         let text = ocr.png_text(&std::fs::read(img).unwrap()).unwrap();
         println!("OCR: {text}");
         assert!(!text.is_empty());

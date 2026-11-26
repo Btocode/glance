@@ -3,7 +3,7 @@
 #   <sha256>  <wheel file name>
 # scripts/fetch-core.sh installs the line matching this machine from the GitHub release
 # core-v<version in the file name>. No matching line: Glance keeps using harper-ls.
-092a93719a91e5b3cef7014de1cbe0fac359b7096ab72bbd4bd72cb6f5aac74f  glance_core-0.2.0-cp310-abi3-macosx_10_12_x86_64.whl
-83d444182b6451b75ebb643a1f351cdbf3af87b132f30a3e216e3dc378a56005  glance_core-0.2.0-cp310-abi3-macosx_11_0_arm64.whl
-2fff63f9cb5febf29c9c9f2e842f7902c813e53b3e946913ec36f6234311500a  glance_core-0.2.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl
-777420a253914356795f5f85e0f1d3ec54ebf29d6087cc57a73bd5acb68c9f24  glance_core-0.2.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+3dc56677f294343d355720bc86b89cff809aa649c2dee0198435408e64869143  glance_core-0.3.0-cp310-abi3-macosx_10_12_x86_64.whl
+d7afa4d5c7e8d9f06eebb407a70004eb101561fe3cf0747192de0f17a1d75509  glance_core-0.3.0-cp310-abi3-macosx_11_0_arm64.whl
+d9ba9cedba0ed8aa2b16ed4740d2d073cac98397d104aa4f40f346431746f1b7  glance_core-0.3.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl
+e19d4eefcb9a9f82f6d44cf3392511cd7a8b52c2807044ac81aec1a353ad8c53  glance_core-0.3.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
