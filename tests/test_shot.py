@@ -312,24 +312,23 @@ def test_never_and_no_vision_and_private_send_nothing(tmp_path):
     r.shoot()
     r.c.action("explain")
     assert r.ui.view.banner == bm.NEEDS_VISION and r.ui.view.notice is None
+
+
+def test_any_window_may_be_shot_and_sent_on_click(tmp_path):
+    # the user's own capture is never blocked: a password manager in the region is fine
     r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")))
     r.shoot(windows=[WindowInfo("bitwarden", "Vault", 1, 2, Rect(0, 0, 300, 300))])
-    assert r.ui.view.banner == bm.PRIVATE and r.ui.view.warn
-    for key in ("explain", "ask", "translate"):
-        r.c.action(key)
-    assert r.sup.images == [] and r.sup.texts == [] and r.overlay.asked is None
-    r.c.action("extract")  # local OCR still works
-    assert r.ui.view.result.text == "Hello teh world"
-    r.c.action("text_explain")
-    assert r.sup.texts == []
+    assert r.ui.view.banner != bm.PRIVATE and not r.ui.view.warn
+    r.c.action("explain")
+    assert len(r.sup.images) == 1
 
 
-def test_password_field_under_the_region_blocks_ai(tmp_path):
+def test_password_field_under_the_region_does_not_block(tmp_path):
     r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")),
             password=Rect(150, 150, 200, 30))
     r.shoot()
     r.c.action("explain")
-    assert r.sup.images == []
+    assert len(r.sup.images) == 1
 
 
 def test_ai_unavailable_and_late_results(tmp_path):

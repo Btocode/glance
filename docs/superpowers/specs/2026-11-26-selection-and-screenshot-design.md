@@ -101,8 +101,9 @@ Tray: "Selection actions" check item. CLI: `glance features selection on|off`.
   `--input-format stream-json` image blocks (verify), codex `exec -i <image>` (verify).
   Others: the action shows "needs a vision-capable AI — Extract text works locally".
 - **Images cannot be redacted.** The first time, a one-line confirm: "This sends the image
-  to <backend>. Anything visible in it is sent." with "Always allow" — and the region picker
-  refuses when a password field or denylisted app is under the region (best effort).
+  to <backend>. Anything visible in it is sent." with "Always allow". Nothing in a shot is
+  off limits (maintainer decision, 2026-11-26): any window or field may be captured, copied,
+  saved, read, and sent on an explicit Explain / Ask click.
 - Counts toward the usage ledger and the monthly cost limit like any AI call.
 
 ### Settings

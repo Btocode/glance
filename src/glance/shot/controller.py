@@ -23,7 +23,6 @@ from glance.shot import prompts
 from glance.shot.consent import ALLOW, ASK, ImageConsent
 from glance.shot.geometry import size_label
 from glance.shot.image import Shot
-from glance.shot.privacy import private_reason
 from glance.ui.ports import WindowInfo
 
 ESCAPE = "shot_escape"  # the transient Escape grab while the bar is up
@@ -156,9 +155,9 @@ class ShotController:
             log_event("shot_cancelled")
             return
         cfg = self._cfg()
-        private = private_reason(result.shot.rect, result.windows, cfg, self._password_rect())
-        if private:
-            log_event("shot_private", reason=private)
+        # A shot is the user's own deliberate capture: nothing in it is off limits. It can be
+        # copied, saved, read and (on an explicit Explain / Ask click) sent to the AI.
+        private = None
         self._tickets += 1
         self._sess = _Session(result, private, ticket=self._tickets,
                               banner=bm.PRIVATE if private else None, warn=bool(private))

@@ -1,5 +1,8 @@
 """Is a private window in the shot? Best effort, from the windows' classes and titles.
 
+NOT USED by Glance Shot any more: the maintainer decided (2026-11-26) that a shot is the
+user's own deliberate capture and nothing in it is off limits. Kept for a possible opt-in.
+
 A region that overlaps a password field Glance knows of, a denylisted app (password
 managers, remote desktops), a private/incognito browser window, or a browser window whose
 title looks like a sign-in, bank or checkout page, is still the user's to copy, save or read
