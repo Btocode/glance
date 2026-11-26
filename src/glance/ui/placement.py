@@ -1,7 +1,9 @@
-"""Placement: caret -> previous char -> field -> window, clamped to the anchor's monitor.
+"""Placement: caret -> previous char -> field, clamped to the anchor's monitor.
 
 `place` gives the controller its anchor point; `place_strip` puts the suggestion strip and its
-drawer, `place_status` the status icon.
+drawer, `place_status` the status icon. None of them falls back to the window: without the
+caret or the field's own rectangle there is nothing to put the icon or the strip next to,
+and they stay hidden (a window corner is no place for them).
 """
 from __future__ import annotations
 
@@ -49,17 +51,18 @@ def place(
     monitors: list[Rect],
     offset: int = 4,
 ) -> tuple[int, int] | None:
-    """Top-left for a chip of `size`, or None when no anchor is usable."""
+    """Top-left for a chip of `size`, or None when no anchor is usable. `window` is never
+    used as an anchor (kept for the callers' signature): no caret and no field, no chip."""
     mon = _usable(caret, monitors, caret_like=True)
     if mon is not None and caret is not None:
         return _clamp(caret.x + caret.w + offset, caret.y + caret.h + offset, size, mon)
     mon = _usable(prev_char, monitors, caret_like=True)
     if mon is not None and prev_char is not None:
         return _clamp(prev_char.x + prev_char.w + offset, prev_char.y + prev_char.h + offset, size, mon)
-    for box in (field, window):
-        mon = _usable(box, monitors, caret_like=False)
-        if mon is not None and box is not None:
-            return _clamp(box.x + box.w - size[0] - offset, box.y + box.h - size[1] - offset, size, mon)
+    mon = _usable(field, monitors, caret_like=False)
+    if mon is not None and field is not None:
+        return _clamp(field.x + field.w - size[0] - offset, field.y + field.h - size[1] - offset,
+                      size, mon)
     return None
 
 
@@ -81,6 +84,15 @@ def clamp_to_monitor(x: int, y: int, size: tuple[int, int],
 
 
 # ---------------------------------------------------------------------- the strip
+
+
+def _field_box(anchor: Anchor, monitors: list[Rect]) -> tuple[Rect, Rect] | None:
+    """The field's rectangle and its monitor when usable. Never the window's."""
+    r = anchor.field
+    m = _usable(r, monitors, caret_like=False)
+    if m is None or r is None or r.w <= 0:
+        return None
+    return r, m
 
 STRIP_MIN_W = 320
 STRIP_MAX_W = 720
@@ -118,7 +130,7 @@ def place_strip(anchor: Anchor, height: int, monitors: list[Rect],
                 gap: int = 6) -> Placed | None:
     """Top-left and width for a strip `height` px tall, or None without a usable anchor.
 
-    Left-aligned with the field (the window when the field is unknown), as wide as it within
+    Left-aligned with the field (the caret when the field is unknown), as wide as it within
     STRIP_MIN_W..STRIP_MAX_W and the monitor, just below the caret line (previous character,
     then the field's bottom). With no room below it goes above that line instead: it never
     covers the line being typed.
@@ -130,13 +142,10 @@ def place_strip(anchor: Anchor, height: int, monitors: list[Rect],
         if mon is not None:
             line = r
             break
-    box = None
-    for r in (anchor.field, anchor.window):
-        m = _usable(r, monitors, caret_like=False)
-        if m is not None and r is not None and r.w > 0:
-            box = r
-            mon = mon or m
-            break
+    found = _field_box(anchor, monitors)
+    box = None if found is None else found[0]
+    if found is not None:
+        mon = mon or found[1]
     ref = line or box
     if ref is None or mon is None:
         return None
@@ -174,13 +183,10 @@ def place_status(anchor: Anchor, size: int, monitors: list[Rect],
         if mon is not None:
             line = r
             break
-    box = None
-    for r in (anchor.field, anchor.window):
-        m = _usable(r, monitors, caret_like=False)
-        if m is not None and r is not None and r.w > 0:
-            box = r
-            mon = mon or m
-            break
+    found = _field_box(anchor, monitors)
+    box = None if found is None else found[0]
+    if found is not None:
+        mon = mon or found[1]
     if mon is None or (line is None and box is None):
         return None
     if line is not None and box is not None and not box.x <= line.x <= box.x + box.w:

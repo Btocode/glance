@@ -105,6 +105,15 @@ def _has_text(obj: Atspi.Accessible) -> bool:
     return "Text" in (_quiet(obj.get_interfaces) or ())
 
 
+def _is_editable_text(obj: Atspi.Accessible) -> bool:
+    """A text object the user can type in. Chromium's page body (document web) and a page's
+    links and labels have text too, and take focus while the user reads: not fields."""
+    if not _has_text(obj):
+        return False
+    state_set = _quiet(obj.get_state_set)
+    return state_set is not None and state_set.contains(Atspi.StateType.EDITABLE)
+
+
 def _char_count(obj: Atspi.Accessible) -> int:
     return Atspi.Text.get_character_count(obj)
 
@@ -215,6 +224,10 @@ class _AtspiField:
             return None
         x, y, w, h = win.get_geometry()
         return Rect(int(x), int(y), int(w), int(h))
+
+    def field_extents(self) -> Rect | None:
+        coords, dx, dy = self._coords()
+        return _rect(_opt(Atspi.Component.get_extents, self.obj, coords), dx, dy)
 
     def _raw_text(self, node: Atspi.Accessible) -> str:
         count = int(_call(Atspi.Text.get_character_count, node))
@@ -547,7 +560,7 @@ class AtspiPort:
         return bool(
             state_set is not None
             and state_set.contains(Atspi.StateType.FOCUSED)
-            and _has_text(obj)
+            and _is_editable_text(obj)
         )
 
     def _adopt(self, obj: Atspi.Accessible) -> _AtspiField | None:
@@ -582,7 +595,7 @@ class AtspiPort:
             if cur is not None and src == cur.obj:
                 self._set_focus(None)
             return
-        if _has_text(src):
+        if _is_editable_text(src):
             self._adopt(src)
         elif cur is not None:
             pid = _quiet(src.get_process_id)

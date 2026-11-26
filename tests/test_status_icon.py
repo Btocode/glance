@@ -91,9 +91,12 @@ def test_icon_goes_above_the_line_without_room_outside():
     assert y + 22 <= 140  # never over the line being typed
 
 
-def test_icon_falls_back_to_the_field_then_the_window():
+def test_icon_falls_back_to_the_field_never_the_window():
     assert place_status(Anchor(field=FIELD), 22, MON) == (704, 104)
-    assert place_status(Anchor(window=Rect(50, 50, 800, 600)), 22, MON) == (854, 54)
+    # Not at the window's top-right corner (over its title or tab strip): hidden.
+    assert place_status(Anchor(window=Rect(50, 50, 800, 600)), 22, MON) is None
+    assert place_status(Anchor(field=Rect(9000, 9000, 10, 10),
+                               window=Rect(50, 50, 800, 600)), 22, MON) is None
     assert place_status(Anchor(prev_char=Rect(150, 140, 8, 20), field=FIELD), 22, MON) == \
         (674, 139)
     assert place_status(Anchor(), 22, MON) is None
@@ -287,6 +290,72 @@ def test_anchor_says_whether_text_follows_the_caret(rig):
     rig.c.handle_snapshot(type(s)(**{**s.__dict__, "caret": 7, "seq": 2}))
     rig.clock.advance(400)  # a caret move is drawn once it settles
     assert rig.overlay.status_anchor.tail is False
+
+
+PRIVATE_FIELD = Rect(90, 190, 400, 300)
+
+
+def _private(**kw):
+    """A gated snapshot as capture sends it: no text, no caret, where the field is."""
+    s = snap(text="", gated="password", caret_rect=None, **kw)
+    return type(s)(**{**s.__dict__, "field_rect": PRIVATE_FIELD,
+                      "window_rect": Rect(50, 50, 800, 600)})
+
+
+def test_private_field_shows_the_grey_icon_by_the_field_and_its_line_only_on_click(rig):
+    rig.c.handle_snapshot(_private())
+    assert rig.overlay.status == StatusView(StatusState.MUTED, message=PRIVATE_LINE)
+    # by the field (just past its right edge, on its first line), not the window corner
+    assert place_status(rig.overlay.status_anchor, 22, MON) == (90 + 400 + 4, 190 + 4)
+    assert rig.overlay.strip is None  # never by itself
+    rig.clock.advance(5000)
+    rig.c.handle_snapshot(_private(seq=2))
+    assert rig.overlay.strip is None
+    rig.c.toggle_strip()
+    assert rig.overlay.strip.note == PRIVATE_LINE
+
+
+@pytest.mark.parametrize("make", ["private", "paused", "no_ai"])
+def test_auto_mode_muted_states_show_the_icon_only(rig, make):
+    rig.cfg = AUTO
+    if make == "private":
+        rig.c.handle_snapshot(_private())
+    else:
+        if make == "no_ai":
+            rig.c.extra_chip_inputs.append(lambda s: {"ai": "none"})
+        _settle(rig, snap(text="The quick brown fox jumps over it."))
+        if make == "paused":
+            rig.c.toggle_pause()
+    rig.clock.advance(400)
+    rig.c.refresh()
+    assert rig.overlay.status.state is StatusState.MUTED
+    assert rig.overlay.strip is None
+    rig.c.toggle_strip()  # a click still says why
+    assert rig.overlay.strip.note == rig.overlay.status.message
+
+
+@pytest.mark.parametrize("gated", [None, "password"])
+@pytest.mark.parametrize("cfg", [Config(), AUTO])
+def test_no_caret_and_no_field_rect_shows_nothing_not_the_window_corner(rig, gated, cfg):
+    rig.cfg = cfg
+    s = snap(gated=gated, text="" if gated else TEH, caret_rect=None)
+    s = type(s)(**{**s.__dict__, "field_rect": None, "window_rect": Rect(0, 0, 1280, 800)})
+    _settle(rig, s)
+    assert rig.overlay.status is None and rig.overlay.strip is None
+    rig.c.toggle_strip()  # no icon to click: nothing opens
+    rig.c.open_panel()
+    assert rig.overlay.strip is None and rig.overlay.panel is None
+
+
+def test_focus_moving_to_a_page_being_read_hides_the_icon(rig):
+    """Capture reports a focused, non-editable page body as no field (test_tracker): what
+    was shown for the field before goes away and nothing comes back by itself."""
+    _settle(rig)
+    rig.c.toggle_strip()
+    rig.c.handle_focus_lost("blur")
+    assert rig.overlay.status is None and rig.overlay.strip is None
+    rig.c.toggle_strip()
+    assert rig.overlay.strip is None
 
 
 # ---------------------------------------------------------------- Escape and the strip

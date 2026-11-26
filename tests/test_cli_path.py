@@ -320,3 +320,11 @@ def test_extension_notice_survives_an_unwritable_state_dir(tmp_path):
     assert ExtensionNotice(blocker / "sub" / "stamp", lambda *m: sent.append(m)).check(False)
     assert len(sent) == 1
 
+
+
+def test_path_only_search_for_tests(tmp_path):
+    (tmp_path / ".local/bin").mkdir(parents=True)
+    called = []
+    out = cli_path.resolve({"GLANCE_CLI_SEARCH": "path", "PATH": "/x:/y", "SHELL": "/bin/zsh"},
+                           home=tmp_path, runner=lambda *a: called.append(a) or "")
+    assert out == "/x:/y" and called == []

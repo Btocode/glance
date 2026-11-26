@@ -230,7 +230,8 @@ class PrivateSession:
         base.update(DISPLAY=self.display, XAUTHORITY=str(self._home / "Xauthority"), XDG_SESSION_TYPE="x11", GDK_BACKEND="x11",
                     GNOME_ACCESSIBILITY="1", GTK_MODULES="gail:atk-bridge",
                     XDG_CONFIG_HOME=str(self._home / "config"),
-                    XDG_DATA_HOME=str(self._home / "data"))
+                    XDG_DATA_HOME=str(self._home / "data"),
+                    GLANCE_CLI_SEARCH="path")  # never find the developer's real AI CLIs
         for d in ("config", "data"):
             (self._home / d).mkdir(exist_ok=True)
         r, w = os.pipe()
@@ -369,7 +370,7 @@ class Typist:
     def _keycode(self, char: str) -> tuple[int, bool]:
         cp = ord(char)
         keysym = cp if 0x20 <= cp <= 0xFF else 0x01000000 + cp
-        hit = self._d.keysym_to_keycodes(keysym)
+        hit = list(self._d.keysym_to_keycodes(keysym))
         if hit:
             code, index = hit[0]
             return code, bool(index & 1)

@@ -136,6 +136,8 @@ def resolve(environ: Mapping[str, str] | None = None, home: Path | None = None,
             runner: ShellRunner | None = None) -> str:
     """The merged search PATH: the login shell's, then the current one, then the usual dirs."""
     environ = os.environ if environ is None else environ
+    if environ.get("GLANCE_CLI_SEARCH") == "path":  # tests: only $PATH, no shell, no home dirs
+        return environ.get("PATH", "")
     home = Path.home() if home is None else home
     shell = login_shell(environ)
     argv = shell_argv(shell) if shell else None

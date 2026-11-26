@@ -89,7 +89,9 @@ def test_password_field_text_is_never_read(rig):
     s = snap(out)
     assert field.reads == 0 and s.gated == "password" and s.text == ""
     assert s.caret == 0
-    assert (s.caret_rect, s.prev_char_rect, s.field_rect) == (None, None, None)
+    assert (s.caret_rect, s.prev_char_rect) == (None, None)
+    # Where the field is (not what it holds): its grey icon sits by the field.
+    assert s.field_rect == field.field_rect
     assert s.window_rect == field.win_rect
     assert "hunter2" not in repr(out)
 
@@ -295,3 +297,42 @@ def test_resync_reads_the_current_field_again(rig):
     tracker.resync()
     clock.advance(16)
     assert field.reads == 2 and snap(out).seq == 2
+
+
+# ---------------------------------------------------------------- only editable fields
+
+
+def test_a_focused_page_being_read_is_no_field_not_a_private_one(rig):
+    """Chrome's document web area takes focus while the user reads a page: it has text but
+    is not editable. It is reported as no field (nothing shown), never as a gated one."""
+    _, port, clock, out = rig
+    page = FakeField(key="doc", text="Dear Afsan, ...", caret=0)
+    page.set_meta(role="document web", states=frozenset({"focused", "focusable"}),
+                  wm_class="Google-chrome", url="https://mail.google.com/", title="")
+    port.focus(page)
+    clock.advance(16)
+    assert out == [] and page.reads == 0
+
+
+def test_leaving_a_field_for_a_page_reports_the_field_lost(rig):
+    _, port, clock, out = rig
+    field = FakeField(text="hello", caret=5)
+    port.focus(field)
+    clock.advance(16)
+    page = FakeField(key="doc", text="a page", caret=0)
+    page.set_meta(role="document web", states=frozenset({"focused"}))
+    port.focus(page)
+    clock.advance(16)
+    assert out[-1] == (FOCUS_LOST, {"reason": "blur"}) and page.reads == 0
+    port.change(page)
+    clock.advance(16)
+    assert [t for t, _ in out] == [SNAPSHOT, FOCUS_LOST]  # once, not per change
+
+
+def test_a_password_field_is_still_a_field(rig):
+    _, port, clock, out = rig
+    field = FakeField(text="hunter2", caret=7)
+    field.set_meta(role="password text", states=frozenset({"focused", "protected"}))
+    port.focus(field)
+    clock.advance(16)
+    assert snap(out).gated == "password" and field.reads == 0

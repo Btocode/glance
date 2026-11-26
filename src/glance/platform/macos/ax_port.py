@@ -208,6 +208,9 @@ class AxField:
         win = self.window()
         return _frame(win) if win is not None else None
 
+    def field_extents(self) -> Rect | None:
+        return _frame(self.el)
+
     def read(self) -> FieldRead:
         if self.secure:
             raise A11yTimeout("secure field")  # never reached through the gate; fail closed

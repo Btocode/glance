@@ -159,7 +159,7 @@ def window_titles(session, pid: int) -> list[str]:
             try:
                 owner = w.get_full_property(atom("_NET_WM_PID"), X.AnyPropertyType)
                 name = w.get_full_property(atom("_NET_WM_NAME"), atom("UTF8_STRING"))
-                if owner and int(owner.value[0]) == pid and name \
+                if owner and int(list(owner.value)[0]) == pid and name \
                         and w.get_attributes().map_state == X.IsViewable:
                     v = name.value
                     out.append(v.decode() if isinstance(v, bytes) else str(v))

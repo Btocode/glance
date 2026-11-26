@@ -1,7 +1,9 @@
 """FocusTracker: follows the focused field and turns it into SNAPSHOT / FOCUS_LOST messages.
 
 The privacy gate is evaluated on metadata before the field's text is read; a gated field is
-never read.
+never read. Only an editable field is a field at all: a focused page body, document, link or
+label (anything without the `editable` state; a password field counts by `protected`) is
+reported as no field, never as a gated one, so nothing is shown for it.
 """
 from __future__ import annotations
 
@@ -15,6 +17,11 @@ from glance.protocol import FOCUS_LOST, SNAPSHOT, FieldSnapshot, Rect
 
 CONFIDENCE_WITH_CARET = 1.0
 CONFIDENCE_WITHOUT_CARET = 0.7
+
+
+def is_field(meta: FieldMeta) -> bool:
+    """An editable text field (a password field is one too: it is `protected`)."""
+    return bool({"editable", "protected"} & meta.states)
 
 
 class FocusTracker:
@@ -34,6 +41,7 @@ class FocusTracker:
         self._field: A11yField | None = None
         self._timer: Handle | None = None
         self._seq = 0
+        self._live = False  # the last message was a SNAPSHOT (a FOCUS_LOST is owed on leaving)
 
     def start(self) -> None:
         self._port.start(self._on_focus, self._on_change)
@@ -70,6 +78,7 @@ class FocusTracker:
         else:
             self._cancel()
             if had_field:
+                self._live = False
                 self._emit(FOCUS_LOST, {"reason": "blur"})
 
     def _on_change(self, field: A11yField) -> None:
@@ -95,8 +104,17 @@ class FocusTracker:
             snapshot = self._capture(field)
         except A11yTimeout:
             self._field = None
+            self._live = False
             self._emit(FOCUS_LOST, {"reason": "timeout"})
             return
+        if snapshot is None:
+            # Not an editable field (a page body being read, a link): no field. Followed
+            # still, in case it becomes editable.
+            if self._live:
+                self._live = False
+                self._emit(FOCUS_LOST, {"reason": "blur"})
+            return
+        self._live = True
         self._emit(SNAPSHOT, snapshot.to_dict())
 
     def _gate_reason(self, meta: FieldMeta) -> str | None:
@@ -109,17 +127,22 @@ class FocusTracker:
             return "title_unknown"
         return None
 
-    def _capture(self, field: A11yField) -> FieldSnapshot:
+    def _capture(self, field: A11yField) -> FieldSnapshot | None:
         meta = field.meta()
+        if not is_field(meta):
+            return None
         reason = self._gate_reason(meta)
         if reason is not None:
-            return self._snapshot(field, meta, gated=reason, window_rect=field.window_rect())
+            # Where the field is (never what it holds), so its icon sits by the field.
+            return self._snapshot(field, meta, gated=reason, field_rect=field.field_extents(),
+                                  window_rect=field.window_rect())
         read = field.read()
         # The length known before the read can be short of the truth (a rich editor's root
         # reports its blocks, not their text), so the gate sees the real length as well.
         reason = self._gate_reason(replace(meta, text_len=len(read.text)))
         if reason is not None:
-            return self._snapshot(field, meta, gated=reason, window_rect=read.window_rect)
+            return self._snapshot(field, meta, gated=reason, field_rect=read.field_rect,
+                                  window_rect=read.window_rect)
         return self._snapshot(
             field, meta, text=read.text, caret=read.caret, caret_rect=read.caret_rect,
             prev_char_rect=read.prev_char_rect, field_rect=read.field_rect,

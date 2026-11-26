@@ -365,6 +365,10 @@ class Controller:
         s = self.current
         if s is None:
             return
+        if not self._strip_visible and (
+                self._anchor(s) is None
+                or self.status_icon().state is StatusState.HIDDEN):
+            return  # no icon on screen: there was nothing to click
         if self._strip_visible:
             self._strip_open = self._panel_open = False
             self._banner = self._copy_offer = None
@@ -749,9 +753,12 @@ class Controller:
     def _visible_strip(self, s: FieldSnapshot, content: StripView | None,
                        status: StatusView) -> StripView | None:
         """The strip as it should be on screen: by itself in "auto" mode (unless snoozed),
-        else only while the user has it open - then with one line when it has nothing."""
+        else only while the user has it open - then with one line when it has nothing.
+        A muted state (paused, private, no AI) never opens it by itself, in either mode:
+        its line is shown only after a click on the icon."""
         if not self._strip_open:
-            if not self._auto() or s.field_id == self._snoozed_field:
+            if (not self._auto() or s.field_id == self._snoozed_field
+                    or status.state in (StatusState.MUTED, StatusState.HIDDEN)):
                 return None
             return content
         if self._pending is not None:

@@ -38,9 +38,9 @@ def test_garbage_prev_char_falls_to_field():
     assert place(None, Rect(0, 0, 0, 0), Rect(200, 200, 400, 100), None, (22, 22), MON) == (574, 274)
 
 
-def test_fallback_order_prev_char_then_field_then_window_then_none():
+def test_fallback_order_prev_char_then_field_then_none_never_the_window():
     assert place(None, Rect(100, 100, 8, 18), None, None, (22, 22), MON) == (112, 122)
-    assert place(None, None, None, Rect(0, 0, 800, 600), (22, 22), MON) == (774, 574)
+    assert place(None, None, None, Rect(0, 0, 800, 600), (22, 22), MON) is None
     assert place(None, None, None, None, (22, 22), MON) is None
 
 
@@ -48,8 +48,9 @@ def test_tall_field_is_usable_but_tall_caret_is_not():
     assert place(None, None, Rect(100, 100, 400, 600), None, (22, 22), MON) == (474, 674)
 
 
-def test_field_off_screen_falls_to_window():
-    assert place(None, None, Rect(9000, 9000, 100, 100), Rect(0, 0, 800, 600), (22, 22), MON) == (774, 574)
+def test_field_off_screen_is_hidden_not_put_on_the_window():
+    assert place(None, None, Rect(9000, 9000, 100, 100), Rect(0, 0, 800, 600), (22, 22),
+                 MON) is None
 
 
 def test_negative_origin_monitor():
@@ -104,13 +105,15 @@ def test_strip_flips_above_the_line_when_there_is_no_room_below():
     assert p.above and p.y + 40 <= 1040  # never over the line being typed
 
 
-def test_strip_falls_back_to_previous_char_field_then_window():
+def test_strip_falls_back_to_previous_char_then_field_never_the_window():
     prev = Anchor(prev_char=Rect(260, 330, 8, 18), field=FIELD)
     assert place_strip(prev, 40, MON) == Placed(200, 354, 500, False)
     field = Anchor(caret=Rect(0, 0, 0, 0), field=FIELD)
     assert place_strip(field, 40, MON) == Placed(200, 426, 500, False)
     window = Anchor(window=Rect(50, 50, 800, 600))
-    assert place_strip(window, 40, MON) == Placed(50, 656, 720, False)
+    assert place_strip(window, 40, MON) is None  # not at the window's top-left corner
+    off = Anchor(field=Rect(9000, 9000, 100, 100), window=Rect(50, 50, 800, 600))
+    assert place_strip(off, 40, MON) is None
     assert place_strip(Anchor(), 40, MON) is None
 
 

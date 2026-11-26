@@ -135,6 +135,10 @@ class FakeField:
         self._check()
         return self.win_rect
 
+    def field_extents(self) -> Rect | None:
+        self._check()
+        return self.field_rect
+
     def read(self) -> FieldRead:
         self._check()
         self.reads += 1

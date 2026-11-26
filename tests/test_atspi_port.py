@@ -160,6 +160,33 @@ def test_focus_event_in_the_active_window_is_adopted():
     assert port.focus_calls == [port._current]
 
 
+def _page(pid: int = 4242) -> Node:
+    """Chrome's page body while the user reads an email: focused, has text, not editable."""
+    app = Node(Role.APPLICATION, name="Google Chrome", pid=pid, states=())
+    frame = Node(Role.FRAME, name="Inbox - Google Chrome", parent=app, pid=pid,
+                 states=("active",))
+    doc = Node(Role.DOCUMENT_WEB, parent=frame, pid=pid, role_name="document web",
+               states=("focused", "focusable", "read-only"))
+    doc.app = app
+    return doc
+
+
+def test_focused_page_being_read_is_not_adopted_as_a_field():
+    port = make_port(Screen(Win(4242), [Win(4242)]))
+    port._focus_event(_page(), True)
+    assert port._current is None and port.focus_calls == []
+    port._text_event(_page())  # a missed-focus search does not take it either
+    assert port._current is None and port.focus_calls == []
+
+
+def test_focus_moving_from_a_field_to_the_page_ends_the_field():
+    port = make_port(Screen(Win(4242), [Win(4242)]))
+    port._focus_event(make_tree("Inbox - Google Chrome"), True)
+    assert port._current is not None
+    port._focus_event(_page(), True)
+    assert port._current is None and port.focus_calls[-1] is None
+
+
 # ---------------------------------------------------------------- title
 
 def test_frame_name_is_the_title():
