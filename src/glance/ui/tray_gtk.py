@@ -76,7 +76,9 @@ class GtkTray:
                  on_setup: Callable[[], None] = lambda: None,
                  on_auto_suggest: Callable[[bool], None] = lambda on: None,
                  auto_suggest: bool = False,
-                 on_update: Callable[[], None] = lambda: None) -> None:
+                 on_update: Callable[[], None] = lambda: None,
+                 on_usage_open: Callable[[], None] = lambda: None,
+                 on_usage_details: Callable[[], None] = lambda: None) -> None:
         self._indicator = None
         self._on_auto_suggest = on_auto_suggest
         self._syncing = False
@@ -111,8 +113,16 @@ class GtkTray:
         self._auto.connect("toggled", self._auto_toggled)
         self._update = Gtk.MenuItem(label="Update available \u2014 Update now")
         self._update.connect("activate", lambda _i: on_update())
+        self._usage_lines: list[Any] = []
+        self._usage_menu = Gtk.Menu()
+        self._usage_item = Gtk.MenuItem(label="AI usage")
+        self._usage_item.set_submenu(self._usage_menu)
+        for refresh in (menu, self._usage_item):  # the numbers are read when the menu opens
+            refresh.connect("show" if refresh is menu else "select", lambda _w: on_usage_open())
+        self._on_usage_details, self._gtk = on_usage_details, Gtk
+        self.set_usage(())
         for item in (self._headline, self._update, Gtk.SeparatorMenuItem(), self._backends.item,
-                     self._auto, self._toggle, quit_item):
+                     self._usage_item, self._auto, self._toggle, quit_item):
             menu.append(item)
         menu.show_all()
         self._update.hide()
@@ -121,6 +131,22 @@ class GtkTray:
     @property
     def available(self) -> bool:
         return self._indicator is not None
+
+    def set_usage(self, lines: tuple[str, ...]) -> None:
+        """The "AI usage ▸" submenu (main thread): `lines` are shown as they are, then
+        "Details…"."""
+        if self._indicator is None:
+            return
+        gtk = self._gtk
+        for child in self._usage_menu.get_children():
+            self._usage_menu.remove(child)
+        for text in lines or ("No usage yet",):
+            self._usage_menu.append(gtk.MenuItem(label=text, sensitive=False))
+        self._usage_menu.append(gtk.SeparatorMenuItem())
+        details = gtk.MenuItem(label="Details…")
+        details.connect("activate", lambda _i: self._on_usage_details())
+        self._usage_menu.append(details)
+        self._usage_menu.show_all()
 
     def set_update_available(self, available: bool) -> None:
         """Show or hide "Update available — Update now" (main thread)."""

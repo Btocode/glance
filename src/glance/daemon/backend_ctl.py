@@ -30,7 +30,7 @@ MAX_KEY_CHARS = 4096
 MAX_TEXT_CHARS = 20_000
 CLI_CTX = Ctx(profile="default", target_tone="neutral", strictness="normal", app_label="glance")
 MESSAGES = ("backend_list", "backend_use", "backend_test", "backend_key", "backend_api", "backend_model",
-            "rewrite", "profile_show", "profile_set", "profile_clear")
+            "usage", "rewrite", "profile_show", "profile_set", "profile_clear")
 
 Reply = Callable[[dict[str, Any]], None]
 
@@ -74,6 +74,14 @@ class BackendControl:
                 return _fail(f"failed: {e.__class__.__name__}")
 
         self._run_bg(safe, done)
+
+    # -- usage ---------------------------------------------------------------------
+    def _usage(self, p: dict[str, Any], reply: Reply) -> None:
+        days = p.get("days")
+        if days is not None and (type(days) is not int or not 1 <= days <= 90):
+            reply(_fail("bad days"))
+            return
+        reply({"ok": True, **self._sup.usage_report(days)})
 
     # -- backends ------------------------------------------------------------------
     def _backend_list(self, p: dict[str, Any], reply: Reply) -> None:

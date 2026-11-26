@@ -5,6 +5,7 @@
     glance resume
     glance wrapper install|uninstall|status
     glance doctor [--fix|--undo] [--app ID]... [--skip ID]... [--json]
+    glance usage [--days N] [--json]   AI calls, tokens and cost (never any text)
     glance backend list|use NAME|test [NAME]|set-key [--provider P]|model NAME [MODEL|--default]
     glance rewrite --tone TONE      stdin -> stdout, through the chosen AI
     glance profile [show|set NAME|clear]   the focused field's audience
@@ -18,6 +19,7 @@ import json
 import os
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -214,6 +216,47 @@ def _rewrite(tone: str) -> int:
     return 0
 
 
+def _usage_offline(days: int | None) -> dict[str, Any]:
+    """The report straight from the ledger file, for when glanced is not running."""
+    from glance.backends.usage import UsageLedger
+    from glance.config import ConfigError, load_config
+    from glance.paths import config_path, usage_ledger_path, usage_path
+
+    try:
+        cfg = load_config(config_path())
+    except ConfigError:
+        from glance.config import Config
+
+        cfg = Config()
+    ledger = UsageLedger(usage_ledger_path())
+    used = 0
+    try:
+        data = json.loads(usage_path().read_text(encoding="utf-8"))
+        if data.get("date") == date.today().isoformat() and type(data.get("count")) is int:
+            used = data["count"]
+    except (OSError, ValueError, AttributeError):
+        pass
+    limit = cfg.ai.monthly_cost_limit_usd
+    month = ledger.month_cost()
+    return {"ok": True, "periods": ledger.periods(days),
+            "budget": {"used_today": used, "per_day": cfg.backend.per_day,
+                       "per_minute": cfg.backend.per_minute},
+            "monthly_cost_limit_usd": limit, "month_cost_usd": round(month, 6),
+            "limit_reason": "month" if limit is not None and month >= limit else None}
+
+
+def _usage(days: int | None, as_json: bool) -> int:
+    from glance.backends.usage import render_report
+
+    reply = _request("usage", {"days": days} if days is not None else {})
+    if reply is not None and not reply.get("ok"):
+        return _refused(reply)
+    report = reply if reply is not None else _usage_offline(days)
+    report = {k: v for k, v in report.items() if k not in ("id", "ok")}
+    print(json.dumps(report) if as_json else render_report(report))
+    return 0
+
+
 def _profile(action: str, name: str | None) -> int:
     msg = {"show": "profile_show", "set": "profile_set", "clear": "profile_clear"}[action]
     reply, code = _ask(msg, {"name": name} if action == "set" else {})
@@ -328,6 +371,9 @@ def main(argv: list[str] | None = None) -> int:
     bm.add_argument("name", choices=BACKENDS)
     bm.add_argument("model", nargs="?", help="model name, as the tool spells it")
     bm.add_argument("--default", action="store_true", help="go back to Glance's default model")
+    us = sub.add_parser("usage", help="how much AI Glance used (calls, tokens, cost)")
+    us.add_argument("--days", type=int, metavar="N", help="just the last N days (1-90)")
+    us.add_argument("--json", action="store_true", help="print the numbers as JSON")
     rw = sub.add_parser("rewrite", help="rewrite stdin in a tone and print it")
     rw.add_argument("--tone", required=True, choices=_TONE_CHOICES)
     pr = sub.add_parser("profile", help="the focused field's audience profile")
@@ -353,6 +399,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.backend_cmd == "model":
             return _backend_model(args.name, args.model, args.default)
         return _backend_set_key(args.provider)
+    if args.cmd == "usage":
+        if args.days is not None and not 1 <= args.days <= 90:
+            ap.error("--days must be between 1 and 90")
+        return _usage(args.days, args.json)
     if args.cmd == "rewrite":
         return _rewrite(args.tone)
     if args.cmd == "profile":

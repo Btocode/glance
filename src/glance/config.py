@@ -178,12 +178,21 @@ class BackendCfg:
 
 
 @dataclass(frozen=True)
+class AiCfg:
+    # Stop new AI calls once the cost the backends reported this calendar month reaches this
+    # many US dollars (local grammar keeps working). None: no limit. Only a cost a backend
+    # reported counts (claude does; the others report none, so they are never stopped by it).
+    monthly_cost_limit_usd: float | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     general: GeneralCfg = field(default_factory=GeneralCfg)
     privacy: PrivacyCfg = field(default_factory=PrivacyCfg)
     apps: dict[str, AppCfg] = field(default_factory=dict)
     ui: UiCfg = field(default_factory=UiCfg)
     backend: BackendCfg = field(default_factory=BackendCfg)
+    ai: AiCfg = field(default_factory=AiCfg)
     raw: dict[str, Any] = field(default_factory=dict)
 
     def app(self, wm_class: str) -> AppCfg:
@@ -252,7 +261,7 @@ def _parse(data: dict[str, Any]) -> Config:
         raise ConfigError("apps", "expected a table")
     apps = {k.casefold(): _build(AppCfg, v, f"apps.{k}", APP_DEFAULTS.get(k.casefold()))
             for k, v in apps_raw.items()}
-    known = {"general", "privacy", "apps", "ui"}  # `raw` keeps [backend] too (Plan 1 contract)
+    known = {"general", "privacy", "apps", "ui", "ai"}  # `raw` keeps [backend] too (Plan 1 contract)
     backend = _build(BackendCfg, data.get("backend", {}), "backend")
     for model_name, model in backend.models.items():
         if not MODEL_NAME.fullmatch(model):
@@ -260,6 +269,9 @@ def _parse(data: dict[str, Any]) -> Config:
     for name in ("per_minute", "per_day"):
         if getattr(backend, name) < 0:
             raise ConfigError(f"backend.{name}", "expected zero or more")
+    ai = _build(AiCfg, data.get("ai", {}), "ai")
+    if ai.monthly_cost_limit_usd is not None and ai.monthly_cost_limit_usd < 0:
+        raise ConfigError("ai.monthly_cost_limit_usd", "expected zero or more")
     ui = _build(UiCfg, data.get("ui", {}), "ui")
     if ui.suggestions not in SUGGESTIONS_MODES:
         # A typo here must not stop Glance: the default, and a line saying which key (the
@@ -272,6 +284,7 @@ def _parse(data: dict[str, Any]) -> Config:
         apps=apps,
         ui=ui,
         backend=backend,
+        ai=ai,
         raw={k: v for k, v in data.items() if k not in known},
     )
 

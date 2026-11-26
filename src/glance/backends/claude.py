@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 from glance.backends.base import BackendError, BaseBackend, Health, error_detail
 from glance.backends.proc import IdleProc, ProcRunner
+from glance.backends.usage import Usage, make_usage
 
 _AUTH = re.compile(
     r"log ?in|logged in|authenticat|unauthori[sz]ed|api key|oauth|credential|sign in", re.IGNORECASE
@@ -38,6 +39,17 @@ def _json_lines(lines: Iterator[str]) -> Iterator[dict]:
             continue
         if isinstance(obj, dict):
             yield obj
+
+
+def claude_usage(obj: dict) -> Usage | None:
+    """Tokens and cost from a claude `result` object (cache reads and writes count as input)."""
+    u = obj.get("usage")
+    u = u if isinstance(u, dict) else {}
+    parts = [u.get(k) for k in ("input_tokens", "cache_creation_input_tokens",
+                                "cache_read_input_tokens")]
+    ints = [p for p in parts if type(p) is int and p >= 0]
+    return make_usage(sum(ints) if ints else None, u.get("output_tokens"),
+                      obj.get("total_cost_usd"))
 
 
 def _raise_if_error(obj: dict) -> None:
@@ -193,6 +205,7 @@ class ClaudeBackend(BaseBackend):
                 self.prewarm("analyze")
             if result is None:
                 raise BackendError("unavailable", "no result")
+            self._add_usage(claude_usage(result))
             return self._structured(result)
         res = self.runner.run(self.argv_json(system, schema), user, timeout_s)
         try:  # the CLI prints one indented JSON object over many lines
@@ -206,6 +219,7 @@ class ClaudeBackend(BaseBackend):
                 classify_error(None, res.stdout + res.stderr) if res.returncode else "bad_output",
                 error_detail(res.stdout + res.stderr, "no json") if res.returncode else "no json",
             )
+        self._add_usage(claude_usage(obj))
         return self._structured(obj)
 
     @staticmethod
@@ -229,14 +243,15 @@ class ClaudeBackend(BaseBackend):
                 lines = idle.feed(self._warm_message(system, user), timeout_s)
             else:
                 lines = self.runner.stream(self.argv_stream(system), user, timeout_s)
-            yield from self._parse_stream(lines)
+            yield from self._parse_stream(lines, self._add_usage)
         finally:
             if idle is not None:
                 idle.kill()
                 self.prewarm("rewrite")
 
     @staticmethod
-    def _parse_stream(lines: Iterator[str]) -> Iterator[str]:
+    def _parse_stream(lines: Iterator[str],
+                      on_usage: Callable[[Usage | None], None] | None = None) -> Iterator[str]:
         sent = ""
         final: str | None = None
         for obj in _json_lines(lines):
@@ -250,6 +265,8 @@ class ClaudeBackend(BaseBackend):
                         sent += text
                         yield text
             elif t == "result":
+                if on_usage is not None:
+                    on_usage(claude_usage(obj))
                 _raise_if_error(obj)
                 final = obj.get("result") if isinstance(obj.get("result"), str) else None
         if final is None:

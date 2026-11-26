@@ -63,5 +63,9 @@ def usage_path() -> Path:
     return data_dir() / "usage.json"
 
 
+def usage_ledger_path() -> Path:
+    return data_dir() / "usage-ledger.json"
+
+
 def harper_bin() -> Path:
     return data_dir() / "bin" / "harper-ls"

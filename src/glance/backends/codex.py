@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from glance.backends.base import (
     BackendError,
@@ -13,6 +13,7 @@ from glance.backends.base import (
     extract_json_object,
 )
 from glance.backends.proc import ProcRunner
+from glance.backends.usage import Usage, make_usage
 from glance.backends.prompts import ANALYZE_SCHEMA
 from glance.paths import runtime_dir
 
@@ -44,8 +45,10 @@ def _events(lines: Iterator[str]) -> Iterator[dict]:
             yield obj
 
 
-def _final_message(lines: Iterator[str]) -> str:
-    """The last agent_message text; raises on error / turn.failed events."""
+def _final_message(lines: Iterator[str],
+                   on_usage: Callable[[Usage | None], None] | None = None) -> str:
+    """The last agent_message text; raises on error / turn.failed events. `on_usage` gets the
+    token counts of a `turn.completed` event."""
     text: str | None = None
     err: str | None = None
     for ev in _events(lines):
@@ -54,6 +57,10 @@ def _final_message(lines: Iterator[str]) -> str:
             item = ev.get("item") or {}
             if item.get("type") == "agent_message" and isinstance(item.get("text"), str):
                 text = item["text"]
+        elif t == "turn.completed" and on_usage is not None:
+            u = ev.get("usage")
+            if isinstance(u, dict):  # codex input_tokens already includes the cached ones
+                on_usage(make_usage(u.get("input_tokens"), u.get("output_tokens")))
         elif t == "turn.failed":
             err = str((ev.get("error") or {}).get("message") or "turn failed")
         elif t == "error" and err is None:
@@ -112,7 +119,7 @@ class CodexBackend(BaseBackend):
     def _run_json(self, system: str, user: str, schema: dict, timeout_s: float) -> dict:
         res = self.runner.run(self._argv(True), self._stdin(system, user), timeout_s)
         try:
-            text = _final_message(iter(res.stdout.splitlines()))
+            text = _final_message(iter(res.stdout.splitlines()), self._add_usage)
         except BackendError as e:
             if e.kind == "bad_output" and res.returncode:
                 raise BackendError(classify_error(res.stderr), error_detail(res.stderr, "codex_exit")) from e
@@ -127,7 +134,7 @@ class CodexBackend(BaseBackend):
 
     def _run_stream(self, system: str, user: str, timeout_s: float) -> Iterator[str]:
         lines = self.runner.stream(self._argv(False), self._stdin(system, user), timeout_s)
-        yield _final_message(lines)  # no deltas in the recorded shape: one chunk
+        yield _final_message(lines, self._add_usage)  # no deltas in the recorded shape: one chunk
 
     def cancel(self) -> None:
         self.runner.cancel()

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
+from glance.backends.usage import Usage
 from glance.log import log_event
 
 ERROR_KINDS = ("timeout", "auth", "rate_limit", "bad_output", "unavailable", "cancelled")
@@ -124,6 +126,22 @@ class BaseBackend:
     name = "base"
     model = ""  # "" runs the CLI's own default (no -m)
     _asked_model = ""  # what the config last asked for; see set_model
+    _usage: Usage | None = None
+    _usage_lock = threading.Lock()
+
+    def _add_usage(self, usage: Usage | None) -> None:
+        """Note what a run reported (backends call this where their output has usage)."""
+        if usage is None:
+            return
+        with self._usage_lock:
+            self._usage = usage if self._usage is None else self._usage + usage
+
+    def take_usage(self) -> Usage | None:
+        """What the runs since the last take reported (a retry adds up); None if nothing.
+        The supervisor takes it once before a call (to clear) and once after."""
+        with self._usage_lock:
+            usage, self._usage = self._usage, None
+        return usage
 
     def set_model(self, model: str) -> None:
         """Follow the configured model. A no-op while the config is unchanged, so a model the

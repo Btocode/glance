@@ -171,6 +171,7 @@ def build_ai(controller: Any, clock: Any, cfg: Callable[[], Any],
     from glance.audience.resolver import DEFAULT_RULES, AudienceResolver
     from glance.backends.budget import Budget
     from glance.backends.supervisor import BackendSupervisor
+    from glance.backends.usage import UsageLedger
     from glance.daemon.ai import AiCoordinator
     from glance.daemon.cache import LruCache
     from glance.daemon.rewrite import is_rich_editor
@@ -193,7 +194,9 @@ def build_ai(controller: Any, clock: Any, cfg: Callable[[], Any],
 
     supervisor = BackendSupervisor(
         backends, lambda: cfg().backend, Budget(clock, lambda: cfg().backend, usage_file),
-        clock, on_battery, on_status, speculative=speculative)
+        clock, on_battery, on_status, speculative=speculative,
+        ledger=UsageLedger(usage_file.with_name("usage-ledger.json")),
+        cost_limit=lambda: cfg().ai.monthly_cost_limit_usd)
     ai = AiCoordinator(
         controller, supervisor, AudienceResolver(profiles, DEFAULT_RULES, overrides),
         LruCache(), clock, run_bg, language=detector.is_mixed, overlay=overlay,
@@ -451,7 +454,9 @@ def main(argv: list[str] | None = None) -> int:
                    on_auto_suggest=lambda on: set_suggestions(
                        update_config, config_path(), on, watcher.reload),
                    auto_suggest=watcher.current.ui.suggestions == "auto",
-                   on_update=lambda: launch_update(notifier.notify, update_log_path()))
+                   on_update=lambda: launch_update(notifier.notify, update_log_path()),
+                   on_usage_open=lambda: refresh_usage(),
+                   on_usage_details=lambda: show_usage_details())
     if not tray.available:
         print(f"glanced: no tray icon; to get one run: {INSTALL_HINT}", file=sys.stderr)
 
@@ -509,6 +514,25 @@ def main(argv: list[str] | None = None) -> int:
         on_status_changed=lambda _status: setup.update_tray())
     setup = AiSetup(ai_supervisor, current_config, keys, run_ai, clock.post,
                     lambda **kw: OnboardingWindow(**kw), tray, update_config, config_path)
+    usage_window: list[Any] = []
+
+    def refresh_usage() -> None:  # main loop: the tray menu is opening
+        from glance.backends.usage import tray_lines
+
+        run_ai(ai_supervisor.usage_report, lambda report: tray.set_usage(tray_lines(report)))
+
+    def show_usage_details() -> None:  # main loop
+        from glance.backends.usage import render_report
+        from glance.ui.usage_gtk import UsageWindow
+
+        def show(text: str) -> None:
+            if not usage_window:
+                usage_window.append(UsageWindow())
+            usage_window[0].show(text)
+
+        run_ai(lambda: render_report(ai_supervisor.usage_report()), show)
+
+    refresh_usage()
     features = attach_features(
         controller=controller, ai=ai, supervisor=ai_supervisor, cfg=current_config,
         grammar=harper, issue_filter=issue_filter,

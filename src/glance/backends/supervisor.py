@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import threading
+from typing import Any
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from glance.backends.base import Analysis, Backend, BackendError, Ctx, Health
 from glance.backends.budget import Budget
+from glance.backends.usage import Usage, UsageLedger
 from glance.clock import Clock
 from glance.config import CLI_MODEL_BACKENDS, BackendCfg, update_config
 from glance.log import log_event
@@ -89,11 +91,14 @@ class BackendSupervisor:
         on_status: Callable[[str], None],
         speculative: dict[str, Backend] | None = None,
         config_path: Path | None = None,
+        ledger: UsageLedger | None = None,
+        cost_limit: Callable[[], float | None] = lambda: None,
     ) -> None:
         self._backends, self._cfg, self._budget, self._clock = backends, cfg, budget, clock
         self._on_battery, self._on_status = on_battery, on_status
         self._spec = dict(speculative or {})
         self._config_path = config_path
+        self.ledger, self._cost_limit = ledger, cost_limit
         self.lane_wait_s = LANE_WAIT_S
         self._lock = threading.RLock()  # guards the state below, never held during a call
         self._breakers = {name: Breaker(clock) for name in backends}
@@ -182,11 +187,69 @@ class BackendSupervisor:
         self._notify()
         return out
 
+    # -- usage -------------------------------------------------------------------
+    def cost_limited(self) -> bool:
+        """Has the cost the backends reported this month reached `[ai] monthly_cost_limit_usd`?"""
+        limit = self._cost_limit()
+        return limit is not None and self.ledger is not None and self.ledger.month_cost() >= limit
+
+    def limit_reason(self) -> str | None:
+        """Why calls are refused: "month" (cost limit), "day", "minute" - or None."""
+        if self.cost_limited():
+            return "month"
+        return self._budget.exhausted()
+
+    def usage_report(self, days: int | None = None) -> dict[str, Any]:
+        """The usage tables plus the limits they are measured against (never any text)."""
+        cfg = self._cfg()
+        report: dict[str, Any] = {
+            "periods": self.ledger.periods(days) if self.ledger else {},
+            "budget": {"used_today": self._budget.used_today(), "per_day": cfg.per_day,
+                       "per_minute": cfg.per_minute},
+            "monthly_cost_limit_usd": self._cost_limit(),
+            "month_cost_usd": round(self.ledger.month_cost(), 6) if self.ledger else 0.0,
+            "limit_reason": self.limit_reason()}
+        return report
+
+    def usage_today(self) -> dict[str, Any]:
+        """A compact summary for `glance status`."""
+        total = self.ledger.periods()["today"]["total"] if self.ledger else {
+            "calls": 0, "input_tokens": 0, "output_tokens": 0, "tokens_known": False,
+            "cost_usd": None}
+        per_day = self._cfg().per_day
+        return {"calls": total["calls"],
+                "tokens": (total["input_tokens"] + total["output_tokens"]
+                           if total["tokens_known"] else None),
+                "cost_usd": total["cost_usd"],
+                "budget_remaining": max(per_day - self._budget.used_today(), 0),
+                "limit": self.limit_reason()}
+
+    def _model_of(self, backend: Backend) -> str:
+        return getattr(backend, "model", "") or getattr(backend, "_model", "") or "default"
+
+    def _before(self, backend: Backend) -> None:
+        take = getattr(backend, "take_usage", None)
+        if take is not None:
+            take()  # drop anything left over from a call nobody recorded
+
+    def _record(self, name: str, backend: Backend, purpose: str, speculative: bool,
+                outcome: str) -> None:
+        """Count one attempt in the ledger. Must never break the AI call itself."""
+        if self.ledger is None:
+            return
+        try:
+            take = getattr(backend, "take_usage", None)
+            usage: Usage | None = take() if take is not None else None
+            self.ledger.record(name, self._model_of(backend), purpose, speculative,
+                               outcome, usage)
+        except Exception as e:  # noqa: BLE001 - bookkeeping failure must not fail a rewrite
+            log_event("usage_record_error", kind=e.__class__.__name__)
+
     # -- status ----------------------------------------------------------------
     def _status(self) -> str:
         if not self._connected():
             return "none"
-        if self._budget.exhausted() is not None:
+        if self._budget.exhausted() is not None or self.cost_limited():
             return "limit"
         return "ok"
 
@@ -248,6 +311,8 @@ class BackendSupervisor:
         if not names:
             self._notify()
             raise AiUnavailable("none")
+        if self.cost_limited():
+            raise AiUnavailable("limit")
         if speculative:
             if self._budget.exhausted() is not None:
                 raise AiUnavailable("limit")
@@ -304,14 +369,19 @@ class BackendSupervisor:
             for name, backend in self._plan("analyze", speculative):
                 if not self._begin(name):
                     continue
+                self._before(backend)
                 try:
                     with self._running(backend, speculative):
                         result = backend.analyze(text, ctx)
                 except BackendError as e:
-                    if e.kind == "cancelled":
+                    cancelled = e.kind == "cancelled"
+                    self._record(name, backend, "analyze", speculative,
+                                 "cancelled" if cancelled else "failed")
+                    if cancelled:
                         raise
                     self._failed(name, e)
                     continue
+                self._record(name, backend, "analyze", speculative, "ok")
                 self._succeeded(name)
                 return result
             raise self._gave_up()
@@ -319,31 +389,42 @@ class BackendSupervisor:
     def rewrite(self, text: str, tone: str, ctx: Ctx, custom: str | None = None,
                 speculative: bool = False) -> Iterator[str]:
         """Text deltas. Falls back only until the first delta has been handed out."""
-        return self._stream(speculative, lambda b: b.rewrite(text, tone, ctx, custom))
+        purpose = "sharpen" if tone == "sharpen_prompt" else "rewrite"
+        return self._stream(speculative, lambda b: b.rewrite(text, tone, ctx, custom), purpose)
 
     def complete(self, prefix: str, ctx: Ctx, speculative: bool = False) -> Iterator[str]:
         """Deltas of a continuation of `prefix`: budget, breaker and fallback as `rewrite`."""
-        return self._stream(speculative, lambda b: b.complete(prefix, ctx))
+        return self._stream(speculative, lambda b: b.complete(prefix, ctx), "complete")
 
-    def _stream(self, speculative: bool,
-                call: Callable[[Backend], Iterator[str]]) -> Iterator[str]:
+    def _stream(self, speculative: bool, call: Callable[[Backend], Iterator[str]],
+                purpose: str = "rewrite") -> Iterator[str]:
         with self._lane(speculative):
             for name, backend in self._plan("rewrite", speculative):
                 if not self._begin(name):
                     continue
                 started = False
+                outcome = "cancelled"  # what a consumer that stops reading leaves behind
+                self._before(backend)
                 try:
-                    with self._running(backend, speculative):
-                        for delta in call(backend):
-                            started = True
-                            yield delta
-                except BackendError as e:
-                    if e.kind == "cancelled":
-                        raise
-                    self._failed(name, e)
-                    if started:
-                        raise self._gave_up() from e
-                    continue
+                    try:
+                        with self._running(backend, speculative):
+                            for delta in call(backend):
+                                started = True
+                                yield delta
+                        outcome = "ok"
+                    except BackendError as e:
+                        if e.kind == "cancelled":
+                            raise
+                        outcome = "failed"
+                        self._record(name, backend, purpose, speculative, outcome)
+                        outcome = ""  # recorded
+                        self._failed(name, e)
+                        if started:
+                            raise self._gave_up() from e
+                        continue
+                finally:
+                    if outcome:
+                        self._record(name, backend, purpose, speculative, outcome)
                 self._succeeded(name)
                 return
             raise self._gave_up()
@@ -372,20 +453,25 @@ class BackendSupervisor:
         self.sync()
         try:
             with self._lane(False):
-                if not self._budget.try_spend():
+                if self.cost_limited() or not self._budget.try_spend():
                     self._notify()
                     return False, "limit"
+                self._before(backend)
                 try:
                     if self._analyzes(name):
                         backend.analyze(TEST_SENTENCE, TEST_CTX)
                     elif not "".join(backend.rewrite(TEST_SENTENCE, TEST_TONE, TEST_CTX)).strip():
                         raise BackendError("bad_output", "empty rewrite")
                 except BackendError as e:
-                    if e.kind == "cancelled":
+                    cancelled = e.kind == "cancelled"
+                    self._record(name, backend, "other", False,
+                                 "cancelled" if cancelled else "failed")
+                    if cancelled:
                         return False, "cancelled"
                     self._failed(name, e)
                     with self._lock:
                         return False, "auth" if name in self._down else e.kind
+                self._record(name, backend, "other", False, "ok")
                 self._succeeded(name)
                 return True, "ok"
         except AiUnavailable:

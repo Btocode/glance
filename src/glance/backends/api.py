@@ -13,6 +13,7 @@ import httpx
 
 from glance.backends.base import BackendError, BaseBackend, Health
 from glance.backends.keystore import KeyStore
+from glance.backends.usage import Usage, make_usage
 from glance.config import API_DEFAULT_MODEL as DEFAULT_ANTHROPIC_MODEL
 from glance.log import log_event
 
@@ -32,6 +33,15 @@ def _status_error(status: int) -> BackendError:
     return BackendError(kind, f"HTTP {status}")
 
 
+def _api_usage(u: object) -> Usage | None:
+    """Tokens from an Anthropic (`input_tokens`) or OpenAI (`prompt_tokens`) usage object."""
+    if not isinstance(u, dict):
+        return None
+    pick = lambda *keys: next((u[k] for k in keys if k in u), None)  # noqa: E731
+    return make_usage(pick("input_tokens", "prompt_tokens"),
+                      pick("output_tokens", "completion_tokens"))
+
+
 class ApiBackend(BaseBackend):
     name = "api"
 
@@ -49,6 +59,7 @@ class ApiBackend(BaseBackend):
         self._lock = threading.Lock()
         self._resp: httpx.Response | None = None
         self._cancelled = False
+        self._stream_tokens: list[int | None] = [None, None]
 
     # -- public -----------------------------------------------------------------------------
 
@@ -142,6 +153,7 @@ class ApiBackend(BaseBackend):
             self._close(resp)
         if not isinstance(data, dict):
             raise BackendError("bad_output", "response is not an object")
+        self._add_usage(_api_usage(data.get("usage")))
         return data
 
     # -- primitives -------------------------------------------------------------------------
@@ -213,6 +225,7 @@ class ApiBackend(BaseBackend):
                 "stream": True,
             }
         resp = self._open(body, timeout_s)
+        self._stream_tokens = [None, None]
         try:
             for line in resp.iter_lines():
                 if self._cancelled:
@@ -228,8 +241,23 @@ class ApiBackend(BaseBackend):
             raise BackendError("unavailable", type(e).__name__) from None
         finally:
             self._close(resp)
+            self._add_usage(make_usage(*self._stream_tokens))
         if self._cancelled:
             raise BackendError("cancelled")
+
+    def _note_stream_usage(self, ev: dict) -> None:
+        """Token counts that ride on stream events: Anthropic's `message_start` (input) and
+        `message_delta` (output so far), an OpenAI-compatible chunk's `usage`."""
+        if self._provider == "anthropic":
+            msg = ev.get("message")
+            u = _api_usage(msg.get("usage") if isinstance(msg, dict) else ev.get("usage"))
+        else:
+            u = _api_usage(ev.get("usage"))
+        if u is not None:
+            if u.input_tokens is not None:
+                self._stream_tokens[0] = u.input_tokens
+            if u.output_tokens is not None:
+                self._stream_tokens[1] = u.output_tokens
 
     def _delta(self, line: str) -> str | None:
         if not line.startswith("data:"):
@@ -243,6 +271,7 @@ class ApiBackend(BaseBackend):
             return None
         if not isinstance(ev, dict):
             return None
+        self._note_stream_usage(ev)
         if self._provider == "anthropic":
             if ev.get("type") != "content_block_delta":
                 return None

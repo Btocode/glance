@@ -429,8 +429,12 @@ class AiCoordinator:
 
     def _status(self) -> dict[str, Any]:
         r = self._resolved
-        return {"ai": self._ai, "backend": self._supervisor.active() or "",
-                "profile": "" if r is None else r.profile.name}
+        out = {"ai": self._ai, "backend": self._supervisor.active() or "",
+               "profile": "" if r is None else r.profile.name}
+        today = getattr(self._supervisor, "usage_today", None)
+        if today is not None:
+            out["usage_today"] = today()
+        return out
 
     # ------------------------------------------------------------------ analyze
 

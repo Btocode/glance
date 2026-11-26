@@ -333,6 +333,41 @@ Claude Code then opens your prompt in Glance's editor window.
 - `glance wrapper status` prints `installed`, `absent` or `conflict`.
 - `glance-edit` must be on the PATH of new shells (for example `~/.local/bin`).
 
+## AI usage
+
+Glance keeps a count of its own AI calls so you can see what it uses. After every call it adds
+to one entry per day, backend and model: calls, failed calls, input and output tokens, and
+what each call was for (analyze, rewrite, complete, sharpen). **No text is stored**: no
+prompts, no replies, no field contents, only numbers. The ledger is
+`~/.local/share/glance/usage-ledger.json` (mode 0600, the last 90 days).
+
+Tokens and cost are recorded only where the backend reports them: claude reports both
+(cost as `total_cost_usd`), the `api` backend and codex report tokens, gemini and opencode
+report neither. Glance has no price list and never estimates, so a missing figure shows as
+`n/a`. On a subscription (a CLI you signed in to) the cost is the API-equivalent figure the
+CLI reports; you are not billed per call.
+
+Where to see it:
+
+- `glance usage` prints Today, Last 7 days and This month per backend and model, plus today's
+  calls against your daily and per-minute limits. `--days N` shows the last N days;
+  `--json` prints the numbers.
+- `glance status` has a short `usage_today` (calls, tokens, cost, calls left today).
+- The tray has an "AI usage" submenu (Today, This month) and "Details..." for the full table.
+
+To stop AI calls once a month's reported cost reaches a number of US dollars, set it in
+`~/.config/glance/config.toml`:
+
+```toml
+[ai]
+monthly_cost_limit_usd = 5.00   # default: no limit
+```
+
+When the limit is reached Glance refuses new AI calls (the chip and tray say "Monthly AI cost
+limit reached") and the local grammar and spelling checks keep working. It starts again on
+the 1st of the next month, or when you raise or remove the setting. Only a cost a backend
+reported counts, so it limits claude (and any backend that reports a cost), not the others.
+
 ## Settings
 
 Settings live in `~/.config/glance/config.toml`; Glance picks up changes while it runs.
