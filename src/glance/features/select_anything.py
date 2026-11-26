@@ -159,29 +159,39 @@ class SelectAnything:
     def trigger(self) -> None:
         self.close()
         self._looking += 1
+        ticket = self._looking
+        self.gated(self._open, current=lambda: ticket == self._looking)
+
+    def gated(self, on_allowed: Callable[[WindowInfo], None], *, quiet: bool = False,
+              terminals: bool = True, current: Callable[[], bool] = lambda: True) -> None:
+        """Decide, without reading a byte of the selection, whether Glance may look at it:
+        the selection must belong to the active window, which is not a password field, not
+        denylisted, private or a sensitive page (and not a terminal unless `terminals`).
+        `on_allowed(active)` is called (maybe later: a browser's page is looked up) while
+        `current()` still holds; a refusal is notified unless `quiet`."""
         if self._c.status()["paused"]:
             return
         cfg = self._cfg()
-        # Who owns the selection, and may Glance look at that window at all, are settled
-        # before a single byte of the selection is read.
+        say = (lambda _m: None) if quiet else self._say
         owner, active = self._selection.owner(), self._selection.active()
         if owner is None or active is None or owner.xid != active.xid:
-            self._say(OTHER_WINDOW)
+            say(OTHER_WINDOW)
             return
         if self._in_password_field(active):
             log_event("select_anything_refused", reason="password")
-            self._say(PRIVATE)
+            say(PRIVATE)
+            return
+        if not terminals and _contains(cfg.privacy.terminal_wm_classes, active.wm_class):
             return
         if not _contains(cfg.privacy.browser_wm_classes, active.wm_class):
-            self._open(active, None, (active.title,))
+            self._allow(active, None, (active.title,), on_allowed, say)
             return
         # A browser: the page decides (a bank page's text must not be sent), and only the
         # browser's own tab knows its URL.
-        ticket = self._looking
         if self._page_lookup is None:
-            self._browser(active, None, ticket)
+            self._browser(active, None, on_allowed, say, current)
         else:
-            self._page_lookup(lambda info: self._browser(active, info, ticket))
+            self._page_lookup(lambda info: self._browser(active, info, on_allowed, say, current))
 
     def _in_password_field(self, active: WindowInfo) -> bool:
         """True if capture's focused field is a password field of the active window's
@@ -189,25 +199,28 @@ class SelectAnything:
         cur = self._c.current
         return cur is not None and cur.gated == "password" and cur.pid == active.pid
 
-    def _browser(self, active: WindowInfo, info: PageInfo | None, ticket: int) -> None:
+    def _browser(self, active: WindowInfo, info: PageInfo | None,
+                 on_allowed: Callable[[WindowInfo], None], say: Callable[[str], None],
+                 current: Callable[[], bool]) -> None:
         now = self._selection.active()
-        if ticket != self._looking or now is None or now.xid != active.xid:
+        if not current() or now is None or now.xid != active.xid:
             return  # the user moved on while the page was being looked up
         url, title = info if info is not None else (None, None)
         titles = (active.title, title) if title else (active.title,)
         if url:
-            self._open(active, url, titles)
+            self._allow(active, url, titles, on_allowed, say)
             return
         # No URL: the title is all there is. A bank, SSO or checkout page is refused by it;
         # anything else goes ahead: the hotkey itself is the user's permission. (The gate's
         # compiler: a broken user pattern still blocks.)
         patterns = [_compile(p) for p in self._cfg().privacy.url_denylist if p]
         if any(rx.search(t) for rx in patterns for t in titles):
-            self._say(PRIVATE)
+            say(PRIVATE)
             return
-        self._open(active, None, titles)
+        self._allow(active, None, titles, on_allowed, say)
 
-    def _open(self, active: WindowInfo, url: str | None, titles: tuple[str, ...]) -> None:
+    def _allow(self, active: WindowInfo, url: str | None, titles: tuple[str, ...],
+               on_allowed: Callable[[WindowInfo], None], say: Callable[[str], None]) -> None:
         gate = self._gate()
         for title in titles:
             meta = FieldMeta(
@@ -217,8 +230,11 @@ class SelectAnything:
             decision = gate.evaluate(meta)
             if not decision.allowed and decision.reason not in _NOT_BLOCKING:
                 log_event("select_anything_refused", reason=decision.reason)
-                self._say(PRIVATE)
+                say(PRIVATE)
                 return
+        on_allowed(active)
+
+    def _open(self, active: WindowInfo) -> None:
         limit = self._cfg().general.max_field_chars
         ticket = self._looking
         # What is in view now, before the hotkey's own blur reaches the controller.
@@ -227,6 +243,14 @@ class SelectAnything:
         xy = self._selection.pointer()
         self._run_read(lambda: self._selection.primary_text(limit * 4),
                        lambda text: self._read(active, text, ticket, anchor, xy))
+
+    def open_text(self, active: WindowInfo, text: str, xy: tuple[int, int]) -> None:
+        """The panel for a selection already read (the action bar's "Rewrite…")."""
+        self.close()
+        self._looking += 1
+        cur = self._c.current
+        anchor = None if cur is None or cur.gated else (cur.field_id, text_sha256(cur.text))
+        self._read(active, text, self._looking, anchor, xy)
 
     def _read(self, active: WindowInfo, text: str | None, ticket: int,
               anchor: tuple[str, str] | None, xy: tuple[int, int]) -> None:

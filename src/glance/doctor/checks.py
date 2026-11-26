@@ -433,9 +433,12 @@ class Hotkeys(_Base):
         from glance.config import ConfigError, load_config
 
         try:
-            wanted = load_config(env.config_file).general.hotkeys
+            cfg = load_config(env.config_file)
         except ConfigError:
             return self.result("warn", "not checked: config is invalid")
+        wanted = dict(cfg.general.hotkeys)
+        if not cfg.shot.enabled:
+            wanted.pop("shot", None)  # Glance Shot is off: its chord is not grabbed
         # The desktop's own shortcuts (read-only gsettings): a chord there is never grabbed.
         taken = [f"{name} ({chord})" for name, chord in wanted.items()
                  if _chord_key(chord) in _desktop_shortcuts(env)]

@@ -149,3 +149,42 @@ def rewrite_text(supervisor: BackendSupervisor, text: str, tone: str, ctx: Ctx,
     except BackendError as e:
         return RewriteOutcome(None, False, "cancelled" if e.kind == "cancelled" else "failed")
     return finish_rewrite(text, shielded, "".join(parts), rich)
+
+
+_FENCE_ONLY = re.compile(r"\A```[^\n]*\n(.*?)\n?```\Z", re.DOTALL)
+_WRAPPED = re.compile(r"\A\s*<glance_text>\s*\n?(.*?)\n?\s*</glance_text>\s*\Z", re.DOTALL)
+
+
+def answer_text(supervisor: BackendSupervisor, text: str, action: str, ctx: Ctx,
+                instruction: str | None = None, *, max_words: int | None = None,
+                replaces: bool = False) -> RewriteOutcome:
+    """A selection action (`prompts.SELECTION_ACTIONS`) on `text`. Blocks: call it off the
+    UI thread. Only the shielded text (its first `max_words` words) is sent; the answer has
+    the user's own content put back. `replaces`: the answer is the text transformed
+    (translate, fix grammar), so whether it may be typed over the selection is decided as
+    for a rewrite (`applicable`); an explanation or a summary is never applicable."""
+    from glance.wordlimit import word_window
+
+    if max_words is not None:
+        w0, w1 = word_window(text, 0, max_words)
+        text = text[w0:w1]
+    shielded = shield(text)
+    try:
+        parts = list(supervisor.rewrite(shielded.text, action, ctx,
+                                        _safe_instruction(instruction)))
+    except AiUnavailable as e:
+        return RewriteOutcome(None, False, e.reason)
+    except BackendError as e:
+        return RewriteOutcome(None, False, "cancelled" if e.kind == "cancelled" else "failed")
+    raw = "".join(parts).strip()
+    if not raw:
+        return RewriteOutcome(None, False, "failed")
+    if replaces:
+        return finish_rewrite(text, shielded, raw, False)
+    m = _WRAPPED.match(raw)
+    if m:
+        raw = m.group(1).strip()
+    m = _FENCE_ONLY.match(raw)
+    if m and action != "explain":
+        raw = m.group(1).strip()
+    return RewriteOutcome(_restore_known(raw, shielded), False, None)

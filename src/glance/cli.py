@@ -10,6 +10,7 @@
     glance rewrite --tone TONE      stdin -> stdout, through the chosen AI
     glance profile [show|set NAME|clear]   the focused field's audience
     glance update [--check]     run the published installer; --check only compares versions
+    glance features [NAME [on|off]]   list the features, or switch one (applies live)
 """
 
 from __future__ import annotations
@@ -89,6 +90,17 @@ def _control(args: argparse.Namespace) -> int:
     if args.cmd == "status":
         status = {k: v for k, v in reply.items() if k not in ("id", "ok")}
         print(json.dumps(status) if args.json else "\n".join(_lines(status)))
+    return 0
+
+
+def _shot() -> int:
+    """`glance shot`: glanced opens the region picker (nothing is captured by this process)."""
+    reply, code = _ask("shot", {})
+    if reply is None:
+        return code
+    if code:
+        print(f"glance: {reply.get('error', 'Glance Shot is off')}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -364,6 +376,35 @@ def _update(check_only: bool) -> int:
     return code
 
 
+def _features(name: str | None, state: str | None) -> int:
+    """List the switches, show one, or turn one on/off. The config file is written directly
+    (keeping its layout); a running glanced picks it up within a second."""
+    from glance import feature_switches as fs
+    from glance.config import Config, ConfigError, load_config, update_config
+    from glance.paths import config_path
+
+    path = config_path()
+    try:
+        cfg = load_config(path)
+    except ConfigError as e:
+        if state is not None:
+            print(f"glance: {e}", file=sys.stderr)
+            return 1
+        cfg = Config()
+    if name is None:
+        print("\n".join(fs.listing(cfg)))
+        return 0
+    f = fs.feature(name)
+    if state is None:
+        print(f"{f.name}: {'on' if f.is_on(cfg) else 'off'}")
+        return 0
+    if not fs.set_feature(update_config, path, name, state == "on"):
+        print(f"glance: could not write {path}", file=sys.stderr)
+        return 1
+    print(f"{f.name}: {state}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     from glance.log import quiet
 
@@ -382,6 +423,7 @@ def _main(argv: list[str] | None) -> int:
     pa.add_argument("duration", nargs="?", metavar="DURATION",
                     help="30m, 2h, 45s; a bare number is minutes")
     sub.add_parser("resume", help="start checking again")
+    sub.add_parser("shot", help="take a Glance Shot: pick a screen region and act on it")
     d = sub.add_parser("doctor", help="check the setup; --fix repairs what Glance owns")
     mode = d.add_mutually_exclusive_group()
     mode.add_argument("--fix", action="store_true", help="repair fixable problems")
@@ -415,7 +457,14 @@ def _main(argv: list[str] | None) -> int:
     up = sub.add_parser("update", help="update Glance by re-running the installer")
     up.add_argument("--check", action="store_true",
                     help="only say whether an update exists (exit 10 if so)")
+    from glance.feature_switches import NAMES as FEATURE_NAMES
+
+    fe = sub.add_parser("features", help="list the features, or turn one on or off")
+    fe.add_argument("name", nargs="?", choices=FEATURE_NAMES)
+    fe.add_argument("state", nargs="?", choices=("on", "off"))
     args = ap.parse_args(argv)
+    if args.cmd == "features":
+        return _features(args.name, args.state)
     if args.cmd in ("status", "pause", "resume"):
         try:
             return _control(args)
@@ -444,6 +493,8 @@ def _main(argv: list[str] | None) -> int:
         return _profile(args.action, args.name)
     if args.cmd == "update":
         return _update(args.check)
+    if args.cmd == "shot":
+        return _shot()
     if args.cmd == "doctor":
         return _doctor(args)
     if args.cmd == "wrapper":

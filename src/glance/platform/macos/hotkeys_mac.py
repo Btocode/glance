@@ -30,7 +30,7 @@ MAC_DEFAULTS: dict[str, str] = {
     "check": "Ctrl+Alt+g", "panel": "Ctrl+Alt+o", "fix_all": "Ctrl+Alt+f",
     "revert": "Ctrl+Alt+z", "pause": "Ctrl+Alt+p", "tone1": "Ctrl+Alt+1",
     "tone2": "Ctrl+Alt+2", "tone3": "Ctrl+Alt+3", "tone4": "Ctrl+Alt+4",
-    "complete": "Ctrl+Alt+Return", "selection": "Ctrl+Alt+a",
+    "complete": "Ctrl+Alt+Return", "selection": "Ctrl+Alt+a", "shot": "Ctrl+Alt+c",
 }
 _SYMBOLS = (("ctrl", "⌃"), ("alt", "⌥"), ("shift", "⇧"), ("super", "⌘"))
 _KEY_SYMBOLS = {"return": "⏎", "space": "Space", "escape": "Esc", "tab": "⇥",

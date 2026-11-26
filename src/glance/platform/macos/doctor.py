@@ -221,9 +221,12 @@ class MacHotkeys(_Base):
         if st is None:
             return self.result("warn", "not checked: glanced is not running")
         try:
-            wanted = mac_hotkeys(load_config(env.config_file).general.hotkeys)
+            cfg = load_config(env.config_file)
         except ConfigError:
             return self.result("warn", "not checked: config is invalid")
+        wanted = mac_hotkeys(cfg.general.hotkeys)
+        if not cfg.shot.enabled:
+            wanted.pop("shot", None)  # Glance Shot is off: its chord is not registered
         grabbed = {n for n in str(st.get("hotkeys_grabbed") or "").split(",") if n}
         lost = [f"{name} ({symbols(chord)})" for name, chord in wanted.items()
                 if name not in grabbed]

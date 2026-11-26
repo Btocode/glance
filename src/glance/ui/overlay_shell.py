@@ -70,7 +70,8 @@ class ShellOverlay:
         self._panel_anchor: Anchor | None = None
         self._panel_point = (0, 0)
         self._ghost: tuple[str, int, int, int, int] | None = None
-        self._sizes = {"strip_h": STRIP_H, "panel_h": PANEL_H}
+        self._selmark: tuple[Any, int, int] | None = None  # selection actions' mark / bar
+        self._sizes = {"strip_h": STRIP_H, "panel_h": PANEL_H, "selmark_w": 0, "selmark_h": 0}
         self._window: dict[str, Any] | None = None
         self._monitors: list[Rect] = []
         self._queued = False
@@ -120,6 +121,22 @@ class ShellOverlay:
             self._panel = None
             self._panel_anchor = None
             self._queue()
+
+    def show_selmark(self, view: Any, x: int, y: int) -> None:
+        self._selmark = (view, x, y)
+        self._queue()
+
+    def hide_selmark(self) -> None:
+        if self._selmark is not None:
+            self._selmark = None
+            self._queue()
+
+    def selmark_hit(self, x: int, y: int) -> bool:
+        r = self._placed.get("selmark") if self._selmark is not None else None
+        return r is not None and r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]
+
+    def selmark_geometry(self) -> tuple[int, int, int, int] | None:
+        return self._placed.get("selmark") if self._selmark is not None else None
 
     def monitors(self) -> list[Rect]:
         if not self._monitors and self._bus.available:
@@ -219,7 +236,7 @@ class ShellOverlay:
 
     def on_sized(self, payload: dict[str, Any]) -> None:
         changed = False
-        for key in ("strip_h", "panel_h"):
+        for key in ("strip_h", "panel_h", "selmark_w", "selmark_h"):
             value = payload.get(key)
             if isinstance(value, (int, float)) and value > 0 and int(value) != self._sizes[key]:
                 self._sizes[key] = int(value)
@@ -327,10 +344,20 @@ class ShellOverlay:
         if self._ghost is not None:
             text, x, y, font_px, max_width = self._ghost
             ghost = sc.ghost_piece(text, x, y, font_px, max_width)
+        selmark = None
+        if self._selmark is not None:
+            from glance.ui import selection_bar as sb
+
+            view, x, y = self._selmark
+            size = sb.MARK_BOX if view.state == "mark" else (
+                self._sizes["selmark_w"] or 640, self._sizes["selmark_h"] or sb.BAR_H)
+            x, y = sb.place_bar((x, y), size, mons)
+            selmark = sc.selmark_piece(view, x, y)
+            placed["selmark"] = (x, y, *size)
         self._placed = placed
         window = self._window if self._window_matches(anchor) else None
         return sc.scene(tokens, window, status=status, strip=strip, panel=panel, ghost=ghost,
-                        sizes=self._sizes)
+                        sizes=self._sizes, selmark=selmark)
 
     def _window_matches(self, anchor: Anchor | None) -> bool:
         """Follow the focused window only if the field is in it."""

@@ -5,13 +5,15 @@ the response body (a server may echo the key).
 """
 from __future__ import annotations
 
+import base64
 import json
 import threading
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 
 import httpx
 
-from glance.backends.base import BackendError, BaseBackend, Health
+from glance.backends.base import VISION_TIMEOUT_S, BackendError, BaseBackend, Health
 from glance.backends.keystore import KeyStore
 from glance.backends.usage import Usage, make_usage
 from glance.config import API_DEFAULT_MODEL as DEFAULT_ANTHROPIC_MODEL
@@ -42,8 +44,21 @@ def _api_usage(u: object) -> Usage | None:
                       pick("output_tokens", "completion_tokens"))
 
 
+def image_content(provider: str, png: bytes, text: str) -> list[dict]:
+    """The user message's content for an image and a question: Anthropic's `image` block
+    (base64 source), or OpenAI's `image_url` with a data URL."""
+    data = base64.b64encode(png).decode("ascii")
+    if provider == "anthropic":
+        return [{"type": "image",
+                 "source": {"type": "base64", "media_type": "image/png", "data": data}},
+                {"type": "text", "text": text}]
+    return [{"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}]
+
+
 class ApiBackend(BaseBackend):
     name = "api"
+    vision = True  # Anthropic's models and OpenAI-compatible vision models take images
 
     def __init__(
         self,
@@ -82,6 +97,18 @@ class ApiBackend(BaseBackend):
         if self._provider == "openai" and not self._model:
             return Health(True, signed_in, "set backend.api_model")
         return Health(True, signed_in, "ok" if signed_in else "no API key stored")
+
+    def vision_key(self) -> str:
+        return f"api:{self._provider}:{urlsplit(self._base).hostname or self._base}"
+
+    def vision_label(self) -> str:
+        host = urlsplit(self._base).hostname or self._base
+        who = "Anthropic" if self._provider == "anthropic" else "the OpenAI-compatible API"
+        return f"{who} ({host})"
+
+    def see(self, png: bytes, system: str, user: str) -> Iterator[str]:
+        yield from self._stream_content(system, image_content(self._provider, png, user),
+                                        VISION_TIMEOUT_S)
 
     def cancel(self) -> None:
         with self._lock:
@@ -209,21 +236,28 @@ class ApiBackend(BaseBackend):
         return out
 
     def _run_stream(self, system: str, user: str, timeout_s: float) -> Iterator[str]:
+        yield from self._stream_content(system, user, timeout_s)
+
+    def stream_body(self, system: str, content: str | list[dict]) -> dict:
+        """The streaming request body; `content` is the user text or a list of blocks."""
         if self._provider == "anthropic":
-            body = {
+            return {
                 "model": self._model,
                 "max_tokens": MAX_TOKENS,
                 "system": system,
-                "messages": [{"role": "user", "content": user}],
+                "messages": [{"role": "user", "content": content}],
                 "stream": True,
             }
-        else:
-            body = {
-                "model": self._model,
-                "messages": [{"role": "system", "content": system},
-                             {"role": "user", "content": user}],
-                "stream": True,
-            }
+        return {
+            "model": self._model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": content}],
+            "stream": True,
+        }
+
+    def _stream_content(self, system: str, content: str | list[dict],
+                        timeout_s: float) -> Iterator[str]:
+        body = self.stream_body(system, content)
         resp = self._open(body, timeout_s)
         self._stream_tokens = [None, None]
         try:

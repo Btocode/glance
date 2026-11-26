@@ -16,6 +16,8 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {KeyGuard} from './keyguard.js';
 import {Overlay} from './overlay.js';
 import {Peers} from './peers.js';
+import {SelectionWatch} from './selwatch.js';
+import {DAEMON_ONLY, ShotUi} from './shot.js';
 
 const VERSION = 1;
 const SHELL_NAME = 'io.github.btocode.GlanceShell';
@@ -25,13 +27,15 @@ const DAEMON_IFACE = 'io.github.btocode.Glance1';
 
 const METHODS = ['Ping', 'Render', 'Grab', 'Ungrab', 'FocusedWindow', 'Monitors', 'KeyState',
     'TypeText', 'Chord', 'ClipboardSave', 'ClipboardSet', 'ClipboardRestore', 'ReadPrimary',
-    'ActivateWindow', 'Ask', 'Pointer'];
+    'ActivateWindow', 'Ask', 'Pointer', 'WatchSelection',
+    // Glance Shot (shot.js): glanced's alone, see DAEMON_ONLY
+    'ShotPick', 'ShotCancel', 'ShotCapture', 'ShotBar', 'ShotClipboard'];
 // GLANCE_SHELL_TEST=1 only (the private test shell). TestCall runs any method of METHODS for
 // the test process, which is not Glance and is refused by every one of them otherwise.
 const TEST_METHODS = ['TestHideOverview', 'TestMoveWindow', 'TestOverlay', 'TestClick',
     'TestScreenshot', 'TestAskText', 'TestPointer', 'TestGrabs', 'TestCall'];
 // Methods that answer later (they wait for the clipboard, a timer or a screenshot).
-const ASYNC = new Set(['TypeText', 'ClipboardSave', 'ReadPrimary', 'ClipboardRestore',
+const ASYNC = new Set(['TypeText', 'ClipboardSave', 'ReadPrimary', 'ClipboardRestore', 'ShotCapture',
     'TestClick', 'TestScreenshot', 'TestCall']);
 // What any caller may ask: whether the extension is there (the installer and doctor ask).
 const OPEN = new Set(['Ping']);
@@ -47,7 +51,7 @@ function ifaceXml(test) {
 
 // Hotkey names glanced configures ([general.hotkeys]); they are keys of our schema.
 const SCHEMA_KEYS = new Set(['check', 'panel', 'fix-all', 'revert', 'pause', 'tone1', 'tone2', 'tone3',
-    'tone4', 'complete', 'selection']);
+    'tone4', 'complete', 'selection', 'shot']);
 
 const MODIFIER_KEYVALS = {
     ctrl: Clutter.KEY_Control_L, shift: Clutter.KEY_Shift_L,
@@ -82,6 +86,15 @@ export default class GlanceExtension extends Extension {
             askDone: result => this._daemon('AskDone', result),
             windowFrame: id => this._frameOf(id),
         });
+        // Selection actions: "a selection settled" (never its text) for glanced.
+        this._selwatch = new SelectionWatch({
+            settled: (x, y) => this._daemon('SelectionSettled', {x, y}),
+            cleared: () => this._daemon('SelectionCleared', {}),
+        });
+        this._shot = new ShotUi({
+            picked: result => this._daemon('ShotPicked', result),
+            clicked: action => this._daemon('Clicked', {target: 'shot', args: {action}}),
+        });
         // Transient grabs never outlive an answering glanced (see keyguard.js).
         this._guard = new KeyGuard({
             held: () => [...this._grabs].filter(([, g]) => g.kind === 'accel')
@@ -107,6 +120,8 @@ export default class GlanceExtension extends Extension {
     }
 
     disable() {
+        this._selwatch.destroy();
+        this._selwatch = null;
         this._guard.gone();
         for (const name of [...this._grabs.keys()])
             this._ungrab(name);
@@ -116,6 +131,8 @@ export default class GlanceExtension extends Extension {
         Main.layoutManager.disconnect(this._monitorsId);
         this._overlay.destroy();
         this._overlay = null;
+        this._shot.destroy();
+        this._shot = null;
         this._obj.unexport();
         this._obj = null;
         Gio.bus_unown_name(this._nameId);
@@ -161,7 +178,11 @@ export default class GlanceExtension extends Extension {
             return true;
         if (TEST_METHODS.includes(name))
             return this._test;  // exported only in the test shell anyway
-        return Boolean(sender) && await this._peers.authorize(sender) !== null;
+        if (!sender)
+            return false;
+        const role = await this._peers.authorize(sender);
+        // the screen capture and the rest of Glance Shot: the verified glanced only
+        return DAEMON_ONLY.has(name) ? role === 'daemon' : role !== null;
     }
 
     _run(name, payload, done) {
@@ -209,11 +230,13 @@ export default class GlanceExtension extends Extension {
     // glanced left the bus (quit, crashed, killed): nothing may stay captured or on screen
     // for it. A new glanced grabs and draws again when it starts.
     _daemonGone() {
+        this._selwatch?.set(false);
         this._guard?.gone();
         for (const name of [...this._grabs.keys()])
             this._ungrab(name);
         try {
             this._overlay?.reset();
+            this._shot?.destroy();
         } catch (e) {
             logError(e, 'Glance: overlay reset');
         }
@@ -530,11 +553,37 @@ export default class GlanceExtension extends Extension {
         });
     }
 
+    _mWatchSelection({on}) {
+        return this._selwatch.set(Boolean(on));
+    }
+
     // "Rewrite as…"
 
     _mAsk(payload) {
         this._overlay.ask(payload, this._window);
         return {ok: true};
+    }
+
+    // Glance Shot (shot.js)
+
+    _mShotPick(payload) {
+        return this._shot.pick(payload);
+    }
+
+    _mShotCancel() {
+        return this._shot.cancel();
+    }
+
+    _mShotCapture(payload, done) {
+        this._shot.capture(payload, done);
+    }
+
+    _mShotBar(payload) {
+        return payload?.hide ? this._shot.hideBar() : this._shot.showBar(payload);
+    }
+
+    _mShotClipboard(payload) {
+        return this._shot.copyImage(payload);
     }
 
     // ------------------------------------------------------------------ test hooks
@@ -575,7 +624,8 @@ export default class GlanceExtension extends Extension {
     }
 
     _mTestOverlay() {
-        return this._overlay.describe();
+        return {...this._overlay.describe(), selwatch: this._selwatch?.stats ?? null,
+            shot: this._shot.describe()};
     }
 
     // The keys held for glanced now: its keybindings ('wm') and transient grabs ('accel').
@@ -584,7 +634,7 @@ export default class GlanceExtension extends Extension {
     }
 
     _mTestClick({target}, done) {
-        const actor = this._overlay.actorFor(target);
+        const actor = this._overlay.actorFor(target) ?? this._shot.actorFor(target);
         if (!actor || !actor.mapped) {
             done({ok: false});
             return;

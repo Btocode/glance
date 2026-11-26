@@ -20,6 +20,8 @@ ANALYZE_TIMEOUT_S = 8.0  # an analysis while typing: a late one is no use
 # quick local fixes at once with a loader, and waits this long for the AI's corrected text.
 CHECK_TIMEOUT_S = 15.0
 REWRITE_TIMEOUT_S = 20.0
+VISION_TIMEOUT_S = 60.0  # an image takes longer to read than a sentence
+NO_VISION = "no_vision"  # BackendError.detail of a backend that cannot take images
 COMPLETE_TIMEOUT_S = 8.0
 
 # The one sign-in table (spec 5.2): onboarding, `glance backend list`, doctor and the chip all
@@ -148,6 +150,8 @@ class BaseBackend:
     """Subclasses supply `_run_json` and `_run_stream`; prompts and validation live here."""
 
     name = "base"
+    # Takes images (Glance Shot's Explain / Ask): the api backend and the claude CLI.
+    vision = False
     model = ""  # "" runs the CLI's own default (no -m)
     _asked_model = ""  # what the config last asked for; see set_model
     _usage: Usage | None = None
@@ -231,9 +235,9 @@ class BaseBackend:
         return parse_analysis(self._json(system + REPAIR_SUFFIX, user, ANALYZE_SCHEMA, left))
 
     def rewrite(self, text: str, tone: str, ctx: Ctx, custom: str | None = None) -> Iterator[str]:
-        from glance.backends.prompts import rewrite_system, user_block
+        from glance.backends.prompts import INSTRUCTED, rewrite_system, user_block
 
-        instruction = custom if tone == "custom" else None  # typed text: stdin/body only
+        instruction = custom if tone in INSTRUCTED else None  # typed text: stdin/body only
         yield from self._stream(
             rewrite_system(tone, ctx), user_block(text, instruction), REWRITE_TIMEOUT_S
         )
@@ -242,3 +246,20 @@ class BaseBackend:
         from glance.backends.prompts import complete_system, user_block
 
         yield from self._stream(complete_system(ctx), user_block(prefix), COMPLETE_TIMEOUT_S)
+
+    def answer(self, system: str, user: str) -> Iterator[str]:
+        """A free-form answer to `user` under `system` (Glance Shot's text actions)."""
+        yield from self._stream(system, user, REWRITE_TIMEOUT_S)
+
+    def see(self, png: bytes, system: str, user: str) -> Iterator[str]:
+        """An answer about a PNG image (Explain / Ask). Only where `vision` is true."""
+        raise BackendError("unavailable", NO_VISION)
+        yield ""  # pragma: no cover - a generator
+
+    def vision_key(self) -> str:
+        """Who receives an image: the one-time notice is remembered under this."""
+        return self.name
+
+    def vision_label(self) -> str:
+        """The receiver as the notice names it."""
+        return self.name

@@ -32,11 +32,19 @@ from glance.grammar.harper import SPELL_RULE
 from glance.log import log_event
 from glance.protocol import Rect
 from glance.ui import look
+from glance.ui import selection_bar as sb
 from glance.ui.chip_model import ChipView
 from glance.ui.hover_menu import CLOSE_MS as MENU_CLOSE_MS
 from glance.ui.hover_menu import OPEN_MS as MENU_OPEN_MS
 from glance.ui.hover_menu import HoverMenu
-from glance.ui.panel_model import IssueRow, PanelView, SuggestedBox, ToneChip, suggested_box
+from glance.ui.panel_model import (
+    IssueRow,
+    PanelView,
+    ResultView,
+    SuggestedBox,
+    ToneChip,
+    suggested_box,
+)
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
 from glance.ui.strip_model import StripView, scroll_max_h
@@ -461,6 +469,16 @@ class GtkOverlay:
         self._strip.connect("size-allocate", lambda *_a: self._strip_shape())
         self._strip.connect("map", lambda *_a: self._strip_shape())
 
+        # Selection actions: the mark beside selected text, then its action bar. A popup
+        # that never takes the focus, like the strip.
+        self._sel = _popup(Gdk.WindowTypeHint.TOOLTIP)
+        self._sel.connect("draw", _clear)
+        self._sel.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self._sel.connect("enter-notify-event", lambda *_a: self._sel_crossing(True, None))
+        self._sel.connect("leave-notify-event", lambda _w, e: self._sel_crossing(False, e))
+        self._sel_view: sb.SelectionBarView | None = None
+        self._sel_xy = (0, 0)
+
         self._panel = _popup(Gdk.WindowTypeHint.POPUP_MENU)
         self._panel.connect("draw", _clear)
         self._panel.connect("size-allocate", lambda *_a: self._panel_shape())
@@ -563,6 +581,140 @@ class GtkOverlay:
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(text, -1)
         clipboard.store()
+
+    # ------------------------------------------------------------------ selection actions
+
+    def show_selmark(self, view: sb.SelectionBarView, x: int, y: int) -> None:
+        """The mark at (x, y), or the action bar growing from there (kept on the monitor)."""
+        rebuilt = view != self._sel_view
+        if rebuilt:
+            self._sel_view = view
+            self._build_sel(view)
+        child = self._sel.get_child()
+        w, h = child.get_preferred_size()[1].width, child.get_preferred_size()[1].height
+        if view.state == "mark":
+            w, h = sb.MARK_BOX
+        xy = sb.place_bar((x, y), (w, h), self.monitors())
+        self._sel_xy = xy
+        self._sel.resize(w, h)
+        self._sel.move(*xy)
+        if not self._sel.get_visible():
+            self._sel.show_all()
+            self._sel.move(*xy)
+        self._sel_shape(w, h)
+        _raise(self._sel)
+
+    def hide_selmark(self) -> None:
+        self._sel_view = None
+        if self._sel.get_visible():
+            self._sel.hide()
+
+    def selmark_hit(self, x: int, y: int) -> bool:
+        """Is (x, y) on the mark or the bar? (A click there must not hide it.)"""
+        if not self._sel.get_visible():
+            return False
+        sx, sy = self._sel_xy
+        w, h = self._sel.get_size()
+        return sx <= x < sx + w and sy <= y < sy + h
+
+    def selmark_geometry(self) -> tuple[int, int, int, int] | None:
+        """Test access: where the mark or the bar is, None while hidden."""
+        if not self._sel.get_visible():
+            return None
+        return (*self._sel_xy, *self._sel.get_size())
+
+    def selmark_state(self) -> str | None:
+        return None if self._sel_view is None else self._sel_view.state
+
+    def selmark_window(self) -> Gtk.Window:
+        return self._sel
+
+    def _sel_crossing(self, inside: bool, event: Gdk.EventCrossing | None) -> bool:
+        if event is not None and event.detail == Gdk.NotifyType.INFERIOR:
+            return False  # onto one of its own buttons: still inside
+        self._act("sel_hover", {"inside": inside})
+        return False
+
+    def _sel_shape(self, w: int, h: int) -> None:
+        gdk_window = self._sel.get_window()
+        if gdk_window is None or self._composited:
+            return
+        gdk_window.shape_combine_region(_rounded(0, 0, w, h, 9 if w > sb.MARK_BOX[0] else 13),
+                                        0, 0)
+
+    def _build_sel(self, view: sb.SelectionBarView) -> None:
+        old = self._sel.get_child()
+        if old is not None:
+            self._sel.remove(old)
+            old.destroy()
+        if view.state == "mark":
+            child = self._sel_mark()
+        else:
+            child = self._sel_bar(view)
+        child.show_all()
+        self._sel.add(child)
+
+    def _sel_mark(self) -> Gtk.Widget:
+        """The bare mark on a small round surface, a hairline round it: visible on any page."""
+        area = _pointer(Gtk.Button(can_focus=False, focus_on_click=False))
+        _classes(area, "glance-selmark")
+        area.set_size_request(*sb.MARK_BOX)
+        draw = Gtk.DrawingArea()
+        draw.set_size_request(*sb.MARK_BOX)
+        area.add(draw)
+
+        def paint(w: Gtk.Widget, cr: Any) -> bool:
+            t = self._theme.tokens
+            bw, bh = sb.MARK_BOX
+            r = bw / 2 - 1
+            cr.arc(bw / 2, bh / 2, r, 0, 6.2832)
+            cr.set_source_rgb(*rgb(t, "surface"))
+            cr.fill_preserve()
+            cr.set_source_rgba(*rgba(t["use_border"]))
+            cr.set_line_width(1.2)
+            cr.stroke()
+            px = sb.MARK_PX - 2
+            paint_mark(cr, w, (bw - px) / 2, (bh - px) / 2, px)
+            return True
+
+        draw.connect("draw", paint)
+        area.connect("clicked", lambda _b: self._act("sel_mark", {}))
+        area.set_tooltip_text("Glance: act on the selected text")
+        return area
+
+    def _sel_bar(self, view: sb.SelectionBarView) -> Gtk.Widget:
+        """The mark, then one button per action (`⋯` opens a second row: "Translate to…"
+        and the audience's tones)."""
+        outer = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4),
+                         "glance-menu", "glance-selbar")
+        row = Gtk.Box(spacing=2)
+        lead = _mark(16)
+        lead.set_margin_start(4)
+        lead.set_margin_end(4)
+        row.pack_start(lead, False, False, 0)
+        for a in view.actions:
+            row.pack_start(self._sel_button(a), False, False, 0)
+        outer.pack_start(row, False, False, 0)
+        if view.more:
+            more = Gtk.Box(spacing=2)
+            for a in view.more:
+                more.pack_start(self._sel_button(a), False, False, 0)
+            outer.pack_start(_classes(more, "glance-selmore"), False, False, 0)
+        return outer
+
+    def _sel_button(self, a: sb.BarAction) -> Gtk.Button:
+        action, args = ("sel_more", {}) if a.key == "more" else ("sel_action", {"key": a.key})
+        button = _pointer(Gtk.Button(can_focus=False, focus_on_click=False))
+        _classes(button, "glance-item", "glance-selbtn")
+        inner = Gtk.Box(spacing=5)
+        if a.glyph is not None and a.glyph in look.GLYPHS:
+            inner.pack_start(self._glyph(a.glyph, 13), False, False, 0)
+        inner.pack_start(_label(a.label, wrap=False), False, False, 0)
+        button.add(inner)
+        if a.tip:
+            button.set_tooltip_text(a.tip)
+        button.connect("clicked", lambda _b: self._act(action, dict(args)))
+        return button
 
     # ------------------------------------------------------------------ placing
 
@@ -764,7 +916,7 @@ class GtkOverlay:
         self._composited = now
         self._shadow = SHADOW if now else NO_SHADOW
         log_event("overlay_composited", on=now)
-        for win in (self._icon, self._strip, self._panel, self._menu):
+        for win in (self._icon, self._strip, self._panel, self._menu, self._sel):
             gdk_window = win.get_window()
             if gdk_window is not None and now:
                 gdk_window.shape_combine_region(None, 0, 0)
@@ -774,6 +926,9 @@ class GtkOverlay:
             self._rebuild_panel(self._panel_view)
         if self._strip_view is not None:
             self._build_strip(self._strip_view)
+        if self._sel_view is not None:  # the mark's round surface: cut out again, or not
+            w, h = self._sel.get_size()
+            self._sel_shape(w, h)
         self._layout(force=True)
 
     def _strip_shape(self) -> None:
@@ -1044,6 +1199,9 @@ class GtkOverlay:
         """The desktop switched light/dark: the CSS is swapped; redraw what cairo draws."""
         self._icon.queue_draw()
         self._strip.queue_draw()
+        if self._sel_view is not None:
+            view, self._sel_view = self._sel_view, None
+            self.show_selmark(view, *self._sel_xy)
         if self._strip_view is not None:
             self._build_strip(self._strip_view)
         if self._panel_view is not None:
@@ -1522,8 +1680,8 @@ class GtkOverlay:
         titles.set_valign(Gtk.Align.CENTER)
         has_tones = bool(view.tone_chips)
         titles.pack_start(_label(look.TITLE, "glance-title", wrap=False), False, False, 0)
-        titles.pack_start(_label(look.subline(view.mode, has_tones), "glance-meta", wrap=False),
-                          False, False, 0)
+        sub = look.subline(view.mode, has_tones, view.result and view.result.origin)
+        titles.pack_start(_label(sub, "glance-meta", wrap=False), False, False, 0)
         line = None if has_tones else look.tone_line(view.tone, view.tone_reason)
         if line:  # no tone chips to put it over
             titles.pack_start(_label(line, "glance-meta"), False, False, 0)
@@ -1636,6 +1794,56 @@ class GtkOverlay:
                                          "glance-secondary"), False, False, 0)
         card.pack_start(footer, False, False, 0)
 
+    def _fill_result(self, card: Gtk.Box, view: PanelView) -> None:
+        """Selection actions' answer: what was asked about (one muted line), the answer in
+        a box (scrolling when long), then "Ask a follow-up…", "Replace selection" (only
+        where a verified write-back is possible) and "Copy" (the default)."""
+        r = view.result or ResultView("", "")
+        card.pack_start(self._header(view), False, False, 0)
+        head = Gtk.Box(spacing=8)
+        head.pack_start(_label(r.title, "glance-tone-tag", wrap=False), False, False, 0)
+        if r.state == "loading":  # the loader, as a requested check shows it
+            head.pack_end(_loader(r.working, self._accent), False, False, 0)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.pack_start(head, False, False, 0)
+        if r.source:
+            box.pack_start(_label(f"“{r.source}”", "glance-meta"), False, False, 0)
+        if r.text:
+            text = Gtk.Label(label=r.text, xalign=0, wrap=True, selectable=False,
+                             max_width_chars=58)
+            text.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        elif r.state == "loading":  # skeleton lines until the answer starts to come in
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=look.SKELETON_GAP)
+            for share in look.SKELETON_SUGGESTED:
+                text.pack_start(_skeleton(int((SEL_W - 64) * share)), False, False, 0)
+        else:
+            text = _label("No answer this time.", "glance-meta")
+        frame = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), "glance-suggest")
+        frame.pack_start(self._scroller(text, _SUGGEST_MAX_H)
+                         if r.text and len(r.text) > 320 else text, False, False, 0)
+        box.pack_start(frame, False, False, 0)
+        card.pack_start(box, False, False, 0)
+        if r.note:
+            card.pack_start(_classes(_label(r.note), "glance-banner"), False, False, 0)
+        if r.actions:  # text from a shot: Fix grammar, Translate, Explain
+            more = Gtk.Box(spacing=8)
+            for key, label in r.actions:
+                more.pack_start(self._button(label, "res_action", "glance-secondary", key=key),
+                                False, False, 0)
+            card.pack_start(more, False, False, 0)
+        footer = Gtk.Box(spacing=8)
+        if r.can_follow and r.state != "loading":
+            follow = self._button("Ask a follow-up…", "res_follow", "glance-link",
+                                  "glance-strong")
+            follow.set_valign(Gtk.Align.CENTER)
+            footer.pack_start(follow, False, False, 0)
+        if r.text and r.state == "ready":
+            footer.pack_end(self._button("Copy", "res_copy", "glance-primary"), False, False, 0)
+            if r.can_replace:
+                footer.pack_end(self._button("Replace selection", "res_replace",
+                                             "glance-secondary"), False, False, 0)
+        card.pack_start(footer, False, False, 0)
+
     def _rebuild_panel(self, view: PanelView) -> None:
         self._ask_input = None
         old = self._panel.get_child()
@@ -1646,6 +1854,8 @@ class GtkOverlay:
                         "glance-drawer")
         if view.mode == "selection":
             self._fill_selection(card, view)
+        elif view.mode == "result":
+            self._fill_result(card, view)
         else:
             self._fill_drawer(card, view)
         outer = _Fit()

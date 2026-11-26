@@ -51,6 +51,8 @@ def _default_hotkeys() -> dict[str, str]:
         "complete": "Super+Alt+Return",
         # Not Super+Alt+S: GNOME toggles the screen reader there (spike S5.3).
         "selection": "Super+Alt+a",
+        # Glance Shot (capture a region). Free on GNOME 46, KDE and Xfce (docs/shortcuts.md).
+        "shot": "Super+Alt+c",
     }
 
 
@@ -200,6 +202,35 @@ class AiCfg:
     max_words: int = DEFAULT_MAX_WORDS
 
 
+MIN_WORDS_RANGE = (1, 50)  # `[selection] min_words`
+
+
+@dataclass(frozen=True)
+class SelectionCfg:
+    """Selection actions: the small Glance mark beside text the user selected anywhere.
+    `enabled` is the floating mark only: the selection hotkey works even when it is off."""
+
+    enabled: bool = True
+    min_words: int = 2
+    translate_to: str = "English"  # "Translate" in the action bar; "Translate to…" sets it
+    terminals: bool = False  # show the mark in terminals too
+SHOT_OCR = ("auto", "ocrs", "tesseract", "off")  # `[shot] ocr`
+SHOT_AI_IMAGES = ("ask", "allow", "never")  # `[shot] ai_images`
+
+
+@dataclass(frozen=True)
+class ShotCfg:
+    """`[shot]`: Glance Shot, capture a screen region and act on it."""
+
+    enabled: bool = True  # the hotkey and the tray's "Take a Glance Shot"
+    save_dir: str = "~/Pictures/Glance"  # where Save puts a PNG (nothing else ever does)
+    # Extract text: "auto" is Vision on macOS, else ocrs (glance_core) then tesseract.
+    ocr: str = "auto"
+    # Explain / Ask send the image to the AI: "ask" (a one-time notice per backend),
+    # "allow" (no notice), "never" (those two actions are off).
+    ai_images: str = "ask"
+
+
 @dataclass(frozen=True)
 class Config:
     general: GeneralCfg = field(default_factory=GeneralCfg)
@@ -208,6 +239,8 @@ class Config:
     ui: UiCfg = field(default_factory=UiCfg)
     backend: BackendCfg = field(default_factory=BackendCfg)
     ai: AiCfg = field(default_factory=AiCfg)
+    selection: SelectionCfg = field(default_factory=SelectionCfg)
+    shot: ShotCfg = field(default_factory=ShotCfg)
     raw: dict[str, Any] = field(default_factory=dict)
 
     def app(self, wm_class: str) -> AppCfg:
@@ -276,7 +309,7 @@ def _parse(data: dict[str, Any]) -> Config:
         raise ConfigError("apps", "expected a table")
     apps = {k.casefold(): _build(AppCfg, v, f"apps.{k}", APP_DEFAULTS.get(k.casefold()))
             for k, v in apps_raw.items()}
-    known = {"general", "privacy", "apps", "ui", "ai"}  # `raw` keeps [backend] too (Plan 1 contract)
+    known = {"general", "privacy", "apps", "ui", "ai", "selection", "shot"}  # `raw` keeps [backend] too (Plan 1 contract)
     backend = _build(BackendCfg, data.get("backend", {}), "backend")
     for model_name, model in backend.models.items():
         if not MODEL_NAME.fullmatch(model):
@@ -305,6 +338,19 @@ def _parse(data: dict[str, Any]) -> Config:
     if general.check not in CHECK_MODES:
         log_event("config_value_ignored", key="general.check")
         general = dataclasses.replace(general, check=GeneralCfg.check)
+    selection = _build(SelectionCfg, data.get("selection", {}), "selection")
+    lo, hi = MIN_WORDS_RANGE
+    if not lo <= selection.min_words <= hi:
+        log_event("config_value_ignored", key="selection.min_words")
+        selection = dataclasses.replace(selection, min_words=SelectionCfg.min_words)
+    if not selection.translate_to.strip() or len(selection.translate_to) > 40:
+        log_event("config_value_ignored", key="selection.translate_to")
+        selection = dataclasses.replace(selection, translate_to=SelectionCfg.translate_to)
+    shot = _build(ShotCfg, data.get("shot", {}), "shot")
+    for key, allowed in (("ocr", SHOT_OCR), ("ai_images", SHOT_AI_IMAGES)):
+        if getattr(shot, key) not in allowed:
+            log_event("config_value_ignored", key=f"shot.{key}")
+            shot = dataclasses.replace(shot, **{key: getattr(ShotCfg, key)})
     return Config(
         general=general,
         privacy=_build(PrivacyCfg, data.get("privacy", {}), "privacy"),
@@ -312,6 +358,8 @@ def _parse(data: dict[str, Any]) -> Config:
         ui=ui,
         backend=backend,
         ai=ai,
+        selection=selection,
+        shot=shot,
         raw={k: v for k, v in data.items() if k not in known},
     )
 

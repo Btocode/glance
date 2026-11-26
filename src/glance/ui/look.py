@@ -112,9 +112,14 @@ def fixes_label(n: int) -> str:
     return f"{n} fix{'' if n == 1 else 'es'}"
 
 
-def subline(mode: str, has_tones: bool) -> str:
-    """The muted line under the panel's title: what is at work."""
-    head = "Selected text" if mode == "selection" else "Local grammar"
+def subline(mode: str, has_tones: bool, origin: str | None = None) -> str:
+    """The muted line under the panel's title: what is at work. `origin` "shot": a result
+    about text a Glance Shot read; "shot_text": that text itself (read on this computer)."""
+    if origin == "shot_text":
+        return "Glance Shot · read on this computer"
+    if origin == "shot":
+        return "Glance Shot"
+    head = "Selected text" if mode in ("selection", "result") else "Local grammar"
     return f"{head} · AI tones" if has_tones else head
 
 
@@ -166,6 +171,17 @@ GLYPHS: dict[str, tuple[tuple, ...]] = {
                   ("M", 2.5, 8.8), ("L", 13.5, 8.8)),
     "pen": (("M", 3, 13), ("L", 3.6, 10.2), ("L", 10.8, 3), ("L", 13, 5.2), ("L", 5.8, 12.4),
             ("Z",), ("M", 9.4, 4.4), ("L", 11.6, 6.6)),
+    # The selection action bar's: a tick, a reply arrow, two sheets, a globe.
+    "check": (("M", 3, 8.6), ("L", 6.4, 12), ("L", 13, 4.5)),
+    "reply": (("M", 6.5, 4), ("L", 2.5, 8), ("L", 6.5, 12), ("M", 2.5, 8), ("L", 9.5, 8),
+              ("C", 11.9, 8, 13.5, 9.6, 13.5, 12), ("L", 13.5, 13)),
+    "copy": (("M", 6, 5.5), ("L", 12.5, 5.5), ("L", 12.5, 13.5), ("L", 6, 13.5), ("Z",),
+             ("M", 3.5, 10.5), ("L", 3.5, 2.5), ("L", 10, 2.5)),
+    "globe": (("M", 8, 2.5), ("C", 11.04, 2.5, 13.5, 4.96, 13.5, 8),
+              ("C", 13.5, 11.04, 11.04, 13.5, 8, 13.5), ("C", 4.96, 13.5, 2.5, 11.04, 2.5, 8),
+              ("C", 2.5, 4.96, 4.96, 2.5, 8, 2.5), ("Z",),
+              ("M", 8, 2.5), ("C", 5.8, 4.6, 5.8, 11.4, 8, 13.5),
+              ("M", 8, 2.5), ("C", 10.2, 4.6, 10.2, 11.4, 8, 13.5), ("M", 2.5, 8), ("L", 13.5, 8)),
     "spark": (("M", 8, 2.5), ("C", 8.6, 6, 10, 7.4, 13.5, 8), ("C", 10, 8.6, 8.6, 10, 8, 13.5),
               ("C", 7.4, 10, 6, 8.6, 2.5, 8), ("C", 6, 7.4, 7.4, 6, 8, 2.5), ("Z",)),
 }

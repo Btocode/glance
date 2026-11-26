@@ -463,7 +463,7 @@ def test_daemon_status_and_sockets(daemon):
     assert st["ok"] and st["harper_alive"] and st["capture_connected"]
     assert (st["capture_child"], st["harper_child"]) == ("up", "up")
     assert st["grammar_engine"] == "harper-ls"
-    want = "check,complete,fix_all,panel,pause,revert,selection,tone1,tone2,tone3,tone4"
+    want = "check,complete,fix_all,panel,pause,revert,selection,shot,tone1,tone2,tone3,tone4"
     assert _wait(lambda: daemon.request("status")["hotkeys_grabbed"] == want, 5.0)
     st = daemon.request("status")
     assert st["hotkeys_unavailable"] is None
@@ -543,3 +543,29 @@ def test_daemon_stops_cleanly_on_sigterm(daemon):
     assert daemon.glance("status").returncode == 3
     log = daemon.log_path.read_text()
     assert "Traceback" not in log and "glanced_stopping" in log
+
+
+# ---------------------------------------------------------------- selection actions
+
+SEL_PROBE = Path(__file__).parent / "desktop" / "selection_probe.py"
+
+
+def test_selection_mark_bar_and_x11_watcher(xvfb, tmp_path):
+    """The mark and the bar are click-through popups that never take the focus; the XFixes
+    + raw-button watcher settles a mouse selection, clears a keyboard one, and reports keys
+    only while armed. Screenshots go to $GLANCE_UI_SHOTS (sel-*.png) when it is set."""
+    shots = Path(os.environ.get("GLANCE_UI_SHOTS") or tmp_path)
+    env = {**os.environ, "DISPLAY": xvfb, "NO_AT_BRIDGE": "1", "GDK_BACKEND": "x11"}
+    env.pop("WAYLAND_DISPLAY", None)
+    done = subprocess.run([sys.executable, str(SEL_PROBE), "--shots", str(shots)], env=env,
+                          capture_output=True, text=True, timeout=60, check=False)
+    assert done.returncode == 0, done.stderr[-2000:]
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["mark_override_redirect"] and out["focus_kept"] and out["hidden"]
+    assert out["mark_hit"] == [True, False]
+    assert out["mark_click"] == ["sel_mark"]
+    assert out["bar_click"] == [["sel_action", {"key": "explain"}]]
+    assert out["watch_running"] and out["settled_early"] == []
+    assert out["mouse"] == [["settled", 520, 210]]
+    assert out["keyboard"] == [["cleared"]]
+    assert out["key_unarmed"] == [] and out["armed"] == [["input", "key"], ["input", "scroll"]]

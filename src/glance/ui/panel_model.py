@@ -35,6 +35,26 @@ class ToneChip:
 
 
 @dataclass(frozen=True)
+class ResultView:
+    """Selection actions' result (`PanelView.mode == "result"`): what was asked ("Explain",
+    "Translate to Bangla"), the selection it was asked about (one line, shortened), the
+    answer as it is known, and what may be done with it."""
+
+    title: str
+    source: str
+    text: str | None = None
+    state: str = "loading"            # loading | ready | failed
+    note: str | None = None           # why there is no answer, or a hint about it
+    can_replace: bool = False         # "Replace selection": a verified write-back is possible
+    can_follow: bool = True           # "Ask a follow-up…"
+    working: str = "Working…"
+    # More to do with the answer, a row of buttons (`res_action` with the key): text read
+    # from a Glance Shot offers ("fix", "Fix grammar"), ("translate", …), ("explain", …).
+    actions: tuple[tuple[str, str], ...] = ()
+    origin: str | None = None         # "shot" / "shot_text": from a Glance Shot (`look.subline`)
+
+
+@dataclass(frozen=True)
 class PanelView:
     tone: str | None = None
     tone_reason: str | None = None
@@ -52,7 +72,8 @@ class PanelView:
     profile_label: str | None = None
     profiles: tuple[tuple[str, str], ...] = ()  # (name, label) the audience can be set to
     # `field`: the focused field's panel. `selection`: select-anything, a read-only issue list,
-    # a rewrite to copy and, where it is safe, a paste over the selection.
+    # a rewrite to copy and, where it is safe, a paste over the selection. `result`: an
+    # action on selected text (Explain, Translate…) and its answer (`result`).
     mode: str = "field"
     can_paste: bool = False
     # A question that must be answered before anything leaves the machine.
@@ -62,6 +83,8 @@ class PanelView:
     # A check the user asked for is waiting for the AI: "Suggested" and the tone cards show
     # skeleton placeholders until its result replaces them in place.
     loading: bool = False
+    # `result`: selection actions' answer panel.
+    result: ResultView | None = None
 
 
 @dataclass(frozen=True)

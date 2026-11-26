@@ -15,13 +15,16 @@ class Features:
     autocomplete: Any
     guard: Any
     selection: Any
+    actions_bar: Any  # selection actions: the mark, its action bar and the result panel
     actions: dict[str, Callable[[], None]]  # hotkey name -> action, for bind_hotkeys
 
 
 def attach_features(*, controller: Any, ai: Any, supervisor: Any, cfg: Callable[[], Any],
                     grammar: Any, issue_filter: Any, ghost: Any, hotkeys: Any, clock: Any,
                     run_ai: RunBg, language: Callable[[str], bool], selection_port: Any,
-                    overlay: Any, capture: Any, notifier: Any) -> Features:
+                    overlay: Any, capture: Any, notifier: Any, selection_watch: Any = None,
+                    remember: Callable[[str, Any], None] = lambda key, value: None,
+                    selection_hint: Callable[[], str | None] = lambda: None) -> Features:
     """Build and attach the features; every hook is appended, none replaced.
 
     `run_ai` runs work on the AI threads (never the grammar pool). `overlay` is the one
@@ -29,6 +32,7 @@ def attach_features(*, controller: Any, ai: Any, supervisor: Any, cfg: Callable[
     """
     from glance.features.autocomplete import Autocomplete
     from glance.features.select_anything import SelectAnything
+    from glance.features.selection_actions import NoWatch, SelectionActions
     from glance.features.sendguard import SendGuard
     from glance.privacy.gate import PrivacyGate
 
@@ -46,9 +50,20 @@ def attach_features(*, controller: Any, ai: Any, supervisor: Any, cfg: Callable[
     controller.add_listener(sa)
     controller.extra_status.append(lambda: {"selection_open": sa.is_open})
 
-    def select() -> None:
-        controller.close_panel()  # one panel at a time: the selection's replaces the field's
-        sa.trigger()
+    bar = SelectionActions(
+        controller=controller, select_anything=sa, selection=selection_port,
+        watch=selection_watch or NoWatch(), cfg=cfg, overlay=overlay, clock=clock,
+        notifier=notifier, run_bg=run_ai, run_read=thread_runner(clock.post, "glance-selection"),
+        supervisor=supervisor, resolver=ai.resolver, grammar=grammar, issue_filter=issue_filter,
+        remember=remember, hint=selection_hint)
+    controller.add_listener(bar)
+    controller.extra_status.append(lambda: {"selection_actions": bar.watching})
+    bar.sync()
 
-    return Features(autocomplete, guard, sa,
+    def select() -> None:
+        # The action bar on the current selection, without the mark (works with the mark
+        # switched off); one panel at a time: it closes the field's.
+        bar.hotkey()
+
+    return Features(autocomplete, guard, sa, bar,
                     {"complete": autocomplete.trigger, "selection": select})

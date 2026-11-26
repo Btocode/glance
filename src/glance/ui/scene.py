@@ -97,11 +97,23 @@ def panel_piece(view: PanelView, x: int, y: int, w: int, follow: bool,
     has_tones = bool(view.tone_chips)
     return {"view": plain,
             "preview_markup": None if view.preview is None else diff_markup(view.preview),
-            "title": look.TITLE, "subline": look.subline(view.mode, has_tones),
+            "title": look.TITLE, "subline": look.subline(view.mode, has_tones,
+                                                            view.result and view.result.origin),
             "tone_line": look.tone_line(view.tone, view.tone_reason),
             "fixes_label": look.fixes_label(len(view.issues)),
             "suggested": suggested, "note": None if suggested else note,
             "x": x, "y": y, "w": w, "follow": follow}
+
+
+def selmark_piece(view: Any, x: int, y: int) -> dict[str, Any]:
+    """Selection actions: the bare mark (`state` mark) or the action bar (`state` bar) at
+    (x, y); `box` is the mark's click target. Placed from the pointer: it does not follow a
+    window."""
+    from glance.ui import selection_bar as sb
+
+    plain = _plain(view)
+    return {**plain, "x": x, "y": y, "box": list(sb.MARK_BOX), "mark_px": sb.MARK_PX - 2,
+            "follow": False}
 
 
 def ghost_piece(text: str, x: int, y: int, font_px: int, max_width: int) -> dict[str, Any]:
@@ -118,9 +130,11 @@ def window_ref(window: dict[str, Any] | None) -> dict[str, Any] | None:
 def scene(tokens: dict[str, str], window: dict[str, Any] | None, *,
           status: dict[str, Any] | None = None, strip: dict[str, Any] | None = None,
           panel: dict[str, Any] | None = None, ghost: dict[str, Any] | None = None,
-          sizes: dict[str, int] | None = None) -> dict[str, Any]:
+          sizes: dict[str, int] | None = None,
+          selmark: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"v": 1, "tokens": dict(tokens), "window": window_ref(window), "status": status,
-            "strip": strip, "panel": panel, "ghost": ghost, "sizes": dict(sizes or {}),
+            "strip": strip, "panel": panel, "ghost": ghost, "selmark": selmark,
+            "sizes": dict(sizes or {}),
             "ask_placeholder": ASK_PLACEHOLDER, "look": LOOK}
 
 

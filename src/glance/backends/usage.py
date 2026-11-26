@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 KEEP_DAYS = 90
-PURPOSES = ("analyze", "rewrite", "complete", "sharpen", "select", "other")
+PURPOSES = ("analyze", "rewrite", "complete", "sharpen", "select", "shot", "other")
 # Backends that run through a CLI the user signed in to (usually a subscription).
 SUBSCRIPTION_BACKENDS = ("claude", "codex", "gemini", "opencode")
 SUBSCRIPTION_NOTE = ("cost shown is the API-equivalent figure the CLI reports; "

@@ -58,8 +58,9 @@ class Rig:
                                                         tmp_path / "ignored.json")
         self.holder = []
         overlay = FieldPanelOverlay(
-            self.screen, lambda: bool(self.holder) and self.holder[0].selection.is_open,
-            lambda: self.holder[0].selection.close())
+            self.screen, lambda: bool(self.holder) and (self.holder[0].selection.is_open
+                                                        or self.holder[0].actions_bar.is_open),
+            lambda: (self.holder[0].selection.close(), self.holder[0].actions_bar.close()))
         self.c = Controller(self.clock, lambda: self.cfg, FakeHarper({}), self.filter,
                             overlay, self.capture, FakeNotifier(), FakeTray(), self.bg)
         self.ai, self.sup = build_ai(
@@ -75,7 +76,9 @@ class Rig:
             language=self.detector.is_mixed, selection_port=self.sel, overlay=self.screen,
             capture=self.capture, notifier=self.notifier)
         self.holder.append(self.f)
-        self.router = PanelRouter(self.c, self.ai, None, self.f.selection, self.f.guard)
+        self.f.actions_bar._run_read = lambda work, done: done(work())  # no thread here
+        self.router = PanelRouter(self.c, self.ai, None, self.f.selection, self.f.guard,
+                                  bar=self.f.actions_bar)
 
     def focus(self, s=None):
         self.c.handle_snapshot(s or snap())
@@ -143,8 +146,38 @@ def test_guard_silence_rejects_a_bad_scope(rig):
 
 
 def _select(rig, text="teh plan is good, i think we shoud go", wm_class="Mousepad"):
+    """The selection hotkey shows the action bar; its "Rewrite…" opens select-anything's
+    tone panel on the selection."""
     rig.sel.set(text, win(wm_class, xid=7))
     rig.f.actions["selection"]()
+    assert rig.screen.selmark is not None and rig.screen.selmark.state == "bar"
+    assert rig.sel.reads == []  # nothing read before an action is clicked
+    rig.router.action("sel_action", {"key": "rewrite"})
+    assert rig.screen.selmark is None
+
+
+def test_selection_hotkey_bar_explain_shows_a_result_to_copy(rig):
+    rig.focus()
+    rig.sel.set("the deploy failed with exit code 137", win("Mousepad", xid=7))
+    rig.f.actions["selection"]()
+    rig.router.action("sel_action", {"key": "explain"})
+    v = rig.screen.panel
+    assert v is not None and v.mode == "result" and v.result.title == "Explain"
+    assert v.result.text == "Thanks so much, will do!" and v.result.state == "ready"
+    assert rig.f.actions_bar.is_open
+    rig.focus(snap(TEXT))  # a redraw of the field leaves the result alone
+    assert rig.screen.panel.mode == "result"
+    rig.router.action("res_copy", {})
+    assert rig.screen.clipboard == ["Thanks so much, will do!"] and rig.screen.panel is None
+
+
+def test_selection_result_escape_closes_it(rig):
+    rig.focus()
+    rig.sel.set("the deploy failed with exit code 137", win("Mousepad", xid=7))
+    rig.f.actions["selection"]()
+    rig.router.action("sel_action", {"key": "summarize"})
+    rig.router.escape()
+    assert not rig.f.actions_bar.is_open and rig.screen.panel is None
 
 
 def test_selection_hotkey_opens_its_panel_and_routes_its_actions(rig):
@@ -390,6 +423,7 @@ def test_selection_read_never_blocks_the_main_loop(tmp_path):
     rig = Rig(tmp_path)
     assert rig.f.selection._run_read is not rig.bg  # its own thread, not the AI pool
     posted, release = [], threading.Event()
+    bar = rig.f.actions_bar
 
     class Stuck(FakeSelection):
         def primary_text(self, max_bytes):
@@ -398,13 +432,14 @@ def test_selection_read_never_blocks_the_main_loop(tmp_path):
 
     sel = Stuck()
     sel.set("x", win("Mousepad", xid=7))
-    rig.f.selection._selection = sel
+    rig.f.selection._selection = bar._selection = sel
     from glance.daemon.wiring import thread_runner
 
-    rig.f.selection._run_read = thread_runner(posted.append, "test-read")
+    bar._run_read = thread_runner(posted.append, "test-read")
     rig.focus()
     t0 = time.monotonic()
     rig.f.actions["selection"]()
+    rig.router.action("sel_action", {"key": "rewrite"})
     assert time.monotonic() - t0 < 0.2 and not rig.f.selection.is_open
     rig.clock.advance(50)  # the main loop keeps ticking meanwhile
     release.set()
@@ -418,10 +453,12 @@ def test_selection_read_never_blocks_the_main_loop(tmp_path):
 def test_a_selection_read_that_lands_after_a_close_is_dropped(tmp_path):
     held = []
     rig = Rig(tmp_path)
-    rig.f.selection._run_read = lambda work, done: held.append((work, done))
+    rig.f.actions_bar._run_read = lambda work, done: held.append((work, done))
     rig.focus()
-    _select(rig)
-    rig.f.selection.close()  # e.g. a pause, before the owner answered
+    rig.sel.set("teh plan is good, i think we shoud go", win("Mousepad", xid=7))
+    rig.f.actions["selection"]()
+    rig.router.action("sel_action", {"key": "explain"})
+    rig.f.actions_bar.hotkey()  # e.g. the hotkey again, before the owner answered
     work, done = held.pop()
     done(work())
-    assert not rig.f.selection.is_open and rig.screen.panel is None
+    assert not rig.f.actions_bar.is_open and rig.screen.panel is None

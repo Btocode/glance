@@ -228,6 +228,13 @@ def css(t: dict[str, str]) -> str:
 .glance-item:hover {{ background-color: {t['hover']}; }}
 .glance-item:hover label {{ color: {t['text']}; }}
 
+/* selection actions: the action bar beside selected text */
+.glance-selmark {{ background-color: transparent; border: none; padding: 0; }}
+.glance-selbar {{ padding: 4px; border-radius: 10px; }}
+.glance-selbtn {{ padding: 5px 8px; }}
+.glance-selbtn label {{ font-size: 13px; }}
+.glance-selmore {{ border-top: 1px solid {t['hairline']}; padding-top: 4px; }}
+
 /* the assistant panel (the drawer), select-anything's panel, the "Rewrite as…" entry */
 .glance-drawer {{
     background-color: {t['surface']}; border: 1px solid {t['hairline']};
@@ -286,6 +293,18 @@ def css(t: dict[str, str]) -> str:
 .glance-footer {{ border-top: 1px solid {t['hairline']}; padding-top: 10px; }}
 .glance-row {{ border-top: 1px solid {t['hairline']}; padding-top: 8px; }}
 .glance-excerpt {{ color: {t['text']}; }}
+
+/* Glance Shot: the bar after a capture, its result card */
+.glance-shot .glance-secondary.glance-muted {{ background-color: transparent; }}
+.glance-shot .glance-secondary.glance-muted label {{ color: {t['muted']}; }}
+.glance-done {{
+    background-color: {t['highlight']}; border: 1px solid {t['card_border']};
+    border-radius: 9px; padding: 8px 10px; }}
+.glance-done label {{ color: {t['text']}; font-size: 13px; }}
+.glance-result {{
+    background-color: {t['card']}; border: 1px solid {t['card_border']};
+    border-radius: 8px; padding: 10px 12px; }}
+.glance-result label {{ color: {t['text']}; font-size: 13.5px; }}
 
 /* the "Connect an AI" window, the shortcuts and usage windows */
 .glance-window {{ background-color: {t['surface']}; }}

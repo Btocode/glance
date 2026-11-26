@@ -146,17 +146,68 @@ def test_overlay_follows_a_window_move_and_resize(desk):
 
 
 def test_select_anything_reads_the_selection(desk):
+    """Super+Alt+A: the action bar on the selection (no text read yet); Rewrite… there opens
+    select-anything's tone panel."""
     shell, app, glance, _root = desk
     assert shell.call("Chord", {"keys": ["ctrl", "a"]})["ok"]  # select all in the field
     assert wait_for(lambda: shell.call("ReadPrimary", {"max_bytes": 1000}).get("text"), 5)
     assert shell.call("Chord", {"keys": ["super", "alt", "a"]})["ok"]
+    ov = wait_for(lambda: (o := shell.overlay()).get("selmark") and o, 10)
+    assert ov and ov["selmark"]["state"] == "bar", shell.overlay()
+    assert "sel:rewrite" in ov["named"]
+    assert target_still_focused(shell, app)
+    assert shell.call("TestClick", {"target": "sel:rewrite"})["ok"]
     ov = wait_for(lambda: (o := shell.overlay()).get("panel") and o, 10)
     assert ov and ov["panel"]["mode"] == "selection", shell.overlay()
+    assert not ov.get("selmark")
     assert glance.status()["selection_open"]
     assert target_still_focused(shell, app)
     shot(shell, "selection")
     assert shell.call("TestClick", {"target": "close"})["ok"]
     assert wait_for(lambda: not shell.overlay().get("panel"), 5)
+
+
+def test_selection_mark_after_a_mouse_selection(desk):
+    """A drag selection in the app: the extension sees the PRIMARY owner change and the
+    button, glanced shows the mark (nothing read), a click opens the bar, Explain reads the
+    selection and shows the answer; the app keeps the focus throughout."""
+    shell, app, glance, _root = desk
+    assert glance.status().get("selection_actions") is True
+    assert shell.call("Chord", {"keys": ["End"]})["ok"]  # no selection left to drag away
+    time.sleep(0.3)
+    x, y, _w, _h = shell.focused()["frame"]
+    ptr = {"how": "abs"}
+    # the first line of the text view, under the window's header bar
+    y0 = y + 64
+    assert shell.call("TestPointer", {**ptr, "x": x + 14, "y": y0})["ok"]
+    assert shell.call("TestPointer", {**ptr, "x": x + 14, "y": y0})["ok"]
+    time.sleep(0.2)
+    assert shell.call("TestPointer", {"how": "button", "x": 1})["ok"]  # press
+    for step in range(1, 9):
+        shell.call("TestPointer", {**ptr, "x": x + 14 + step * 30, "y": y0 + 1})
+        time.sleep(0.05)
+    assert shell.call("TestPointer", {"how": "button", "x": 0})["ok"]  # release
+    ov = wait_for(lambda: (o := shell.overlay()).get("selmark") and o, 10)
+    assert ov and ov["selmark"]["state"] == "mark", shell.overlay()["selwatch"]
+    assert ov["selwatch"]["settled"] >= 1 and ov["selwatch"]["held"] >= 1
+    assert target_still_focused(shell, app)
+    shot(shell, "sel-mark")
+    assert shell.call("TestClick", {"target": "sel:mark"})["ok"]
+    ov = wait_for(lambda: (o := shell.overlay()).get("selmark")
+                  and o["selmark"]["state"] == "bar" and o, 10)
+    assert ov, shell.overlay()
+    shot(shell, "sel-bar")
+    assert shell.call("TestClick", {"target": "sel:explain"})["ok"]
+    ov = wait_for(lambda: (o := shell.overlay()).get("panel")
+                  and o["panel"]["mode"] == "result" and "res_copy" in o["named"] and o, 15)
+    assert ov, shell.overlay()
+    assert not ov.get("selmark")
+    assert target_still_focused(shell, app)
+    shot(shell, "sel-result")
+    assert shell.call("TestClick", {"target": "close"})["ok"]
+    assert wait_for(lambda: not shell.overlay().get("panel"), 5)
+    # the mark is gone for good once the selection is dropped with the keyboard
+    assert shell.call("Chord", {"keys": ["End"]})["ok"]
 
 
 REWRITE = "Thanks so much, will do!"  # FakeAiBackend.REWRITE

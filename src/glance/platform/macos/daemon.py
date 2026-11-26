@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any
 
+from glance.feature_switches import menu_rows, set_feature
 from glance.log import log_event
 
 
@@ -137,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     from glance.platform.macos.power import on_battery
     from glance.platform.macos.runloop import MacClock
     from glance.platform.macos.selection import MacSelection
+    from glance.platform.macos.selection_watch import MacSelectionWatch
     from glance.platform.macos.session import MacSessionEvents, screen_locked
     from glance.platform.macos.tray import MacTray
     from glance.platform.macos.windows import SetupNotice, UsageWindow
@@ -174,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
         auto_choose()  # the choice may have been removed, or set to one that is gone
         tray.set_auto_suggest(cfg.ui.suggestions == "auto")
         tray.set_check_mode(cfg.general.check)
+        tray.set_features(menu_rows(cfg))
+        features.actions_bar.sync()
+        shot_switch.apply(cfg)  # the `shot` feature switch: hotkey and tray item, live
         controller.refresh()
 
     watcher = ConfigWatcher(config_path(), clock, on_config,
@@ -192,8 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     overlay = PanelEscape(mac_overlay, hotkeys, lambda: panels.escape(),
                           on_use=lambda: controller.use_strip(),
                           use_key=lambda: watcher.current.ui.use_key)
-    field_overlay = FieldPanelOverlay(overlay, lambda: features.selection.is_open,
-                                      lambda: features.selection.close())
+    field_overlay = FieldPanelOverlay(
+        overlay, lambda: features.selection.is_open or features.actions_bar.is_open,
+        lambda: (features.selection.close(), features.actions_bar.close()))
     tray = MacTray(on_pause=lambda: handle_control(controller, "pause", {}),
                    on_resume=lambda: handle_control(controller, "resume", {}),
                    on_quit=quit_app, on_choose=lambda name: setup.choose(name),
@@ -209,7 +215,10 @@ def main(argv: list[str] | None = None) -> int:
                    check_mode=watcher.current.general.check,
                    check_hint=check_label(
                        mac_hotkeys(watcher.current.general.hotkeys).get("check", ""), mac=True),
-                   on_shortcuts=lambda: show_shortcuts())
+                   on_shortcuts=lambda: show_shortcuts(),
+                   on_feature=lambda name, on: set_feature(
+                       update_config, config_path(), name, on, watcher.reload),
+                   features=menu_rows(watcher.current))
 
     link = CaptureLink(clock.post)
     grammar_client = make_grammar_client(harper_bin(), dictionary_path())
@@ -298,17 +307,42 @@ def main(argv: list[str] | None = None) -> int:
         grammar=harper, issue_filter=issue_filter,
         ghost=MacGhost(watcher.current.ui.ghost_font_factor), hotkeys=hotkeys, clock=clock,
         run_ai=run_ai, language=detector.is_mixed, selection_port=MacSelection(),
-        overlay=overlay, capture=link, notifier=notifier)
+        overlay=overlay, capture=link, notifier=notifier,
+        selection_watch=MacSelectionWatch(clock.call_later, clock.now, clock.post),
+        remember=lambda key, value: remember_setting(key, value),
+        selection_hint=lambda: check_label(
+            mac_hotkeys(watcher.current.general.hotkeys).get("selection", ""), mac=True))
     panels = PanelRouter(controller, ai, overrides.set, features.selection, features.guard,
-                         on_setup=lambda: setup.open())
+                         on_setup=lambda: setup.open(), bar=features.actions_bar)
+    # Glance Shot: the picker (ScreenCaptureKit / CGWindowListCreateImage), the bar
+    from glance.daemon.shot_wiring import ShotSwitch, build_shot, shot_request
+    from glance.platform.macos.shot import MacShot
+
+    shot_ui = MacShot(lambda key: shot.action(key), clock.post, notifier.notify)
+    shot = build_shot(ui=shot_ui, controller=controller, supervisor=ai_supervisor,
+                      cfg=current_config, overlay=overlay, notifier=notifier, hotkeys=hotkeys,
+                      run_ai=run_ai, grammar=harper,
+                      # Extract text opens in the selection actions' result panel
+                      text_panel=features.actions_bar.open_text)
     ctl = CtlRouter(
         controller, panels.action,
         backend_control=BackendControl(ai_supervisor, ai, keys, current_config, overrides,
-                                       run_ai, config_path()))
+                                       run_ai, config_path()),
+        extra={"shot": shot_request(shot)})
+
+    def remember_setting(key: str, value: Any) -> None:  # main thread
+        try:
+            update_config(config_path(), key, value)
+        except (ConfigError, OSError) as e:
+            log_event("config_write_failed", kind=type(e).__name__)
+            return
+        watcher.reload()
 
     def toggle_panel() -> None:
         if overlay.panel_visible:
-            if features.selection.is_open:
+            if features.actions_bar.is_open:
+                features.actions_bar.close()
+            elif features.selection.is_open:
                 features.selection.close()
             else:
                 controller.close_panel()
@@ -326,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
     }
     bound_chords: dict[str, str] = {}
     hotkey_problems: dict[str, str] = {}
+    shot_switch = ShotSwitch(shot, actions, tray, lambda: rebind(), hotkeys)
+    shot_switch.apply(watcher.current, rebind=False)
 
     def rebind() -> None:
         nonlocal bound_chords
@@ -513,6 +549,8 @@ def main(argv: list[str] | None = None) -> int:
         teardown = Teardown()
         teardown.run([
             ("overlay", lambda: hide_everything(overlay, None, None)),
+            ("selection", features.actions_bar.stop),
+            ("shot", shot.close),
             ("hotkeys", hotkeys.close),
             ("ai", ai_supervisor.cancel_all),
             ("pools", lambda: (pool.shutdown(wait=False, cancel_futures=True),

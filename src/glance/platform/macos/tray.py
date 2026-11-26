@@ -1,7 +1,8 @@
 """MacTray: the TrayPort as an NSStatusItem with the Linux tray's menu.
 
-Menu: status line, "Update available — Update now", AI backend ▸, AI usage ▸, "Check: on
-shortcut / while typing", "Show suggestions automatically", "Keyboard shortcuts…",
+Menu: status line, "Update available — Update now", AI backend ▸, AI usage ▸, Features ▸
+("Check: on shortcut / while typing", then the feature switches), "Show suggestions
+automatically", "Keyboard shortcuts…",
 Pause/Resume, Quit Glance. The menu bar shows the brand mark (a template image). Main thread
 only. Needs PyObjC.
 """
@@ -53,9 +54,20 @@ class MacTray:
                  on_usage_details: Callable[[], None] = lambda: None,
                  on_check_mode: Callable[[str], None] = lambda mode: None,
                  check_mode: str = "shortcut", check_hint: str = "",
-                 on_shortcuts: Callable[[], None] = lambda: None) -> None:
-        from glance.ui.tray_gtk import SHORTCUTS_LABEL, check_mode_labels
+                 on_shortcuts: Callable[[], None] = lambda: None,
+                 on_feature: Callable[[str, bool], None] = lambda name, on: None,
+                 features: tuple[object, ...] = (),
+                 on_shot: Callable[[], None] | None = None) -> None:
+        from glance.ui.tray_gtk import (
+            FEATURES_LABEL,
+            SHORTCUTS_LABEL,
+            SHOT_LABEL,
+            check_mode_labels,
+        )
 
+        self._on_feature = on_feature
+        self._feature_items: dict[str, object] = {}
+        self._feature_on: dict[str, bool] = {}
         self._on_pause, self._on_resume = on_pause, on_resume
         self._on_check_mode = on_check_mode
         self._on_choose, self._on_setup = on_choose, on_setup
@@ -79,6 +91,9 @@ class MacTray:
         self._headline.setEnabled_(False)
         self._update = self._add(self._menu, "Update available — Update now", on_update)
         self._update.setHidden_(True)
+        self._on_shot = on_shot
+        self._shot = self._add(self._menu, SHOT_LABEL, lambda: self._on_shot and self._on_shot())
+        self._shot.setHidden_(on_shot is None)
         self._menu.addItem_(NSMenuItem.separatorItem())
         self._backends_item = self._add(self._menu, "AI backend", None)
         self._backends = NSMenu.alloc().initWithTitle_("AI backend")
@@ -89,10 +104,21 @@ class MacTray:
         self._usage.setAutoenablesItems_(False)
         self._usage_item.setSubmenu_(self._usage)
         self._menu.addItem_(NSMenuItem.separatorItem())
+        self._features_item = self._add(self._menu, FEATURES_LABEL, None)
+        self._features = NSMenu.alloc().initWithTitle_(FEATURES_LABEL)
+        self._features.setAutoenablesItems_(False)
+        self._features_item.setSubmenu_(self._features)  # type: ignore[attr-defined]
         self._check_items = {
-            mode: self._add(self._menu, label, lambda m=mode: self._check_clicked(m))
+            mode: self._add(self._features, label, lambda m=mode: self._check_clicked(m))
             for mode, label in check_mode_labels(check_hint)}
         self.set_check_mode(check_mode)
+        self._features.addItem_(NSMenuItem.separatorItem())
+        for row in features:
+            name = row.name  # type: ignore[attr-defined]
+            self._feature_items[name] = self._add(
+                self._features, row.label,  # type: ignore[attr-defined]
+                lambda n=name: self._feature_clicked(n))
+        self.set_features(features)
         self._auto = self._add(self._menu, "Show suggestions automatically", self._auto_clicked)
         self._auto.setState_(1 if auto_suggest else 0)
         self._add(self._menu, SHORTCUTS_LABEL, on_shortcuts)
@@ -117,6 +143,10 @@ class MacTray:
     @property
     def available(self) -> bool:
         return True
+
+    def set_shot(self, on_shot: Callable[[], None] | None) -> None:
+        self._on_shot = on_shot
+        self._shot.setHidden_(on_shot is None)
 
     def set_usage(self, lines: tuple[str, ...]) -> None:
         self._usage.removeAllItems()
@@ -156,6 +186,19 @@ class MacTray:
     def set_check_mode(self, mode: str) -> None:
         for m, item in self._check_items.items():
             item.setState_(1 if m == mode else 0)  # type: ignore[attr-defined]
+
+    def set_features(self, rows: tuple[object, ...]) -> None:
+        for row in rows:
+            item = self._feature_items.get(row.name)  # type: ignore[attr-defined]
+            if item is not None:
+                self._feature_on[row.name] = bool(row.on)  # type: ignore[attr-defined]
+                item.setState_(1 if row.on else 0)  # type: ignore[attr-defined]
+
+    def _feature_clicked(self, name: str) -> None:
+        on = not self._feature_on.get(name, False)
+        self._feature_on[name] = on
+        self._feature_items[name].setState_(1 if on else 0)  # type: ignore[attr-defined]
+        self._on_feature(name, on)
 
     def _check_clicked(self, mode: str) -> None:
         self.set_check_mode(mode)

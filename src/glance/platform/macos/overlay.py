@@ -521,6 +521,9 @@ class MacOverlay:
         self._menu = make_panel()
         self._strip = make_panel()
         self._panel = make_panel()
+        self._sel = make_panel()  # selection actions: the mark, then its action bar
+        self._sel_view: Any = None
+        self._sel_rect: Rect | None = None
 
     # ------------------------------------------------------------------ OverlayPort
 
@@ -578,6 +581,82 @@ class MacOverlay:
         self._details_open = self._profiles_open = False
         if self._strip_view is not None:
             self._layout(force=True)
+
+    # ------------------------------------------------------------------ selection actions
+
+    def show_selmark(self, view: Any, x: int, y: int) -> None:
+        """The mark at (x, y), or the action bar growing from there."""
+        from glance.ui import selection_bar as sb
+
+        t = self._t
+        self._sel_view = view
+        if view.state == "mark":
+            w, h = sb.MARK_BOX
+            card = _MenuCard.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
+            card.fill, card.border, card.radius = color(t["surface"]), color(t["use_border"]), \
+                w / 2
+            mark = _mark_view(sb.MARK_PX - 2)
+            mark.setFrameOrigin_(NSMakePoint((w - sb.MARK_PX + 2) / 2, (h - sb.MARK_PX + 2) / 2))
+            card.addSubview_(mark)
+            self._cover(card, lambda: self._act("sel_mark", {}), "sel:mark")
+        else:
+            card, w, h = self._sel_bar(view)
+        card.on_enter = lambda: self._act("sel_hover", {"inside": True})
+        card.on_leave = lambda: self._act("sel_hover", {"inside": False})
+        self._sel.setContentView_(card)
+        bx, by = sb.place_bar((x, y), (int(w), int(h)), self.monitors())
+        self._sel_rect = Rect(bx, by, int(w), int(h))
+        place(self._sel, self._sel_rect)
+        self._sel.orderFrontRegardless()
+
+    def _sel_bar(self, view: Any) -> tuple[Any, float, float]:
+        t = self._t
+        buttons = []
+        for row in (view.actions, view.more):
+            line = []
+            for a in row:
+                action, args = ("sel_more", {}) if a.key == "more" else \
+                    ("sel_action", {"key": a.key})
+                b = self._link(a.label, lambda ac=action, ar=args: self._act(ac, dict(ar)))
+                b.setAttributedTitle_(_attr(a.label, color(t["body"]), size=13.0))
+                b.sizeToFit()
+                b.setAccessibilityIdentifier_(f"sel:{a.key}")
+                if a.tip:
+                    b.setToolTip_(a.tip)
+                line.append(b)
+            if line:
+                buttons.append(line)
+        pad, gap, row_h = 8.0, 12.0, 26.0
+        width = max(sum(b.frame().size.width for b in line) + gap * (len(line) - 1) + 30
+                    for line in buttons) + 2 * pad
+        height = row_h * len(buttons) + 2 * pad - 4
+        card = _MenuCard.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
+        card.fill, card.border, card.radius = color(t["surface"]), color(t["hairline"]), 10.0
+        mark = _mark_view(16)
+        mark.setFrameOrigin_(NSMakePoint(pad, pad + 4))
+        card.addSubview_(mark)
+        y = pad
+        for line in buttons:
+            x = pad + 26
+            for b in line:
+                b.setFrameOrigin_(NSMakePoint(x, y + 2))
+                card.addSubview_(b)
+                x += b.frame().size.width + gap
+            y += row_h
+        return card, width, height
+
+    def hide_selmark(self) -> None:
+        self._sel_view = None
+        self._sel_rect = None
+        self._sel.orderOut_(None)
+
+    def selmark_hit(self, x: int, y: int) -> bool:
+        r = self._sel_rect
+        return r is not None and r.x <= x < r.x + r.w and r.y <= y < r.y + r.h
+
+    def selmark_geometry(self) -> tuple[int, int, int, int] | None:
+        r = self._sel_rect
+        return None if r is None else (r.x, r.y, r.w, r.h)
 
     def monitors(self) -> list[Rect]:
         return monitors()
@@ -1057,6 +1136,8 @@ class MacOverlay:
         rows = _Rows(card, inner, top=14, left=16)
         if view.mode == "selection":
             self._fill_selection(rows, view, inner)
+        elif view.mode == "result":
+            self._fill_result(rows, view, inner)
         else:
             self._fill_drawer(rows, view, inner)
         h = rows.y + 14 - 12
@@ -1076,7 +1157,7 @@ class MacOverlay:
                        size=14)
         title.setFrameOrigin_(NSMakePoint(32, 0))
         block.addSubview_(title)
-        sub = look.subline(view.mode, has_tones)
+        sub = look.subline(view.mode, has_tones, view.result and view.result.origin)
         line = None if has_tones else look.tone_line(view.tone, view.tone_reason)
         subline = _label(sub + (f" · {line}" if line else ""), color(t["muted"]),
                          rows.width - 232, lines=1, size=12)
@@ -1285,6 +1366,55 @@ class MacOverlay:
             right.append(self._act_button("Paste over selection", "sel_paste"))
         right.append(self._act_button("Copy rewrite", "sel_copy", primary=True))
         rows.run([], right=right)
+
+    def _fill_result(self, rows: _Rows, view: PanelView, inner: float) -> None:
+        """Selection actions' answer, as the GTK and GNOME renderers draw it."""
+        t = self._t
+        r = view.result
+        if r is None:
+            return
+        self._header(rows, view)
+        head = [_label(r.title, color(t["muted"]), 120, bold=True, lines=1, size=12)]
+        head[0].sizeToFit()
+        # the loader, as a requested check shows it
+        right = _loader(r.working, t, 200) if r.state == "loading" else []
+        rows.run(head, right=right, gap=8)
+        if r.source:
+            rows.full(_label(f"“{r.source}”", color(t["muted"]), inner, size=12), gap=4)
+        if not r.text and r.state == "loading":  # skeleton lines until the answer comes in
+            h = len(look.SKELETON_SUGGESTED) * (look.SKELETON_BAR_H + look.SKELETON_GAP) + 13
+            box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, inner, h))
+            box.fill, box.border, box.radius = color(t["card"]), color(t["card_border"]), 8.0
+            y = 10.0
+            for share in look.SKELETON_SUGGESTED:
+                bar = _skeleton(t, (inner - 24) * share)
+                bar.setFrameOrigin_(NSMakePoint(12, y))
+                box.addSubview_(bar)
+                y += look.SKELETON_BAR_H + look.SKELETON_GAP
+        else:
+            text = r.text or "No answer this time."
+            lab = _label(text, color(t["text"] if r.text else t["muted"]), inner - 20, lines=14)
+            _fit(lab, inner - 20)
+            box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, inner,
+                                                          lab.frame().size.height + 16))
+            box.fill, box.border, box.radius = color(t["card"]), color(t["card_border"]), 8.0
+            lab.setFrameOrigin_(NSMakePoint(10, 8))
+            box.addSubview_(lab)
+        rows.full(box)
+        if r.note:
+            rows.full(_label(r.note, color(t["warn_text"]), inner))
+        if r.actions:  # text from a shot: Fix grammar, Translate, Explain
+            rows.run([self._act_button(label, "res_action", key=key)
+                      for key, label in r.actions])
+        left, right = [], []
+        if r.can_follow and r.state != "loading":
+            left.append(self._link("Ask a follow-up…", lambda: self._act("res_follow", {}),
+                                   strong=True))
+        if r.text and r.state == "ready":
+            if r.can_replace:
+                right.append(self._act_button("Replace selection", "res_replace"))
+            right.append(self._act_button("Copy", "res_copy", primary=True))
+        rows.run(left, right=right)
 
     def _toggle_details(self) -> None:
         self._details_open = not self._details_open

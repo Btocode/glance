@@ -21,7 +21,8 @@ do not set keeps its default.
 | Pause / resume | `pause` | `Super+Alt+p` | ⌃⌥P |
 | Pick tone 1–4 (Alt+Enter applies it) | `tone1` … `tone4` | `Super+Alt+1`, `Super+Alt+2`, `Super+Alt+3`, `Super+Alt+4` | ⌃⌥1 … ⌃⌥4 |
 | Ask for a completion | `complete` | `Super+Alt+Return` | ⌃⌥⏎ |
-| Rewrite the selection in any app | `selection` | `Super+Alt+a` | ⌃⌥A |
+| Act on the selection in any app (explain, translate, rewrite…) | `selection` | `Super+Alt+a` | ⌃⌥A |
+| Take a Glance Shot (capture a region) | `shot` | `Super+Alt+c` | ⌃⌥C |
 | Use the strip's suggestion (only while it shows one) | `[ui] use_key` | `Alt+Return` | ⌥⏎ |
 
 On macOS `Super` is ⌘, `Alt` ⌥ and `Ctrl` ⌃. A chord left at its Linux default becomes the
@@ -30,6 +31,9 @@ macOS default above; a chord you set is used as you wrote it.
 What changed in this release:
 
 - `check` is new (`Super+Alt+g` / ⌃⌥G).
+- `shot` is new (`Super+Alt+c` / ⌃⌥C, C for capture): Glance Shot. In the region picker
+  Enter takes the whole screen, Space the window under the pointer, Esc cancels; those three
+  keys are held only while the picker is up.
 - On macOS the panel moved from ⌃⌥G to ⌃⌥O, so ⌃⌥G (G for Glance) is the check on every
   platform. A config that sets `panel` itself keeps its own chord.
 - Select-anything stays off `Super+Alt+s`. GNOME uses that chord to turn the screen reader (Orca)
@@ -64,7 +68,8 @@ session): Plasma `Meta+Alt+k` (next keyboard layout), `Meta+Alt+l` (some version
 `Meta+p`, `Alt+F1`, `Ctrl+Alt+Escape`; Xfce `Super+r`, `Super+t`, `Super+p`, `Ctrl+Alt+l`,
 `Ctrl+Alt+Escape`. None of Glance's chords is among them.
 
-Result: no Glance default collides. `Super+Alt+g` (check) is free on all of them.
+Result: no Glance default collides. `Super+Alt+g` (check) and `Super+Alt+c` (Glance Shot) are
+free on all of them (GNOME's own screenshot keys are `Print`, `Shift+Print` and `Alt+Print`).
 
 ## macOS: what was checked
 
@@ -85,7 +90,8 @@ System shortcuts (System Settings → Keyboard → Keyboard Shortcuts) and the s
 | Globe/fn E, Fn Fn | emoji, dictation (not chords Glance could take) |
 
 Glance uses ⌃⌥ chords because ⌘⌥ chords clash with app shortcuts everywhere. None of the ⌃⌥
-defaults above is a macOS system shortcut. **VoiceOver** uses ⌃⌥ as its "VO" modifier while it
+defaults above is a macOS system shortcut; ⌃⌥C (Glance Shot) is not one of the screenshot
+chords (⇧⌘3/4/5 and their ⌃ forms). **VoiceOver** uses ⌃⌥ as its "VO" modifier while it
 runs, so with VoiceOver on, pick other chords under `[general.hotkeys]`.
 
 ## When a chord is taken anyway

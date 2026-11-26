@@ -9,8 +9,13 @@
 //! Phase 3 adds the privacy functions (`privacy_find_secrets`, `privacy_find_protected`,
 //! `privacy_shield`, `privacy_unshield`): the Rust twin of `glance.privacy.redact` and
 //! `glance.privacy.entities`, with Python str (code point) offsets.
+//!
+//! 0.3.0 adds `Ocr` (Glance Shot's local OCR, the `ocrs` engine): `Ocr(detection,
+//! recognition)` loads the two model files, `Ocr.png_text(png_bytes)` reads an image held in
+//! memory. Model download and pinning are Glance's job (Python), never this crate's.
 
 pub mod engine;
+pub mod ocr;
 pub mod privacy;
 
 #[cfg(feature = "python")]
@@ -199,6 +204,46 @@ mod python {
         spans(privacy::find_protected(text))
     }
 
+    /// Local OCR over in-memory PNGs. Thread safe; calls release the GIL and never panic
+    /// into Python (`GrammarPanic` is raised instead).
+    #[pyclass(module = "glance_core", frozen)]
+    struct Ocr {
+        inner: crate::ocr::Ocr,
+    }
+
+    #[pymethods]
+    impl Ocr {
+        /// `Ocr(detection, recognition)`: the paths of the two ONNX model files. OSError
+        /// when one cannot be loaded.
+        #[new]
+        fn new(py: Python<'_>, detection: PathBuf, recognition: PathBuf) -> PyResult<Self> {
+            let r = py.detach(|| {
+                catch_unwind(AssertUnwindSafe(|| crate::ocr::Ocr::load(&detection, &recognition)))
+            });
+            match r {
+                Ok(Ok(inner)) => Ok(Ocr { inner }),
+                Ok(Err(e)) => Err(PyOSError::new_err(e.to_string())),
+                Err(p) => Err(GrammarPanic::new_err(format!("ocrs panicked: {}",
+                                                            panic_message(p.as_ref())))),
+            }
+        }
+
+        /// The text in a PNG image (bytes), one line per line of text. ValueError for an
+        /// image that cannot be decoded.
+        fn png_text(&self, py: Python<'_>, png: Vec<u8>) -> PyResult<String> {
+            let r = py.detach(|| catch_unwind(AssertUnwindSafe(|| self.inner.png_text(&png))));
+            match r {
+                Ok(Ok(text)) => Ok(text),
+                Ok(Err(e @ crate::ocr::OcrFailure::Image(_))) => {
+                    Err(PyValueError::new_err(e.to_string()))
+                }
+                Ok(Err(e)) => Err(PyRuntimeError::new_err(e.to_string())),
+                Err(p) => Err(GrammarPanic::new_err(format!("ocrs panicked: {}",
+                                                            panic_message(p.as_ref())))),
+            }
+        }
+    }
+
     /// `redact.shield` as (text, mapping, has_objects, segments).
     #[pyfunction]
     fn privacy_shield(text: &str) -> (String, Vec<(String, String)>, bool, Vec<Segment>) {
@@ -225,6 +270,7 @@ mod python {
         m.add_function(wrap_pyfunction!(privacy_unshield, m)?)?;
         m.add("PRIVACY_UNICODE_VERSION", privacy::tables::UNICODE_VERSION)?;
         m.add_class::<Grammar>()?;
+        m.add_class::<Ocr>()?;
         m.add("GrammarPanic", m.py().get_type::<GrammarPanic>())?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;
         m.add("HARPER_VERSION", HARPER_VERSION)?;

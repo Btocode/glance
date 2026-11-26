@@ -47,5 +47,9 @@
       <default>['&lt;Super&gt;&lt;Alt&gt;a']</default>
       <summary>Glance: selection</summary>
     </key>
+    <key name="shot" type="as">
+      <default>['&lt;Super&gt;&lt;Alt&gt;c']</default>
+      <summary>Glance: shot</summary>
+    </key>
   </schema>
 </schemalist>

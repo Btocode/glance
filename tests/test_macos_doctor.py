@@ -113,4 +113,8 @@ def test_hotkeys_reports_the_mac_chords(tmp_path):
     assert r.status == "warn" and "check (⌃⌥G)" in r.detail and "panel (⌃⌥O)" in r.detail
     e, _ = env(tmp_path, status={"hotkeys_grabbed": "check,panel,fix_all,revert,pause,tone1,"
                                                     "tone2,tone3,tone4,complete,selection"})
+    r = md.MacHotkeys().run(e)
+    assert r.status == "warn" and r.detail == "not available: shot (⌃⌥C)"  # Glance Shot's
+    e, _ = env(tmp_path, status={"hotkeys_grabbed": "check,panel,fix_all,revert,pause,tone1,"
+                                                    "tone2,tone3,tone4,complete,selection,shot"})
     assert md.MacHotkeys().run(e).status == "ok"

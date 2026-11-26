@@ -9,6 +9,9 @@ from glance.log import log_event
 
 # Actions of select-anything's panel; `tone` there selects a tone and shows its rewrite.
 SELECTION_ACTIONS = ("tone", "sel_copy", "sel_paste", "close")
+# The selection mark and its action bar (`features.selection_actions`), and its result panel.
+BAR_ACTIONS = ("sel_mark", "sel_hover", "sel_more", "sel_action", "sel_hide")
+RESULT_ACTIONS = ("res_copy", "res_replace", "res_follow", "res_action", "close")
 
 
 def dispatch_panel_action(controller: Any, action: str, args: dict[str, Any],
@@ -77,12 +80,19 @@ class PanelRouter:
     def __init__(self, controller: Any, ai: Any = None,
                  remember_profile: Callable[[str, str], None] | None = None,
                  selection: Any = None, guard: Any = None,
-                 on_setup: Callable[[], None] | None = None) -> None:
+                 on_setup: Callable[[], None] | None = None, bar: Any = None) -> None:
         self._c, self._ai, self._remember = controller, ai, remember_profile
-        self.selection, self.guard = selection, guard
+        self.selection, self.guard, self.bar = selection, guard, bar
         self._on_setup = on_setup
 
     def action(self, action: str, args: dict[str, Any]) -> None:
+        bar = self.bar
+        if bar is not None and action in BAR_ACTIONS:
+            self._bar_action(bar, action, args)
+            return
+        if bar is not None and bar.is_open and action in RESULT_ACTIONS:
+            self._result_action(bar, action, args)
+            return
         sa = self.selection
         if sa is not None and sa.is_open and action in SELECTION_ACTIONS:
             self._selection_action(sa, action, args)
@@ -101,10 +111,46 @@ class PanelRouter:
 
     def escape(self) -> None:
         sa = self.selection
-        if sa is not None and sa.is_open:
+        if self.bar is not None and self.bar.is_open:
+            self.bar.close()
+        elif sa is not None and sa.is_open:
             sa.close()
         else:
             self._c.close_panel(snooze=True)
+
+    @staticmethod
+    def _bar_action(bar: Any, action: str, args: dict[str, Any]) -> None:
+        if action == "sel_mark":
+            bar.open_bar()
+        elif action == "sel_hover":
+            bar.hover(bool(args.get("inside")))
+        elif action == "sel_more":
+            bar.toggle_more()
+        elif action == "sel_hide":
+            bar.hide()
+        else:
+            key = args.get("key")
+            if isinstance(key, str):
+                bar.act(key)
+            else:
+                log_event("panel_action_malformed")
+
+    @staticmethod
+    def _result_action(bar: Any, action: str, args: dict[str, Any]) -> None:
+        if action == "res_copy":
+            bar.copy_result()
+        elif action == "res_replace":
+            bar.replace()
+        elif action == "res_follow":
+            bar.follow_up()
+        elif action == "res_action":
+            key = args.get("key")
+            if isinstance(key, str):
+                bar.result_action(key)
+            else:
+                log_event("panel_action_malformed")
+        else:
+            bar.close()
 
     @staticmethod
     def _selection_action(sa: Any, action: str, args: dict[str, Any]) -> None:

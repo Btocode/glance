@@ -366,6 +366,18 @@ class FakeOverlay:
         self.monitor_list = monitors if monitors is not None else [Rect(0, 0, 1920, 1080)]
         self.clipboard: list[str] = []
         self.asked: list[tuple[str, Callable[[str, bool], None]]] = []
+        self.selmark: Any = None  # the selection mark / action bar on show
+        self.selmark_xy: tuple[int, int] | None = None
+        self.hit = False  # what `selmark_hit` answers
+
+    def show_selmark(self, view: Any, x: int, y: int) -> None:
+        self.selmark, self.selmark_xy = view, (x, y)
+
+    def hide_selmark(self) -> None:
+        self.selmark = self.selmark_xy = None
+
+    def selmark_hit(self, x: int, y: int) -> bool:
+        return self.hit
 
     def show_chip(self, view: ChipView, x: int, y: int) -> None:
         self.chip, self.chip_xy = view, (x, y)

@@ -431,17 +431,44 @@ class BackendSupervisor:
     def rewrite(self, text: str, tone: str, ctx: Ctx, custom: str | None = None,
                 speculative: bool = False) -> Iterator[str]:
         """Text deltas. Falls back only until the first delta has been handed out."""
-        purpose = "sharpen" if tone == "sharpen_prompt" else "rewrite"
+        from glance.backends.prompts import SELECTION_ACTIONS
+
+        purpose = "sharpen" if tone == "sharpen_prompt" else \
+            "select" if tone in SELECTION_ACTIONS else "rewrite"
         return self._stream(speculative, lambda b: b.rewrite(text, tone, ctx, custom), purpose)
 
     def complete(self, prefix: str, ctx: Ctx, speculative: bool = False) -> Iterator[str]:
         """Deltas of a continuation of `prefix`: budget, breaker and fallback as `rewrite`."""
         return self._stream(speculative, lambda b: b.complete(prefix, ctx), "complete")
 
+    def answer_text(self, system: str, user: str, purpose: str = "shot") -> Iterator[str]:
+        """A free-form answer (Glance Shot's Translate / Explain on text): budget, breaker,
+        cost limit and fallback as `rewrite`. The caller shields the text."""
+        return self._stream(False, lambda b: b.answer(system, user), purpose)
+
+    def vision_backend(self) -> tuple[str, Backend] | None:
+        """The connected backend an image would go to (the first in order that takes
+        images), or None."""
+        for name in self._connected():
+            backend = self._backends.get(name)
+            if backend is not None and getattr(backend, "vision", False):
+                return name, backend
+        return None
+
+    def see(self, name: str, png: bytes, system: str, user: str) -> Iterator[str]:
+        """An answer about an image from `name` only: an image never falls back to a backend
+        the user was not told about. Budget, breaker, ledger and cost limit apply."""
+        return self._stream(False, lambda b: b.see(png, system, user), "shot", only=name)
+
     def _stream(self, speculative: bool, call: Callable[[Backend], Iterator[str]],
-                purpose: str = "rewrite") -> Iterator[str]:
+                purpose: str = "rewrite", only: str | None = None) -> Iterator[str]:
         with self._lane(speculative):
-            for name, backend in self._plan("rewrite", speculative):
+            plan = self._plan("rewrite", speculative)
+            if only is not None:
+                plan = [(n, b) for n, b in plan if n == only]
+                if not plan:
+                    raise AiUnavailable("none")
+            for name, backend in plan:
                 if not self._begin(name):
                     continue
                 started = False

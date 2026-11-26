@@ -60,3 +60,57 @@ class ShellSelection:
             return int(x), int(y)
         except (ShellUnavailable, TypeError, ValueError):
             return 0, 0
+
+
+class ShellSelectionWatch:
+    """SelectionWatchPort over the extension: it watches the shell's PRIMARY owner
+    (`Meta.Selection` owner-changed: no content) and the pointer's button, and calls glanced
+    with `SelectionSettled` {x, y} or `SelectionCleared`. Keys are not visible to it; the
+    focused window changing (`on_window`) and the idle time hide the mark there."""
+
+    def __init__(self, bus: ShellBus) -> None:
+        self._bus = bus
+        self._on: bool = False
+        self._settled: Any = None
+        self._cleared: Any = None
+        self._input: Any = None
+
+    def start(self, on_settled: Any, on_cleared: Any, on_input: Any) -> None:
+        self._settled, self._cleared, self._input = on_settled, on_cleared, on_input
+        self._on = True
+        self._tell()
+
+    def stop(self) -> None:
+        self._on = False
+        self._tell()
+
+    def arm(self, on: bool) -> None:
+        pass  # the extension cannot see the app's keys; the focus change and idle cover it
+
+    def resync(self) -> None:
+        """The extension (re)appeared: tell it again whether to watch."""
+        self._tell()
+
+    def _tell(self) -> None:
+        try:
+            self._bus.call("WatchSelection", {"on": self._on})
+        except ShellUnavailable:
+            pass
+
+    # from the extension (ShellLink signals)
+    def on_settled(self, payload: Any) -> None:
+        if not self._on or self._settled is None or not isinstance(payload, dict):
+            return
+        try:
+            x, y = int(payload.get("x", 0)), int(payload.get("y", 0))
+        except (TypeError, ValueError):
+            return
+        self._settled(x, y)
+
+    def on_cleared(self, _payload: Any = None) -> None:
+        if self._on and self._cleared is not None:
+            self._cleared()
+
+    def on_window(self, _payload: Any = None) -> None:
+        if self._on and self._input is not None:
+            self._input("focus", 0, 0)

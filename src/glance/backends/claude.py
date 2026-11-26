@@ -10,6 +10,7 @@ answers (`thinking_tokens` frames; 4.5-10.6 s from the feed, slower than a cold 
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import threading
@@ -17,6 +18,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 from glance.backends.base import (
+    VISION_TIMEOUT_S,
     BackendError,
     BaseBackend,
     Health,
@@ -78,8 +80,21 @@ WARM_SYSTEM = ("Follow the instructions in the <system> block of each user messa
                "exactly.")
 
 
+def image_message(png: bytes, text: str) -> str:
+    """One stream-json input line: a user message with the image (a base64 `image` block, the
+    Messages API's shape) and the question."""
+    data = base64.b64encode(png).decode("ascii")
+    content = [{"type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": data}},
+               {"type": "text", "text": text}]
+    return json.dumps({"type": "user", "message": {"role": "user", "content": content}}) + "\n"
+
+
 class ClaudeBackend(BaseBackend):
     name = "claude"
+    # Images go in through `--input-format stream-json` (`claude --help`: "realtime streaming
+    # input", only with --print), as an image content block on stdin: never a file.
+    vision = True
     # Findings S6.2: a warm (pre-spawned, idle) process saves ~0.86 s a call for ~195 MB idle
     # RSS. The user prioritises speed, so it is on for the chosen backend when that is claude
     # (`backend.warm`, see BackendCfg). The supervisor turns it on with `set_warm`; a backend
@@ -113,6 +128,20 @@ class ClaudeBackend(BaseBackend):
         return self._base(system) + [
             "--output-format", "stream-json", "--include-partial-messages", "--verbose",
         ]
+
+    def argv_vision(self, system: str) -> list[str]:
+        return self._base(system) + [
+            "--input-format", "stream-json", "--output-format", "stream-json",
+            "--include-partial-messages", "--verbose",
+        ]
+
+    def vision_label(self) -> str:
+        return "Claude (the claude CLI)"
+
+    def see(self, png: bytes, system: str, user: str) -> Iterator[str]:
+        lines = self.runner.stream(self.argv_vision(system), image_message(png, user),
+                                   VISION_TIMEOUT_S)
+        yield from self._parse_stream(lines, self._add_usage)
 
     def _argv_warm(self, kind: str) -> list[str]:
         """A warm process cannot know the call's system prompt (it depends on the profile,

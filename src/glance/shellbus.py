@@ -36,12 +36,15 @@ SHELL_METHODS = (
     "Ping", "Render", "Grab", "Ungrab", "FocusedWindow", "Monitors", "KeyState", "TypeText",
     "Chord", "ClipboardSave", "ClipboardSet", "ClipboardRestore", "ReadPrimary",
     "ActivateWindow", "Ask", "Pointer",
+    # Glance Shot: the extension serves these to glanced only (not to glance-capture)
+    "ShotPick", "ShotCancel", "ShotCapture", "ShotBar", "ShotClipboard",
     # GLANCE_SHELL_TEST=1 only (the private test shell); absent otherwise
     "TestHideOverview", "TestMoveWindow", "TestOverlay", "TestClick", "TestScreenshot",
     "TestAskText", "TestPointer", "TestCall",
 )
 DAEMON_METHODS = ("ExtensionHello", "WindowChanged", "GeometryChanged", "Clicked", "Key",
-                  "Sized", "AskDone")
+                  "Sized", "AskDone", "SelectionSettled", "SelectionCleared",
+                  "ShotPicked")
 
 
 def _xml(iface: str, methods: tuple[str, ...], out: bool) -> str:

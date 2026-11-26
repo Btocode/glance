@@ -11,6 +11,7 @@ from glance.ui.onboarding_model import ORDER, TITLES, BackendRow, headline
 
 INSTALL_HINT = "sudo apt install gir1.2-ayatanaappindicator3-0.1"
 SHORTCUTS_LABEL = "Keyboard shortcuts…"
+SHOT_LABEL = "Take a Glance Shot"
 # The brand mark as a flat white tray icon (packaging/icons/symbolic in the checkout).
 _BRAND_ICONS = Path(__file__).resolve().parents[3] / "packaging" / "icons" / "symbolic"
 # state -> (icon name, line shown at the top of the menu)
@@ -74,11 +75,15 @@ class BackendMenu:
             self._on_choose(name)
 
 
+FEATURES_LABEL = "Features"
+
+
 class GtkTray:
     """TrayPort. `available` is False when the indicator library is missing.
 
-    Menu: status line, "AI backend ▸", "Check: on shortcut / while typing" (two radio items:
-    `[general] check`), "Show suggestions automatically" (a check item: on is
+    Menu: status line, "AI backend ▸", "Features ▸" ("Check: on shortcut / while typing", two
+    radio items for `[general] check`, then one check item per switch of
+    `glance.feature_switches`), "Show suggestions automatically" (a check item: on is
     `[ui] suggestions = "auto"`), "Keyboard shortcuts…" (a window listing them), Pause/Resume,
     Quit. `set_backends` takes rows built by the
     caller (never a blocking health check here)."""
@@ -94,8 +99,15 @@ class GtkTray:
                  on_usage_details: Callable[[], None] = lambda: None,
                  on_check_mode: Callable[[str], None] = lambda mode: None,
                  check_mode: str = "shortcut", check_hint: str = "",
-                 on_shortcuts: Callable[[], None] = lambda: None) -> None:
+                 on_shortcuts: Callable[[], None] = lambda: None,
+                 on_feature: Callable[[str, bool], None] = lambda name, on: None,
+                 features: tuple[Any, ...] = (),
+                 on_shot: Callable[[], None] | None = None) -> None:
+        """`features`: the "Features ▸" check items (`feature_switches.menu_rows`).
+        `on_shot`: "Take a Glance Shot" (absent when None: Glance Shot is off)."""
         self._indicator = None
+        self._on_feature = on_feature
+        self._feature_items: dict[str, Any] = {}
         self._on_check_mode = on_check_mode
         self._check_items: dict[str, Any] = {}
         self._on_auto_suggest = on_auto_suggest
@@ -139,6 +151,18 @@ class GtkTray:
             radio.connect("toggled", self._check_toggled, mode)
             self._check_items[mode] = radio
             check_items.append(radio)
+        features_item = Gtk.MenuItem(label=FEATURES_LABEL)
+        self._features_menu = Gtk.Menu()
+        features_item.set_submenu(self._features_menu)
+        for radio in check_items:
+            self._features_menu.append(radio)
+        self._features_menu.append(Gtk.SeparatorMenuItem())
+        for row in features:
+            item = Gtk.CheckMenuItem(label=row.label)
+            item.set_active(row.on)
+            item.connect("toggled", self._feature_toggled, row.name)
+            self._feature_items[row.name] = item
+            self._features_menu.append(item)
         self._auto = Gtk.CheckMenuItem(label="Show suggestions automatically")
         self._auto.set_active(auto_suggest)
         self._auto.connect("toggled", self._auto_toggled)
@@ -154,12 +178,17 @@ class GtkTray:
         self.set_usage(())
         shortcuts = Gtk.MenuItem(label=SHORTCUTS_LABEL)
         shortcuts.connect("activate", lambda _i: on_shortcuts())
-        for item in (self._headline, self._update, Gtk.SeparatorMenuItem(), self._backends.item,
-                     self._usage_item, Gtk.SeparatorMenuItem(), *check_items,
+        self._on_shot = on_shot
+        self._shot = Gtk.MenuItem(label=SHOT_LABEL)
+        self._shot.connect("activate", lambda _i: self._on_shot and self._on_shot())
+        for item in (self._headline, self._update, self._shot, Gtk.SeparatorMenuItem(),
+                     self._backends.item,
+                     self._usage_item, Gtk.SeparatorMenuItem(), features_item,
                      self._auto, shortcuts, Gtk.SeparatorMenuItem(), self._toggle, quit_item):
             menu.append(item)
         menu.show_all()
         self._update.hide()
+        self._shot.set_visible(on_shot is not None)
         self._indicator.set_menu(menu)
 
     @property
@@ -181,6 +210,12 @@ class GtkTray:
         details.connect("activate", lambda _i: self._on_usage_details())
         self._usage_menu.append(details)
         self._usage_menu.show_all()
+
+    def set_shot(self, on_shot: Callable[[], None] | None) -> None:
+        """Show "Take a Glance Shot" (calling `on_shot`), or hide it with None (main thread)."""
+        self._on_shot = on_shot
+        if self._indicator is not None:
+            self._shot.set_visible(on_shot is not None)
 
     def set_update_available(self, available: bool) -> None:
         """Show or hide "Update available — Update now" (main thread)."""
@@ -231,6 +266,23 @@ class GtkTray:
             item.set_active(True)
         finally:
             self._syncing = False
+
+    def set_features(self, rows: tuple[Any, ...]) -> None:
+        """Reflect the feature switches (`feature_switches.menu_rows`) after a config change."""
+        if self._indicator is None:
+            return
+        self._syncing = True
+        try:
+            for row in rows:
+                item = self._feature_items.get(row.name)
+                if item is not None and item.get_active() != row.on:
+                    item.set_active(row.on)
+        finally:
+            self._syncing = False
+
+    def _feature_toggled(self, item: Any, name: str) -> None:
+        if not self._syncing:
+            self._on_feature(name, bool(item.get_active()))
 
     def _check_toggled(self, item: Any, mode: str) -> None:
         if item.get_active() and not self._syncing:

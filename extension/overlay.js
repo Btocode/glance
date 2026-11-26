@@ -97,7 +97,7 @@ function cursorNow() {
     return 'default';
 }
 
-function clickable(actor, onClick) {
+export function clickable(actor, onClick) {
     actor.reactive = true;
     actor.track_hover = true;
     actor.can_focus = false;
@@ -144,7 +144,7 @@ export class Overlay {
         this._look = {};
         this._surfaces = new Map();  // the brand mark's PNGs, for the status icon
         this._named = new Map();
-        this._keys = {status: '', strip: '', panel: '', ghost: '', menu: ''};
+        this._keys = {status: '', strip: '', panel: '', ghost: '', menu: '', selmark: ''};
         this._phase = 0;
         this._spin = 0;
         this._resizing = false;
@@ -169,7 +169,12 @@ export class Overlay {
         this._strip = new St.Bin({reactive: true});
         this._panel = new St.Bin({reactive: true});
         this._ghost = new St.BoxLayout({reactive: false, style: `spacing: ${GHOST_GAP}px;`});
-        for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu]) {
+        // Selection actions: the mark beside selected text, then its action bar.
+        this._selmark = new St.Bin({reactive: true, track_hover: true});
+        this._selHovered = false;
+        this._selmark.connect('notify::hover', () => this._selHover());
+        for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu,
+            this._selmark]) {
             actor.hide();
             Main.layoutManager.addTopChrome(actor);
         }
@@ -181,7 +186,8 @@ export class Overlay {
         if (this._spin)
             GLib.source_remove(this._spin);
         this._cancelMenuTimers();
-        for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu]) {
+        for (const actor of [this._ghost, this._strip, this._panel, this._icon, this._menu,
+            this._selmark]) {
             Main.layoutManager.removeChrome(actor);
             actor.destroy();
         }
@@ -206,6 +212,7 @@ export class Overlay {
         this._renderStrip(scene.strip, tokensKey);
         this._renderPanel(scene.panel, tokensKey);
         this._renderGhost(scene.ghost, tokensKey);
+        this._renderSelmark(scene.selmark ?? null, tokensKey);
         this._place();
         this._reportSizes();
     }
@@ -228,7 +235,8 @@ export class Overlay {
             return;
         const menu = s.status?.menu ? {x: s.status.x + ICON_BOX[0], y: s.status.y} : null;
         const pieces = [[this._icon, s.status], [this._strip, s.strip],
-            [this._panel, s.panel], [this._ghost, s.ghost], [this._menu, menu]];
+            [this._panel, s.panel], [this._ghost, s.ghost], [this._menu, menu],
+            [this._selmark, s.selmark]];
         for (const [actor, piece] of pieces) {
             if (!piece || this._resizing && piece.follow !== false) {
                 actor.hide();
@@ -260,6 +268,11 @@ export class Overlay {
             sizes.strip_h = Math.ceil(this._strip.get_child().get_preferred_height(s.strip.w)[1]);
         if (s.panel && this._panel.get_child())
             sizes.panel_h = Math.ceil(this._panel.get_child().get_preferred_height(s.panel.w)[1]);
+        if (s.selmark?.state === 'bar' && this._selmark.get_child()) {
+            const child = this._selmark.get_child();
+            sizes.selmark_w = Math.ceil(child.get_preferred_width(-1)[1]);
+            sizes.selmark_h = Math.ceil(child.get_preferred_height(sizes.selmark_w)[1]);
+        }
         const key = JSON.stringify(sizes);
         const assumed = s.sizes || {};
         const differs = Object.keys(sizes).some(k => Math.abs((assumed[k] ?? -1) - sizes[k]) > 1);
@@ -691,7 +704,7 @@ export class Overlay {
         this._keys.panel = key;
         for (const n of [...this._named.keys()]) {
             if (!['status', 'use', 'more', 'strip-text', 'ask-entry'].includes(n) &&
-                !n.startsWith('menu:'))
+                !n.startsWith('menu:') && !n.startsWith('sel:'))
                 this._named.delete(n);
         }
         this._panel.get_child()?.destroy();
@@ -703,6 +716,8 @@ export class Overlay {
         card.set_width(panel.w);
         if (panel.view.mode === 'selection')
             this._fillSelection(card, panel);
+        else if (panel.view.mode === 'result')
+            this._fillResult(card, panel);
         else
             this._fillDrawer(card, panel);
         this._panel.set_child(card);
@@ -1101,6 +1116,134 @@ export class Overlay {
         card.add_child(footer);
     }
 
+    // Selection actions' answer: what was asked, the selection (one muted line), the answer,
+    // then "Ask a follow-up…", "Replace selection" (verified write-back only) and Copy.
+    _fillResult(card, panel) {
+        const r = panel.view.result ?? {}, t = this._t;
+        card.add_child(this._header(panel));
+        const section = vbox({style: 'spacing: 6px;'});
+        const head = hbox({style: 'spacing: 8px;'});
+        head.add_child(this._label(r.title ?? '', 'accent', 12, 'font-weight: 600;', false));
+        head.add_child(new St.Widget({x_expand: true}));
+        if (r.state === 'loading')  // the loader, as a requested check shows it
+            head.add_child(this._loader(r.working ?? 'Working…'));
+        section.add_child(head);
+        if (r.source)
+            section.add_child(this._label(`“${r.source}”`, 'muted', 12));
+        let text;
+        if (r.text) {
+            text = this._label(r.text, 'text', 14);
+        } else if (r.state === 'loading') {  // skeleton lines until the answer comes in
+            const sk = this._look?.skeleton ?? {suggested: [1, 0.82, 0.55], gap: 7};
+            text = vbox({x_expand: true, style: `spacing: ${sk.gap}px;`});
+            const inner = Math.max(120, (this._scene?.panel?.w ?? 520) - 64);
+            for (const share of sk.suggested)
+                text.add_child(this._skeleton(inner * share));
+        } else {
+            text = this._label('No answer this time.', 'muted', 12);
+        }
+        const box = new St.Bin({style: `background-color: ${t.card}; border: 1px solid ` +
+            `${t.card_border}; border-radius: 8px; padding: 10px 12px;`, x_expand: true});
+        text.x_expand = true;
+        text.x_align = Clutter.ActorAlign.START;
+        box.set_child(text);
+        this._named.set('result-text', text);
+        section.add_child(r.text && r.text.length > 320 ? this._scroll(box, 200) : box);
+        card.add_child(section);
+        if (r.note)
+            card.add_child(this._banner(r.note));
+        if (r.actions?.length) {  // text from a shot: Fix grammar, Translate, Explain
+            const more = hbox({style: 'spacing: 8px;'});
+            for (const [key, label] of r.actions)
+                more.add_child(this._button(label, 'secondary', this._act('res_action', {key}),
+                    `res_action:${key}`));
+            card.add_child(more);
+        }
+        const footer = hbox({style: 'spacing: 8px;'});
+        if (r.can_follow && r.state !== 'loading')
+            footer.add_child(this._button('Ask a follow-up…', 'strong', this._act('res_follow'), 'res_follow'));
+        footer.add_child(new St.Widget({x_expand: true}));
+        if (r.text && r.state === 'ready') {
+            if (r.can_replace)
+                footer.add_child(this._button('Replace selection', 'secondary', this._act('res_replace'), 'res_replace'));
+            footer.add_child(this._button('Copy', 'primary', this._act('res_copy'), 'res_copy'));
+        }
+        card.add_child(footer);
+    }
+
+    // ------------------------------------------------------------------ selection actions
+    // The mark: the brand mark on a small round surface. The bar: the mark and one button
+    // per action; '⋯' opens a second row ("Translate to…", the tones). Hovering tells glanced
+    // (it keeps the bar while the pointer is on it and opens it from the mark).
+
+    _selHover() {
+        const inside = this._selmark.hover;
+        if (inside === this._selHovered || !this._scene?.selmark)
+            return;
+        this._selHovered = inside;
+        this._cb.clicked('action', {action: 'sel_hover', args: {inside}});
+    }
+
+    _selButton(a) {
+        const t = this._t;
+        const base = 'background-color: transparent; border-radius: 6px; padding: 5px 8px;';
+        const bin = this._hoverBox({y_align: Clutter.ActorAlign.CENTER}, base,
+            `background-color: ${t.hover};`);
+        const row = hbox({style: 'spacing: 5px;'});
+        if (a.glyph && this._look?.glyphs?.[a.glyph])
+            row.add_child(this._glyph(a.glyph, 13));
+        row.add_child(this._label(a.label, 'body', 13, '', false));
+        bin.set_child(row);
+        const more = a.key === 'more';
+        clickable(bin, this._act(more ? 'sel_more' : 'sel_action', more ? {} : {key: a.key}));
+        this._named.set(`sel:${a.key}`, bin);
+        return bin;
+    }
+
+    _renderSelmark(piece, tokensKey) {
+        const key = piece ? JSON.stringify([{...piece, x: 0, y: 0}, tokensKey]) : '';
+        if (key === this._keys.selmark)
+            return;
+        this._keys.selmark = key;
+        for (const n of [...this._named.keys()]) {
+            if (n.startsWith('sel:'))
+                this._named.delete(n);
+        }
+        this._selmark.get_child()?.destroy();
+        if (!piece) {
+            this._selHovered = false;
+            return;
+        }
+        const t = this._t;
+        if (piece.state === 'mark') {
+            const [w, h] = piece.box ?? [28, 28];
+            const dot = new St.Bin({style: `background-color: ${t.surface}; border: 1px solid ` +
+                `${t.use_border}; border-radius: ${Math.round(w / 2)}px; ` +
+                `box-shadow: 0 2px 6px ${t.shadow};`, width: w, height: h});
+            dot.set_child(this._mark(piece.mark_px ?? 16));
+            clickable(dot, this._act('sel_mark'));
+            this._named.set('sel:mark', dot);
+            this._selmark.set_child(dot);
+            return;
+        }
+        const bar = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
+            `border-radius: 10px; padding: 4px; spacing: 4px; box-shadow: 0 4px 14px ${t.shadow};`});
+        const row = hbox({style: 'spacing: 2px;'});
+        const lead = this._mark(16);
+        lead.style = 'margin: 0 4px;';
+        row.add_child(lead);
+        for (const a of piece.actions ?? [])
+            row.add_child(this._selButton(a));
+        bar.add_child(row);
+        if (piece.more?.length) {
+            const more = hbox({style: `spacing: 2px; padding-top: 4px; border-top: 1px solid ${t.hairline};`});
+            for (const a of piece.more)
+                more.add_child(this._selButton(a));
+            bar.add_child(more);
+        }
+        this._selmark.set_child(bar);
+    }
+
     // ------------------------------------------------------------------ the ghost
     // The completion in emerald italics after the caret, with a small "Tab" keycap: Tab takes it.
 
@@ -1231,8 +1374,14 @@ export class Overlay {
                 badge: s.status.badge, spinning: Boolean(this._spin)} : null,
             strip: geo(this._strip) && s?.strip ? {rect: geo(this._strip),
                 text: text && text.mapped ? text.clutter_text.get_text() : null} : null,
-            panel: geo(this._panel) ? {rect: geo(this._panel), mode: s?.panel?.view?.mode} : null,
+            panel: geo(this._panel) ? {rect: geo(this._panel), mode: s?.panel?.view?.mode,
+                result: s?.panel?.view?.result ? {state: s.panel.view.result.state,
+                    actions: (s.panel.view.result.actions ?? []).map(([key]) => key),
+                    text: this._named.get('result-text')?.clutter_text?.get_text() ?? null}
+                    : null} : null,
             ghost: geo(this._ghost) ? {rect: geo(this._ghost)} : null,
+            selmark: geo(this._selmark) && s?.selmark ? {rect: geo(this._selmark),
+                state: s.selmark.state} : null,
             menu: geo(this._menu) && s?.status?.menu ? {rect: geo(this._menu),
                 items: s.status.menu.items.map(i => i.label), note: s.status.menu.note ?? null,
                 hint: s.status.menu.hint ?? null} : null,

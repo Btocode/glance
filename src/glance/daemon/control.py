@@ -55,11 +55,15 @@ class CtlRouter:
     loop. The request id is added to every reply here."""
 
     def __init__(self, controller: Any, panel_action: Callable[[str, dict[str, Any]], None],
-                 backend_control: Any = None, edit_host: Any = None) -> None:
+                 backend_control: Any = None, edit_host: Any = None,
+                 extra: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None
+                 ) -> None:
+        """`extra`: more requests, name -> handler(payload) -> reply (e.g. `shot`)."""
         self._c = controller
         self._panel_action = panel_action
         self._backends = backend_control
         self._edit = edit_host
+        self._extra = dict(extra or {})
 
     def handle(self, msg_type: str, payload: dict[str, Any], send: Reply) -> None:
         def reply(msg: dict[str, Any]) -> None:
@@ -77,6 +81,9 @@ class CtlRouter:
                 return
             if self._backends is not None and self._backends.handles(msg_type):
                 self._backends.handle(msg_type, payload, reply)
+                return
+            if msg_type in self._extra:
+                reply(self._extra[msg_type](payload))
                 return
         except Exception as e:  # noqa: BLE001 - one bad request must not end the daemon
             log_event("ctl_error", type=msg_type, kind=type(e).__name__)
