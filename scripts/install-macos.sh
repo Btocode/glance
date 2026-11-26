@@ -430,12 +430,40 @@ sys.stdout.buffer.write(render_plist(Path(sys.argv[1]), home, default_path_env(h
     local uid
     uid="$(id -u)"
     launchctl_do bootout "gui/$uid/$LABEL" 2>/dev/null || true
+    # bootout returns before glanced has finished leaving (it takes up to a few seconds);
+    # loading again before then fails with "Bootstrap failed: 5: Input/output error".
+    agent_gone "gui/$uid/$LABEL"
     if [ "$NO_START" = 1 ]; then
         note "installed; it starts at your next login (--no-start)"
     else
-        launchctl_do bootstrap "gui/$uid" "$AGENT" || die "launchctl could not load $AGENT"
+        load_agent "$uid" || die "launchctl could not load $AGENT"
         [ -n "${GLANCE_SKIP_LAUNCHCTL:-}" ] || note "started (logs: $LOG_DIR/glanced.log)"
     fi
+}
+
+# Waits (up to ~10 s) until launchd no longer knows the service.
+agent_gone() {
+    [ -n "${GLANCE_SKIP_LAUNCHCTL:-}" ] && return 0
+    local i=0
+    while [ "$i" -lt 40 ] && launchctl print "$1" >/dev/null 2>&1 </dev/null; do
+        sleep 0.25
+        i=$((i + 1))
+    done
+    return 0
+}
+
+# bootstrap, retried; if launchd still holds the old job, restart it in place instead.
+load_agent() {
+    local uid="$1" try=0
+    while [ "$try" -lt 3 ]; do
+        launchctl_do bootstrap "gui/$uid" "$AGENT" 2>/dev/null && return 0
+        try=$((try + 1))
+        sleep 1
+    done
+    if launchctl print "gui/$uid/$LABEL" >/dev/null 2>&1 </dev/null; then
+        launchctl_do kickstart -k "gui/$uid/$LABEL" && return 0
+    fi
+    launchctl_do bootstrap "gui/$uid" "$AGENT"  # last try, with its error shown
 }
 
 # ---------------------------------------------------------------------- steps 7-8: doctor
