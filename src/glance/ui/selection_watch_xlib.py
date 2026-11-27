@@ -65,7 +65,10 @@ class XlibSelectionWatch:
                 log_event("selection_watch_unavailable")
                 return
             d.xfixes_query_version()
-            d.xinput_query_version()
+            # 2.2: raw events arrive even while an app holds the pointer (Chrome, Electron
+            # and GTK grab it while you drag); with 2.0 the button's release never came.
+            xinput.XIQueryVersion(display=d.display, opcode=d.display.get_extension_major(
+                xinput.extname), major_version=2, minor_version=2)
             self._xi = d.query_extension("XInputExtension").major_opcode
             self._root = d.screen().root
             self._active = d.intern_atom("_NET_ACTIVE_WINDOW")
@@ -184,8 +187,12 @@ class XlibSelectionWatch:
         self._settling = None
         if self._d is None:
             return
+        held = self._held and self._button_down()
+        if self._held and not held:  # its release was not reported: the server knows
+            self._held = False
+            self._released_at = self._now()
         quiet_s = self._now() - max(self._changed_at, self._released_at)
-        if self._held or quiet_s * 1000 < SETTLE_MS:
+        if held or quiet_s * 1000 < SETTLE_MS:
             self._settling = self._later(POLL_MS, self._settle)
             return
         try:
@@ -194,6 +201,12 @@ class XlibSelectionWatch:
         except error.XError:
             return
         self._on_settled(x, y)
+
+    def _button_down(self) -> bool:
+        try:
+            return bool(self._root.query_pointer().mask & X.Button1Mask)
+        except error.XError:
+            return False
 
     def _input(self, kind: str) -> None:
         try:

@@ -29,6 +29,9 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
   toolbar never moves. Ask is typed in the card itself instead of a window of its own.
 
 ### Fixed
+- The selection mark never showed in Chrome, Slack or Discord on X11: the mouse button's
+  release went unreported while the app held the pointer (Glance now asks for XInput 2.2
+  and checks the button's state itself).
 - Selection actions never appeared in Chrome, Electron apps and Firefox on X11: their
   selection is owned by a hidden helper window the privacy gate could not tie to the app.
 

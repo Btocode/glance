@@ -235,6 +235,7 @@ def test_window_change_hides(b):
 
 class _Q:
     root_x, root_y = 120, 80
+    mask = 1 << 8  # Button1Mask: the server says the left button is down
 
 
 class _Root:
@@ -259,6 +260,24 @@ def _xwatch():
 def _raw(detail):
     import struct
     return struct.pack("=HII", 2, 0, detail)
+
+
+def test_xwatch_settles_when_the_release_was_never_reported():
+    """Chrome, Slack and Discord hold the pointer while you drag: the raw release can go
+    missing, and the server's own button state says the button is up."""
+    from Xlib.ext import xinput
+
+    w, clock, out = _xwatch()
+    w._raw(xinput.RawButtonPress, _raw(1))
+    w._owner_changed(0x400001)
+    clock.advance(1000)
+    assert out == []  # still down, by the server too
+    _Q.mask = 0
+    try:
+        clock.advance(sb.SETTLE_MS + 200)
+    finally:
+        _Q.mask = 1 << 8
+    assert out == [("settled", 120, 80)]
 
 
 def test_xwatch_mouse_selection_settles_after_release():
