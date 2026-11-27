@@ -21,11 +21,23 @@ Type, press Super+Alt+G, then Alt+Enter. Or select text and click Explain.
 
 </div>
 
+## A one-minute tour
+
+Every feature in this version, one screen at a time: the mark while you type, the Assistant
+and its tones, the right-click toolbar, autocomplete, selected text (Explain, Summarize,
+Translate), Glance Shot (Text, Explain, Ask, Mark) and Settings.
+
+<div align="center">
+<img alt="Glance overview: the mark beside a text field and its states, the fix strip, the Assistant panel with tones, the right-click toolbar, autocomplete, the selection mark and its Explain, Summarize, Translate and Copy bar, an answer and the language choices, Glance Shot's region picker, toolbar, Text, Explain, Ask and Mark, and the Settings window." src="docs/assets/overview.gif" width="800">
+
+[Watch it as a video (MP4, 56 s)](docs/assets/overview.mp4)
+</div>
+
 ## What it does
 
 - **Fixes spelling and grammar in any app.** Chat, mail in the browser, editors, terminals. Grammar runs on your computer.
 - **Changes the tone.** Friendlier, more direct, shorter, more professional, or "Rewrite as…" (needs an AI).
-- **Works on selected text.** Select text anywhere, then Explain, Summarize, Translate, Reply or Rewrite it.
+- **Works on selected text.** Select text anywhere, then Explain, Summarize, Translate or Copy it.
 - **Glance Shot.** Pick a screen region, then copy it, save it, pull the text out of it, or ask the AI to explain it.
 - **Your AI, or none.** Use the `claude`, `codex`, `gemini` or `opencode` you already signed in to, or an API key. Grammar works offline without any.
 - **Private by design.** Text goes to an AI only if you connect one, and secrets are removed first.
