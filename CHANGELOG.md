@@ -11,6 +11,11 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
 
 ## [0.5.0] - 2026-11-27
 
+### Added
+- Settings ▸ General ▸ Checked by: "AI (fast model)" (default) or "Local + AI"
+  (`[general] checker`).
+- Glance Shot outlines the captured region while its card is up.
+
 ### Changed
 - The check is the AI's (`[general] checker = "ai"`, the new default): with an AI connected
   the strip shows the loader until the fast model answers, and the local checker's findings

@@ -13,7 +13,7 @@
 class Glance < Formula
   desc "System-wide writing assistant: grammar, tone rewrites and AI actions in any app"
   homepage "https://github.com/Btocode/glance"
-  url "https://github.com/Btocode/glance/releases/download/v0.4.0/glance-0.4.0.tar.gz"
+  url "https://github.com/Btocode/glance/releases/download/v0.5.0/glance-0.5.0.tar.gz"
   sha256 "REPLACE_WITH_SHA256_FROM_SHA256SUMS"
   license "MIT"
 

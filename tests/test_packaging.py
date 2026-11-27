@@ -68,7 +68,7 @@ def test_changelog_section_for_this_version():
 def test_changelog_releases_are_in_order_with_dates():
     heads = re.findall(r"^## \[(\d[^\]]*)\] - (\d{4}-\d\d-\d\d)$",
                        (REPO / "CHANGELOG.md").read_text(), re.MULTILINE)
-    assert [v for v, _ in heads] == ["0.4.0", "0.3.0", "0.2.0", "0.1.0"]
+    assert [v for v, _ in heads] == ["0.5.0", "0.4.0", "0.3.0", "0.2.0", "0.1.0"]
     assert heads[0][0] == version()
 
 

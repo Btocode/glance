@@ -1,6 +1,6 @@
 pkgbase = glance-writing-assistant
 	pkgdesc = System-wide writing assistant: grammar, tone rewrites and AI actions in any app
-	pkgver = 0.4.0
+	pkgver = 0.5.0
 	pkgrel = 1
 	url = https://github.com/Btocode/glance
 	install = glance-writing-assistant.install
@@ -30,7 +30,7 @@ pkgbase = glance-writing-assistant
 	optdepends = git: lets glance update compare commits on the main channel
 	conflicts = python-glanceclient
 	noextract = glance_core-0.3.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-	source = https://github.com/Btocode/glance/releases/download/v0.4.0/glance-0.4.0.tar.gz
+	source = https://github.com/Btocode/glance/releases/download/v0.5.0/glance-0.5.0.tar.gz
 	source = https://github.com/Btocode/glance/releases/download/core-v0.3.0/glance_core-0.3.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 	sha256sums = SKIP
 	sha256sums = e19d4eefcb9a9f82f6d44cf3392511cd7a8b52c2807044ac81aec1a353ad8c53
