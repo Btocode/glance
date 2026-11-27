@@ -94,10 +94,39 @@ class XlibSelection:
             # window next to a normal one).
             pid = self._window_pid(owner)
             same = [w for w in self._client_windows() if pid and self._window_pid(w) == pid]
-            return self._info(same[0]) if len(same) == 1 else None
+            if len(same) == 1:
+                return self._info(same[0])
+            return self._same_client_active(owner)
         except error.XError:
             pass
         return None
+
+    def _same_client_active(self, owner: Any) -> WindowInfo | None:
+        """Chrome, Electron apps and Firefox own PRIMARY with a hidden helper window that has
+        no PID and no parent among their windows. Its X client is still theirs: windows of
+        one connection share the server's resource-id base. The owner counts for the active
+        window when both come from that one connection and the pointer is over the active
+        window (the selection was just made there with the mouse: a stale one in another
+        window of the same app does not pass as this one's)."""
+        mask = self._d.display.info.resource_id_mask
+        prop = self._root.get_full_property(self._active, X.AnyPropertyType)
+        xid = int(prop.value[0]) if prop is not None and len(prop.value) else 0
+        if not xid or (int(owner.id) & ~mask) != (xid & ~mask):
+            return None
+        active = self._d.create_resource_object("window", xid)
+        if not self._pointer_over(active):
+            return None
+        return self._info(active)
+
+    def _pointer_over(self, window: Any) -> bool:
+        try:
+            g = window.get_geometry()
+            at = window.translate_coords(self._root, 0, 0)  # the root's origin in the window
+            q = self._root.query_pointer()
+        except error.XError:
+            return False
+        x, y = int(q.root_x) + int(at.x), int(q.root_y) + int(at.y)
+        return 0 <= x < int(g.width) and 0 <= y < int(g.height)
 
     def active(self) -> WindowInfo | None:
         try:

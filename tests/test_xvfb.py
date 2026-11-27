@@ -580,3 +580,42 @@ def test_selection_mark_bar_and_x11_watcher(xvfb, tmp_path):
     assert out["mouse"] == [["settled", 520, 210]]
     assert out["keyboard"] == [["cleared"]]
     assert out["key_unarmed"] == [] and out["armed"] == [["input", "key"], ["input", "scroll"]]
+
+
+def test_browser_style_selection_owner_counts_for_its_window(xvfb, monkeypatch):
+    """Chrome owns PRIMARY with a hidden helper window: no WM_CLASS, no PID, not under its
+    top-level. It counts for the active window when both are one X client's and the pointer
+    is over that window; another client's helper never does."""
+    from Xlib import X, Xatom, display
+
+    from glance.ui.selection_xlib import XlibSelection
+
+    monkeypatch.setenv("DISPLAY", xvfb)
+    app, other = display.Display(xvfb), display.Display(xvfb)
+    root = app.screen().root
+    top = root.create_window(0, 0, 300, 200, 0, X.CopyFromParent)
+    top.set_wm_class("chrome", "Google-chrome")
+    top.map()
+    helper = root.create_window(-10, -10, 1, 1, 0, X.CopyFromParent, X.InputOnly)
+    root.change_property(app.intern_atom("_NET_ACTIVE_WINDOW"), Xatom.WINDOW, 32, [top.id])
+    helper.set_selection_owner(Xatom.PRIMARY, X.CurrentTime)
+    root.warp_pointer(150, 100)
+    app.sync()
+    sel = XlibSelection()
+    try:
+        got = sel.owner()
+        assert got is not None and got.xid == top.id and got.wm_class == "Google-chrome"
+        root.warp_pointer(900, 700)  # the pointer is elsewhere: not this window's selection
+        app.sync()
+        assert sel.owner() is None
+        root.warp_pointer(150, 100)
+        stranger = other.screen().root.create_window(-10, -10, 1, 1, 0, X.CopyFromParent,
+                                                     X.InputOnly)
+        stranger.set_selection_owner(Xatom.PRIMARY, X.CurrentTime)
+        other.sync()
+        app.sync()
+        assert sel.owner() is None  # another client's selection is never this window's
+    finally:
+        sel.close()
+        app.close()
+        other.close()

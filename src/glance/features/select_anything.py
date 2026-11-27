@@ -175,6 +175,7 @@ class SelectAnything:
         say = (lambda _m: None) if quiet else self._say
         owner, active = self._selection.owner(), self._selection.active()
         if owner is None or active is None or owner.xid != active.xid:
+            log_event("select_anything_refused", reason="other_window" if owner else "no_owner")
             say(OTHER_WINDOW)
             return
         if self._in_password_field(active):
