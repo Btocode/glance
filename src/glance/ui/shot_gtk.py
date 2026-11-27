@@ -50,8 +50,9 @@ from glance.ui.ports import WindowInfo
 from glance.ui.theme import FONT, MONO, install, rgb, rgba
 
 DIM = 0.45  # the frozen screen outside the region
-BAR_W = 560
-_RESULT_MAX_H = 240
+BAR_W = 460  # the card
+_RESULT_MAX_H = 260
+_BODY_MIN_H = 132  # the body keeps at least this height: the card barely resizes per step
 PICK_KEYS = (("shot_pick_return", "Return"), ("shot_pick_space", "space"),
              ("shot_pick_escape", "Escape"))
 
@@ -170,6 +171,9 @@ class GtkShot:
         self._bar_view: bm.ShotBarView | None = None
         self._region: Rect | None = None
         self._bar_xy: tuple[int, int] | None = None
+        # the captured region, outlined while its card is up (clicks go through it)
+        self._frame = _popup(Gdk.WindowTypeHint.TOOLTIP)
+        self._frame.connect("draw", self._draw_frame)
 
     # ------------------------------------------------------------------ the picker
 
@@ -418,12 +422,43 @@ class GtkShot:
         if changed:
             self._bar_view = view
             self._rebuild(view)
+        self._show_frame(region)
         if not self._bar.get_visible():
             self._bar.show_all()
             _raise(self._bar)
         self._place_bar()
 
+    _FRAME_PAD = 3  # the outline sits just outside the region: the shot itself stays clear
+
+    def _show_frame(self, region: Rect) -> None:
+        p = self._FRAME_PAD
+        x, y, w, h = region.x - p, region.y - p, region.w + 2 * p, region.h + 2 * p
+        self._frame.set_size_request(max(1, w), max(1, h))
+        self._frame.resize(max(1, w), max(1, h))
+        self._frame.move(x, y)
+        if not self._frame.get_visible():
+            self._frame.show_all()
+            self._frame.move(x, y)
+        gdk_window = self._frame.get_window()
+        if gdk_window is not None:
+            gdk_window.input_shape_combine_region(cairo.Region(), 0, 0)
+            if not self._composited:  # a ring: the region shows through it
+                ring = cairo.Region(cairo.RectangleInt(0, 0, w, h))
+                ring.subtract(cairo.RectangleInt(2, 2, max(0, w - 4), max(0, h - 4)))
+                gdk_window.shape_combine_region(ring, 0, 0)
+        self._frame.queue_draw()
+
+    def _draw_frame(self, widget: Gtk.Widget, cr: Any) -> bool:
+        _clear(widget, cr)
+        w, h = widget.get_allocated_width(), widget.get_allocated_height()
+        cr.set_source_rgba(*rgba(self._theme.tokens["accent_fill"]))
+        cr.set_line_width(2)
+        cr.rectangle(1, 1, w - 2, h - 2)
+        cr.stroke()
+        return True
+
     def hide_bar(self) -> None:
+        self._frame.hide()
         self._bar.hide()
         self._bar_view = None
         self._region = None
@@ -462,11 +497,17 @@ class GtkShot:
         if not self._composited:
             gdk_window.shape_combine_region(_rounded(*card, 12), 0, 0)
 
-    def _button(self, b: bm.ShotButton) -> Gtk.Button:
+    def _button(self, b: bm.ShotButton, *classes: str) -> Gtk.Button:
         button = _pointer(Gtk.Button(label=b.label, can_focus=False, focus_on_click=False))
-        _classes(button, "glance-primary" if b.primary and not b.muted else "glance-secondary")
+        if classes:
+            _classes(button, *classes)
+        else:
+            _classes(button, "glance-primary" if b.primary and not b.muted
+                     else "glance-secondary")
         if b.muted:
             _classes(button, "glance-muted")
+        if b.selected:
+            _classes(button, "glance-selected")
         if b.tip:
             button.set_tooltip_text(b.tip)
         button.set_name(f"shot:{b.key}")
@@ -491,7 +532,18 @@ class GtkShot:
         close.set_valign(Gtk.Align.CENTER)
         close.connect("clicked", lambda _b: self._act("close"))
         header.pack_end(close, False, False, 0)
+        for b in reversed(view.tools):  # Copy image, Save: they act on the image itself
+            tool = self._button(b, "glance-tool")
+            tool.set_valign(Gtk.Align.CENTER)
+            header.pack_end(tool, False, False, 0)
         return header
+
+    def _tabs(self, view: bm.ShotBarView) -> Gtk.Widget:
+        row = _classes(Gtk.Box(spacing=2, homogeneous=True), "glance-tabs")
+        for b in view.buttons:
+            if b.key != "close":
+                row.pack_start(self._button(b, "glance-tab"), True, True, 0)
+        return row
 
     def _rebuild(self, view: bm.ShotBarView) -> None:
         old = self._bar.get_child()
@@ -502,26 +554,38 @@ class GtkShot:
                         "glance-drawer", "glance-shot")
         card.set_size_request(BAR_W, -1)
         card.pack_start(self._header(view), False, False, 0)
-        row = Gtk.Box(spacing=6)
-        for b in view.buttons:
-            if b.key != "close":  # the header's "Esc Close"
-                row.pack_start(self._button(b), False, False, 0)
-        card.pack_start(row, False, False, 0)
+        card.pack_start(self._tabs(view), False, False, 0)
+        body = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8),
+                        "glance-shot-body")
+        body.set_size_request(-1, _BODY_MIN_H)
+        body.set_name("shot:body")
+        actions: tuple[bm.ShotButton, ...] = ()
         if view.notice is not None:
-            box = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8),
-                           "glance-banner")
-            box.pack_start(_label(view.notice.text, chars=64), False, False, 0)
-            actions = Gtk.Box(spacing=6)
-            for b in view.notice.buttons:
-                actions.pack_start(self._button(b), False, False, 0)
-            box.pack_start(actions, False, False, 0)
-            card.pack_start(box, False, False, 0)
+            _classes(body, "glance-banner")
+            body.pack_start(_label(view.notice.text, chars=52), False, False, 0)
+            actions = view.notice.buttons
+        elif view.result is not None:
+            self._result(body, view.result)
+            if view.result.text is not None:
+                actions = view.result.actions
+        else:
+            body.pack_start(_label(view.hint or bm.HINT, "glance-title"), False, False, 0)
+            body.pack_start(_label(bm.HINT_SUB, "glance-meta", chars=52), False, False, 0)
+        card.pack_start(body, False, False, 0)
+        foot = Gtk.Box(spacing=6)
+        foot.set_size_request(-1, 32)
+        for b in actions:
+            foot.pack_start(self._button(b), False, False, 0)
         if view.banner:
-            card.pack_start(_classes(_label(view.banner, chars=64),
-                                     "glance-banner" if view.warn else "glance-done"),
-                            False, False, 0)
-        if view.result is not None:
-            card.pack_start(self._result(view.result), False, False, 0)
+            status = _classes(_label(view.banner, "glance-status", wrap=False), "glance-status")
+            if view.warn:
+                _classes(status, "glance-warn")
+            status.set_ellipsize(Pango.EllipsizeMode.END)
+            status.set_valign(Gtk.Align.CENTER)
+            status.set_tooltip_text(view.banner)
+            foot.pack_end(status, True, True, 0)
+            status.set_xalign(1)
+        card.pack_start(foot, False, False, 0)
         outer = Gtk.Box()
         outer.set_margin_start(self._shadow[0])
         outer.set_margin_top(self._shadow[1])
@@ -532,33 +596,44 @@ class GtkShot:
         self._bar.add(outer)
         self._bar.resize(1, 1)  # shrink to the new content
 
-    def _result(self, r: bm.ShotResult) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    def _result(self, box: Gtk.Box, r: bm.ShotResult) -> None:
         head = Gtk.Box(spacing=8)
         head.pack_start(_label(r.title, "glance-section", wrap=False), False, False, 0)
+        if r.state == "failed":
+            box.pack_start(head, False, False, 0)
+            why = _classes(_label(r.note or "That did not work. Try again", chars=52),
+                           "glance-status", "glance-warn")
+            box.pack_start(why, False, False, 0)
+            return
         if r.note:
             note = _label(r.note, "glance-meta", wrap=False)
             note.set_ellipsize(Pango.EllipsizeMode.END)
             head.pack_end(note, False, False, 0)
         box.pack_start(head, False, False, 0)
         if r.text is not None:
-            text = Gtk.Label(label=r.text, xalign=0, yalign=0, wrap=True, max_width_chars=66,
-                             selectable=False)
+            text = Gtk.Label(label=r.text, xalign=0, yalign=0, wrap=True, max_width_chars=52,
+                             width_chars=46, selectable=False)
             text.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            _classes(text, "glance-result-text")
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
             scroll.set_propagate_natural_height(True)
             scroll.set_max_content_height(_RESULT_MAX_H)
             scroll.add(text)
-            box.pack_start(_classes(scroll, "glance-result"), False, False, 0)
+            box.pack_start(scroll, False, False, 0)
         elif r.state == "loading":
-            box.pack_start(_label("…", "glance-meta"), False, False, 0)
-        if r.actions and r.text is not None:
-            actions = Gtk.Box(spacing=6)
-            for b in r.actions:
-                actions.pack_start(self._button(b), False, False, 0)
-            box.pack_start(actions, False, False, 0)
-        return box
+            for frac in (1.0, 0.86, 0.6):  # skeleton lines, the answer's shape
+                bar = _classes(Gtk.Box(), "glance-skeleton")
+                bar.set_size_request(int((BAR_W - 60) * frac), 10)
+                bar.set_halign(Gtk.Align.START)
+                box.pack_start(bar, False, False, 2)
+
+    def ask_point(self) -> tuple[int, int] | None:
+        """Where Ask…'s one-line entry goes: over the card's body."""
+        if self._bar_xy is None or not self._bar.get_visible():
+            return None
+        x, y = self._bar_xy
+        return x + self._shadow[0] + 16, y + self._shadow[1] + 104
 
     def _restyle(self) -> None:
         if self._bar_view is not None:

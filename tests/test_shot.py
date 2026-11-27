@@ -27,12 +27,16 @@ from tests.shot_fakes import FakeEngine, VisionFake
 
 def test_bar_buttons_order_and_tips():
     row = bm.buttons(vision=False, ai=True, images="ask", ocr=True, private=False)
-    assert [b.label for b in row] == ["Copy", "Save", "Extract text", "Explain", "Ask…",
-                                      "Translate", "Close"]
-    assert row[0].primary
+    assert [b.label for b in row] == ["Text", "Explain", "Translate", "Ask…"]
+    assert not any(b.selected for b in row)
+    assert [b.label for b in bm.tools()] == ["Copy image", "Save"]
     tips = {b.key: b.tip for b in row if b.muted}
-    assert tips == {"explain": bm.NEEDS_VISION, "ask": bm.NEEDS_VISION}
-    row = bm.buttons(vision=True, ai=True, images="never", ocr=False, private=False)
+    assert tips == {"ask": bm.NEEDS_VISION}  # Explain falls back to the text read locally
+    row = bm.buttons(vision=False, ai=False, images="ask", ocr=True, private=False)
+    assert {b.key for b in row if b.muted} == {"explain", "ask", "translate"}
+    row = bm.buttons(vision=True, ai=True, images="never", ocr=False, private=False,
+                     shown="extract")
+    assert [b.key for b in row if b.selected] == ["extract"]
     tips = {b.key: b.tip for b in row if b.muted}
     assert tips["explain"] == bm.IMAGES_OFF and tips["extract"] == bm.OCR_OFF
     assert tips["translate"] == bm.OCR_OFF
@@ -104,7 +108,7 @@ class FakeOverlay:
     def copy_to_clipboard(self, text):
         self.copied.append(text)
 
-    def ask_text(self, prompt, on_done):
+    def ask_text(self, prompt, on_done, at=None):
         self.asked = (prompt, on_done)
 
 
@@ -184,7 +188,8 @@ def test_trigger_picks_and_shows_the_bar(tmp_path):
     r = Rig(tmp_path)
     r.shoot()
     v = r.ui.view
-    assert v.size == "400 × 300" and v.buttons[0].label == "Copy"
+    assert v.size == "400 × 300" and v.buttons[0].label == "Text"
+    assert v.hint == bm.HINT and v.result is None and v.tools[0].key == "copy"
     assert r.ui.bars[-1][1] == Rect(100, 100, 400, 300)
     assert ESCAPE in r.hotkeys.grabs
     r.hotkeys.press(ESCAPE)
@@ -227,27 +232,30 @@ def test_extract_text_shows_the_text_card(tmp_path):
     r.c.action("extract")
     res = r.ui.view.result
     assert res.title == "Text" and res.text == "Hello teh world" and res.state == "ready"
-    assert [a.key for a in res.actions] == ["text_copy", "text_fix", "text_translate",
-                                            "text_explain"]
+    assert [a.key for a in res.actions] == ["text_copy", "text_fix"]
+    assert [b.key for b in r.ui.view.buttons if b.selected] == ["extract"]
     r.c.action("text_fix")
     assert r.ui.view.result.text == "Hello the world"
     r.c.action("text_copy")
     assert r.overlay.copied == ["Hello the world"]
-    r.c.action("text_translate")
+    r.c.action("translate")  # the tab: the same card, the text already read
     assert r.ui.view.result.title == "Translation" and r.ui.view.result.text == "Hola mundo"
+    assert [b.key for b in r.ui.view.buttons if b.selected] == ["translate"]
     assert "English" in r.sup.texts[0][0] and "Hello the world" in r.sup.texts[0][1]
     assert r.sup.images == []  # text actions never send the image
+    r.c.action("extract")  # back to the text: shown again, not read again
+    assert r.ui.view.result.text == "Hello the world" and r.c.is_open
+    r.c.action("translate")
+    assert len(r.sup.texts) == 1
 
 
-def test_extract_text_hands_over_to_the_text_panel_seam(tmp_path):
+def test_extract_text_stays_in_the_shot_card(tmp_path):
     got = []
-    r = Rig(tmp_path, text_panel=lambda text, region, private: got.append(
-        (text, region, private)))
+    r = Rig(tmp_path, text_panel=lambda *a: got.append(a))
     r.shoot()
     r.c.action("extract")
-    ((text, region, private),) = got
-    assert text == "Hello teh world" and not private and not r.c.is_open
-    assert region == Rect(100, 100, 400, 300)
+    assert got == [] and r.c.is_open and r.ui.view.result.text == "Hello teh world"
+    assert r.ui.hidden == 0  # the card never closed and reopened
 
 
 def test_extract_text_failure_says_why(tmp_path):
@@ -275,8 +283,12 @@ def test_explain_asks_once_then_sends(tmp_path):
     r.c.action("notice_send")
     assert r.sup.images[0][1] == png and r.ui.view.result.text == "It is an error dialog."
     assert r.ui.view.notice is None
+    r.c.action("explain")  # the tab again: its answer, not a second upload
+    assert r.ui.view.notice is None and len(r.sup.images) == 1
+    r.c.close()
+    r.shoot()
     r.c.action("explain")
-    assert r.ui.view.notice is not None  # "Send" was for this once
+    assert r.ui.view.notice is not None  # "Send" was for that once
     r.c.action("notice_always")
     assert len(r.sup.images) == 2
     r.c.close()
@@ -307,11 +319,16 @@ def test_never_and_no_vision_and_private_send_nothing(tmp_path):
     r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="never")))
     r.shoot()
     r.c.action("explain")
+    assert r.sup.images == []
+    assert r.ui.view.result.title == "Explanation"  # the text read locally went instead
+    r.c.action("ask")
     assert r.sup.images == [] and r.ui.view.banner == bm.IMAGES_OFF
     r = Rig(tmp_path, sup=FakeSup(vision=False))
     r.shoot()
-    r.c.action("explain")
+    r.c.action("ask")
     assert r.ui.view.banner == bm.NEEDS_VISION and r.ui.view.notice is None
+    r.c.action("explain")
+    assert r.sup.images == [] and r.ui.view.result.note == "From the text read on this computer"
 
 
 def test_any_window_may_be_shot_and_sent_on_click(tmp_path):

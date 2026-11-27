@@ -67,13 +67,24 @@ def test_label_follows_and_flips_at_the_edges():
     assert x + 80 <= 1900 and y + 20 <= 1070
 
 
-def test_bar_goes_below_then_above_then_inside():
-    size = (520, 48)
-    assert geo.bar_position(Rect(100, 100, 600, 300), size, SCREEN) == (180, 408)
-    x, y = geo.bar_position(Rect(100, 700, 600, 360), size, SCREEN)
-    assert y == 700 - 8 - 48
+def test_card_goes_beside_the_region_and_keeps_its_side():
+    size = (440, 160)
+    # right of the region, tops aligned
+    assert geo.bar_position(Rect(100, 100, 600, 300), size, SCREEN) == (708, 100)
+    # growing (a result came in) keeps the side and the top
+    assert geo.bar_position(Rect(100, 100, 600, 300), (440, 400), SCREEN) == (708, 100)
+    # no room right: left of it
+    assert geo.bar_position(Rect(1300, 100, 600, 300), size, SCREEN) == (1300 - 8 - 440, 100)
+    # as wide as the screen: under it, then above it
+    assert geo.bar_position(Rect(0, 100, 1920, 300), size, SCREEN) == (0, 408)
+    x, y = geo.bar_position(Rect(0, 600, 1920, 300), size, SCREEN)
+    assert y == 600 - 8 - 160
+    # the whole screen: inside its top-right corner
     x, y = geo.bar_position(Rect(0, 0, 1920, 1080), size, SCREEN)
-    assert y == 1080 - 48 - 8 and x == 1920 - 520
+    assert (x, y) == (1920 - 440 - 16, 16)
+    # near the bottom: pushed up, never off screen
+    x, y = geo.bar_position(Rect(100, 1000, 300, 60), (440, 400), SCREEN)
+    assert y + 400 <= 1080 and x == 408
 
 
 def test_picker_drag_selects_and_click_does_not():

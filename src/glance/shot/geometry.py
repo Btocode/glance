@@ -81,22 +81,38 @@ def label_position(px: int, py: int, size: tuple[int, int], screen: Rect) -> tup
     return max(screen.x, x), max(screen.y, y)
 
 
-def bar_position(region: Rect, size: tuple[int, int], monitors: list[Rect]) -> tuple[int, int]:
-    """Top-left of the shot bar: under the region, right-aligned with it; above it when there
-    is no room below; inside its bottom edge when there is room neither side. Kept whole on
-    the region's monitor."""
+CARD_RESERVE_H = 420  # the card's height with a result: the side is picked for this much
+
+
+def bar_position(region: Rect, size: tuple[int, int], monitors: list[Rect],
+                 reserve_h: int = CARD_RESERVE_H) -> tuple[int, int]:
+    """Top-left of the shot card: beside the region, never over it while there is room.
+
+    Right of the region (tops aligned), else left of it, else under it, else above it, else
+    under or above it with room for its present height only, else inside its top-right
+    corner (a full-screen shot). The side is picked for the card's
+    full height (`reserve_h`), so it does not jump sides as a result fills it: it only grows
+    down (pushed up at the screen's bottom edge). Kept whole on the region's monitor."""
     w, h = size
+    tall = max(h, reserve_h)
     mon = monitor_at(region.x + region.w // 2, region.y + region.h // 2, monitors) \
-        or Rect(region.x, region.y, max(region.w, w), region.h + h + BAR_GAP)
-    x = region.x + region.w - w
-    below = region.y + region.h + BAR_GAP
-    above = region.y - BAR_GAP - h
-    if below + h <= mon.y + mon.h:
-        y = below
-    elif above >= mon.y:
-        y = above
+        or Rect(region.x, region.y, region.w + w + BAR_GAP, max(region.h, tall))
+    right, bottom = mon.x + mon.w, mon.y + mon.h
+    fits_h = min(tall, mon.h)
+    if region.x + region.w + BAR_GAP + w <= right:
+        x, y = region.x + region.w + BAR_GAP, region.y
+    elif region.x - BAR_GAP - w >= mon.x:
+        x, y = region.x - BAR_GAP - w, region.y
+    elif region.y + region.h + BAR_GAP + fits_h <= bottom:
+        x, y = region.x, region.y + region.h + BAR_GAP
+    elif region.y - BAR_GAP - fits_h >= mon.y:
+        x, y = region.x, region.y - BAR_GAP - h
+    elif region.y + region.h + BAR_GAP + h <= bottom:  # room for it as it is, not grown
+        x, y = region.x + region.w - w, region.y + region.h + BAR_GAP
+    elif region.y - BAR_GAP - h >= mon.y:
+        x, y = region.x + region.w - w, region.y - BAR_GAP - h
     else:
-        y = region.y + region.h - h - BAR_GAP
-    x = max(mon.x, min(x, mon.x + mon.w - w))
-    y = max(mon.y, min(y, mon.y + mon.h - h))
+        x, y = region.x + region.w - w - 2 * BAR_GAP, region.y + 2 * BAR_GAP
+    x = max(mon.x, min(x, right - w))
+    y = max(mon.y, min(y, bottom - h))
     return x, y

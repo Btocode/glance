@@ -26,7 +26,8 @@ from glance.shot.image import Shot
 from glance.ui.ports import WindowInfo
 
 ESCAPE = "shot_escape"  # the transient Escape grab while the bar is up
-COPIED = "Copied to the clipboard"
+COPIED = "Image copied to the clipboard"
+COPIED_TEXT = "Text copied to the clipboard"
 COPY_FAILED = "Could not copy the image"
 SAVE_FAILED = "Could not save the image"
 READING = "Reading the text…"
@@ -83,11 +84,24 @@ class _Session:
     warn: bool = False
     notice: tuple[str, Callable[[], None]] | None = None  # (backend key, what to send)
     notice_label: str = ""
-    result: bm.ShotResult | None = None
+    results: dict[str, bm.ShotResult] = field(default_factory=dict)  # per tab
+    shown: str | None = None  # the tab whose result is in the body
     busy: str | None = None
-    text: str | None = None  # the OCR text, once read (Translate reuses it)
+    text: str | None = None  # the OCR text, once read (Translate and Explain reuse it)
     ticket: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def result(self) -> bm.ShotResult | None:
+        return self.results.get(self.shown) if self.shown is not None else None
+
+    def put(self, tab: str, result: bm.ShotResult) -> None:
+        """`result` is the tab's now, and on show."""
+        self.results[tab] = result
+        self.shown = tab
+
+
+_TAB = {"text_translate": "translate", "text_explain": "explain"}
 
 
 class ShotController:
@@ -99,10 +113,8 @@ class ShotController:
                  text_panel: Callable[[str, Rect, bool], None] | None = None,
                  now: Callable[[], float] = time.time) -> None:
         """`overlay` gives `ask_text` (Ask…) and `copy_to_clipboard` (text); `hotkeys` the
-        transient Escape grab. `text_panel(text, region, private)`, when given, takes the
-        extracted text instead of the bar's own result card: the selection actions' result
-        panel (`SelectionActions.open_text`), placed under the region; `private` keeps it
-        from any AI."""
+        transient Escape grab. `text_panel` is no longer used: the text read from a shot stays
+        in the shot's own card (kept so older wiring still works)."""
         self._ui = ui
         self._cfg = cfg
         self._sup = supervisor
@@ -187,13 +199,20 @@ class ShotController:
     # ------------------------------------------------------------------ the bar
 
     def action(self, key: str, args: dict[str, Any] | None = None) -> None:
-        """A click on the bar (or its result card, or the notice)."""
+        """A click on the card: a tab, a header tool, a result action or the notice."""
         s = self._sess
         if s is None:
             return
+        if key in dict(bm.ACTIONS) and key != "ask" and key in s.results \
+                and s.results[key].state != "failed" and s.busy != key:
+            s.shown, s.notice = key, None  # back to a tab already done: its result, at once
+            s.banner, s.warn = None, False
+            log_event("shot_action", key=key)
+            self._render()
+            return
         handler = {
             "copy": self._copy, "save": self._save, "extract": self._extract,
-            "explain": lambda: self._image_ai("explain"), "ask": lambda: self._image_ai("ask"),
+            "explain": self._explain, "ask": lambda: self._image_ai("ask"),
             "translate": self._translate, "close": self.close,
             "text_copy": self._text_copy, "text_fix": self._text_fix,
             "text_translate": lambda: self._text_ai("text_translate"),
@@ -268,8 +287,9 @@ class ShotController:
         fetching = any(getattr(e, "available", lambda: False)() and
                        getattr(e, "needs_download", lambda: False)() for e in engines[:1])
         s.busy = busy
-        s.banner, s.warn = None, False
-        s.result = bm.ShotResult("Text", None, "loading", note=FETCHING if fetching else READING)
+        s.banner, s.warn, s.notice = None, False, None
+        title = {"translate": "Translation", "explain": "Explanation"}.get(busy, "Text")
+        s.put(busy, bm.ShotResult(title, None, "loading", note=FETCHING if fetching else READING))
         self._render()
         png = s.pick.shot.png
 
@@ -286,9 +306,10 @@ class ShotController:
             if self._sess is not s:
                 return
             text, how = out
-            s.busy = None
+            if s.busy == busy:
+                s.busy = None
             if text is None:
-                s.result = bm.ShotResult("Text", None, "failed", note=how)
+                s.put(busy, bm.ShotResult(title, None, "failed", note=how))
                 self._render()
                 return
             log_event("shot_ocr", engine=how, chars=len(text))
@@ -299,17 +320,21 @@ class ShotController:
 
     def _extract(self) -> None:
         def show(s: _Session, text: str) -> None:
-            if self.text_panel is not None:
-                panel, region, private = self.text_panel, s.pick.shot.rect, bool(s.private)
-                self.close()
-                panel(text, region, private)
-                return
-            s.result = bm.ShotResult("Text", text, "ready",
-                                     bm.text_actions(ai=self._ai_connected(), private=bool(
-                                         s.private)), note="Read on this computer")
+            s.put("extract", bm.ShotResult("Text", text, "ready", bm.text_actions(),
+                                           note="Read on this computer"))
             self._render()
 
         self._ocr(show, "extract")
+
+    def _explain(self) -> None:
+        """The image to a vision AI; without one (or with images off), the text read on this
+        computer to any connected AI."""
+        s = self._sess
+        assert s is not None
+        if self._vision() is not None and self._cfg().shot.ai_images != "never":
+            self._image_ai("explain")
+            return
+        self._ocr(lambda _s, text: self._text_ai("text_explain", text), "explain")
 
     def _translate(self) -> None:
         self._ocr(lambda s, text: self._text_ai("text_translate", text), "translate")
@@ -322,7 +347,7 @@ class ShotController:
         text = s.result.text if s.result is not None else None
         if text:
             self._overlay.copy_to_clipboard(text)
-            self._say(COPIED)
+            self._say(COPIED_TEXT)
 
     def _text_fix(self) -> None:
         s = self._sess
@@ -342,9 +367,12 @@ class ShotController:
         if not n:
             self._say(NOTHING_TO_FIX)
             return
-        s.result = replace(r, text=fixed)
+        s.results[s.shown or "extract"] = replace(r, text=fixed)
         if s.text is not None and r.title == "Text":
             s.text = fixed
+            for k in ("translate", "explain"):  # made from the old text: made again on a click
+                if k in s.results and s.results[k].note != NO_VISION_NOTE:
+                    s.results.pop(k, None)
         self._say(TEXT_FIXED.format(n=n, es="" if n == 1 else "es"))
 
     def _text_ai(self, key: str, text: str | None = None) -> None:
@@ -353,7 +381,8 @@ class ShotController:
         s = self._sess
         assert s is not None
         if text is None:
-            text = s.result.text if s.result is not None else None
+            text = s.text if s.text is not None else (
+                s.result.text if s.result is not None else None)
         if not text:
             return
         if s.private:
@@ -371,7 +400,8 @@ class ShotController:
             return out if out is not None else raw.strip()
 
         self._ask_ai(s, key, title, lambda: self._sup.answer_text(system, user), finish,
-                     note=None)
+                     note="From the text read on this computer" if key == "text_explain"
+                     else None)
 
     # ------------------------------------------------------------------ images to the AI
 
@@ -391,7 +421,8 @@ class ShotController:
         s = self._sess
         assert s is not None
         if key == "ask":
-            self._overlay.ask_text(bm.ASK_PROMPT, lambda q, _back: self._asked(s, q))
+            at = getattr(self._ui, "ask_point", lambda: None)()
+            self._overlay.ask_text(bm.ASK_PROMPT, lambda q, _back: self._asked(s, q), at=at)
             return
         self._gate_image(s, key, prompts.EXPLAIN_IMAGE, prompts.EXPLAIN_IMAGE_USER)
 
@@ -427,6 +458,7 @@ class ShotController:
             s.notice = (bkey, send)
             s.notice_label = label
             s.banner = None
+            s.shown = key  # the tab the notice is for
             self._render()
         else:
             self._say(bm.IMAGES_OFF, warn=True)
@@ -448,9 +480,10 @@ class ShotController:
 
     def _ask_ai(self, s: _Session, key: str, title: str, call: Callable[[], Iterator[str]],
                 finish: Callable[[str], str], note: str | None) -> None:
+        tab = _TAB.get(key, key)
         s.busy = key
-        s.banner, s.warn = None, False
-        s.result = bm.ShotResult(title, None, "loading", note="Thinking…")
+        s.banner, s.warn, s.notice = None, False, None
+        s.put(tab, bm.ShotResult(title, None, "loading", note="Thinking…"))
         self._render()
 
         def work() -> tuple[str | None, str | None]:
@@ -467,14 +500,15 @@ class ShotController:
                 return None, FAILED
 
         def done(out: tuple[str | None, str | None]) -> None:
-            if self._sess is not s or s.busy != key:
+            if self._sess is not s:
                 return
-            s.busy = None
+            if s.busy == key:
+                s.busy = None
             text, why = out
             if text:
-                s.result = bm.ShotResult(title, text, "ready", bm.ANSWER_ACTIONS, note=note)
+                s.results[tab] = bm.ShotResult(title, text, "ready", bm.ANSWER_ACTIONS, note=note)
             else:
-                s.result = bm.ShotResult(title, None, "failed", note=why or FAILED)
+                s.results[tab] = bm.ShotResult(title, None, "failed", note=why or FAILED)
             self._render()
 
         self._run_bg(work, done)
@@ -483,9 +517,11 @@ class ShotController:
 
     def _buttons(self, s: _Session) -> tuple[bm.ShotButton, ...]:
         cfg = self._cfg().shot
+        busy = _TAB.get(s.busy, s.busy) if s.busy else None
         return bm.buttons(vision=self._vision() is not None, ai=self._ai_connected(),
                           images=cfg.ai_images, ocr=cfg.ocr != "off", private=bool(s.private),
-                          busy=s.busy if s.busy in dict(bm.ACTIONS) else None)
+                          busy=busy if busy in dict(bm.ACTIONS) else None,
+                          shown=s.shown)
 
     def view(self) -> bm.ShotBarView | None:
         s = self._sess
@@ -495,7 +531,8 @@ class ShotController:
         if s.notice is not None:
             notice = bm.ShotNotice(bm.notice_text(s.notice_label))
         return bm.ShotBarView(size_label(s.pick.shot.rect), self._buttons(s), s.banner, s.warn,
-                              notice, s.result)
+                              notice, None if notice is not None else s.result,
+                              tools=bm.tools())
 
     def refresh(self) -> None:
         """Draw the bar again (the desktop switched between light and dark)."""

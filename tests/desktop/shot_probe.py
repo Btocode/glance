@@ -178,16 +178,31 @@ def main() -> int:
     region = Rect(160, 120, 760, 300)
 
     def bar_views():
-        row = bm.buttons(vision=True, ai=True, images="ask", ocr=True, private=False)
-        text = bm.ShotBarView(
-            "760 × 300", bm.buttons(vision=True, ai=True, images="ask", ocr=True,
-                                    private=False),
-            result=bm.ShotResult("Text", EXTRACTED, "ready",
-                                 bm.text_actions(ai=True, private=False),
-                                 note="Read on this computer"))
-        notice = bm.ShotBarView("760 × 300", row, notice=bm.ShotNotice(
+        def tabs(**kw):
+            return bm.buttons(vision=True, ai=True, images="ask", ocr=True, private=False, **kw)
+
+        size, tools = "760 × 300", bm.tools()
+        start = bm.ShotBarView(size, tabs(), tools=tools)
+        text = bm.ShotBarView(size, tabs(shown="extract"), banner="Text copied to the clipboard",
+                              result=bm.ShotResult("Text", EXTRACTED, "ready", bm.text_actions(),
+                                                   note="Read on this computer"), tools=tools)
+        loading = bm.ShotBarView(size, tabs(busy="explain"), tools=tools,
+                                 result=bm.ShotResult("Explanation", None, "loading",
+                                                      note="Thinking…"))
+        explain = bm.ShotBarView(size, tabs(shown="explain"), tools=tools, result=bm.ShotResult(
+            "Explanation", "The deploy script could not reach the release server: nothing "
+            "was listening on the address it connected to (connection refused). Check that "
+            "the server is running and the host and port in deploy.py are right.", "ready",
+            bm.ANSWER_ACTIONS, note="Answered by Anthropic"))
+        notice = bm.ShotBarView(size, tabs(shown="explain"), tools=tools, notice=bm.ShotNotice(
             bm.notice_text("Anthropic (api.anthropic.com)")))
-        return text, notice
+        return start, text, loading, explain, notice
+
+    def save_scene(name, pad=24):
+        x, y, w, h = shot.bar_geometry()
+        left, top = min(region.x, x) - pad, min(region.y, y) - pad
+        save(name, (left, top, max(region.x + region.w, x + w) + pad - left,
+                    max(region.y + region.h, y + h) + pad - top))
 
     for theme in ("light", "dark"):
         shot._theme.force(theme == "dark")
@@ -213,7 +228,7 @@ def main() -> int:
             "rect": [res.shot.rect.x, res.shot.rect.y, res.shot.rect.w, res.shot.rect.h],
             "png": list(png_size(res.shot.png)), "bytes": len(res.shot.png)}
         out[f"picker_closed_{theme}"] = shot.picker_window is None and not keys.grabs
-        text, notice = bar_views()
+        start, text, loading, explain, notice = bar_views()
         shot.show_bar(text, region)
         pump(0.4)
         geo = shot.bar_geometry()
@@ -221,16 +236,15 @@ def main() -> int:
         out[f"bar_override_redirect_{theme}"] = override_redirect(shot.bar_window)
         out[f"bar_focus_{theme}"] = [shot.bar_window.get_accept_focus(),
                                      shot.bar_window.is_active()]
-        x, y, w, h = geo
-        pad = 24
-        top = min(region.y, y)
-        save(f"shot-bar-{theme}", (min(region.x, x) - pad, top - pad,
-                                   max(region.x + region.w, x + w) - min(region.x, x) + 2 * pad,
-                                   max(region.y + region.h, y + h) - top + 2 * pad))
-        shot.show_bar(notice, region)
-        pump(0.4)
-        x, y, w, h = shot.bar_geometry()
-        save(f"shot-notice-{theme}", (x - pad, y - pad, w + 2 * pad, h + 2 * pad))
+        save_scene(f"shot-bar-{theme}")
+        tops = []
+        for name, view in (("start", start), ("text", text), ("loading", loading),
+                           ("explain", explain), ("notice", notice)):
+            shot.show_bar(view, region)
+            pump(0.4)
+            tops.append(shot.bar_geometry()[:2])
+            save_scene(f"shot-{name}-{theme}")
+        out[f"card_stays_put_{theme}"] = len(set(tops)) == 1
         acts.clear()
         out[f"clicked_{theme}"] = [click_button("notice_send"), click_button("copy")]
         out[f"acts_{theme}"] = list(acts)

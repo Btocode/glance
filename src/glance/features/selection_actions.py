@@ -485,7 +485,16 @@ class SelectionActions:
 
     def _open_result(self, active: WindowInfo, text: str, point: tuple[int, int], action: str,
                      title: str, *, from_shot: bool = False, private: bool = False) -> _Result:
-        self.close()
+        prev = self._res
+        if prev is not None:
+            # A new answer in the same panel (a follow-up, Translate on the shot's text…):
+            # it stays where it is, it does not close and open again somewhere else.
+            point = prev.xy
+            if prev.state == "loading" and self._supervisor is not None:
+                self._supervisor.cancel_all()
+            self._res = None
+        else:
+            self.close()
         self._sa.close()
         self._res = res = _Result(text, active, action, title, point, from_shot=from_shot,
                                   private=private)

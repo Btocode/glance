@@ -84,7 +84,7 @@ LIGHT: dict[str, str] = {
     "warn_bg": "#fbf1dc",
     "warn_border": "#efd9a6",
     "warn_text": "#6b4400",
-    "shadow": "rgba(23, 25, 28, 0.16)",
+    "shadow": "rgba(23, 25, 28, 0.12)",
     "dot_quiet": "#8a939d",
     "dot_warn": "#c98a12",
     "dot_info": "#0B7A52",
@@ -122,7 +122,7 @@ DARK: dict[str, str] = {
     "warn_bg": "#3a2e17",
     "warn_border": "#5a4720",
     "warn_text": "#f2cf86",
-    "shadow": "rgba(0, 0, 0, 0.5)",
+    "shadow": "rgba(0, 0, 0, 0.32)",
     "dot_quiet": "#6b7787",
     "dot_warn": "#e0a43a",
     "dot_info": "#3ECF8E",
@@ -226,7 +226,7 @@ def css(t: dict[str, str]) -> str:
 /* the toolbars' card (the status icon's, the selection's) and their items */
 .glance-menu {{
     background-color: {t['surface']}; border: 1px solid {t['hairline']};
-    border-radius: 10px; padding: 6px; box-shadow: 0 4px 14px {t['shadow']}; }}
+    border-radius: 10px; padding: 6px; box-shadow: none; }}  /* no room around it for one: a cut shadow is a dark band */
 .glance-menu .glance-note {{ color: {t['muted']}; font-size: 12px; padding: 4px 8px 6px 8px; }}
 .glance-menu .glance-hint {{ padding: 6px 8px 2px 8px; border-top: 1px solid {t['hairline']}; }}
 .glance-menu .glance-hint label.glance-meta {{ color: {t['muted']}; font-size: 12px; }}
@@ -247,11 +247,32 @@ def css(t: dict[str, str]) -> str:
 .glance-strip label.glance-strip-label {{
     color: {t['accent']}; font-size: 12px; font-weight: 600; }}
 
+/* Glance Shot's card: the tabs (one row, always in the same place) and the body */
+.glance-tabs {{ background-color: {t['group']}; border: 1px solid {t['card_border']};
+    border-radius: 9px; padding: 3px; }}
+.glance-tabs button.glance-tab {{
+    background-color: transparent; background-image: none; border: none; box-shadow: none;
+    border-radius: 7px; padding: 5px 12px; color: {t['muted']}; font-size: 13px; }}
+.glance-tabs button.glance-tab:hover {{ color: {t['text']}; }}
+.glance-tabs button.glance-tab.glance-selected {{
+    background-color: {t['highlight_rgba']}; color: {t['accent']}; font-weight: 600; }}
+.glance-tabs button.glance-tab.glance-muted {{ opacity: 0.5; }}
+.glance-shot-body {{ background-color: {t['card']}; border: 1px solid {t['card_border']};
+    border-radius: 8px; padding: 12px; }}
+.glance-shot-body scrolledwindow, .glance-shot-body undershoot,
+.glance-shot-body overshoot {{ background: none; border: none; box-shadow: none; }}
+button.glance-tool {{ background-color: transparent; background-image: none; border: 1px solid
+    {t['card_border']}; box-shadow: none; border-radius: 7px; padding: 3px 9px;
+    color: {t['text']}; font-size: 12px; }}
+button.glance-tool:hover {{ border-color: {t['accent']}; }}
+.glance-status {{ color: {t['accent']}; font-size: 12px; }}
+.glance-status.glance-warn {{ color: {t['warn_text']}; }}
+
 /* the assistant panel (the drawer), select-anything's panel, the "Rewrite as…" entry */
 .glance-drawer {{
     background-color: {t['surface']}; border: 1px solid {t['hairline']};
     border-radius: 12px; padding: 14px 16px;
-    box-shadow: 0 8px 24px {t['shadow']}; }}
+    box-shadow: 0 4px 12px {t['shadow']}; }}
 .glance-title {{ color: {t['text']}; font-size: 14px; font-weight: 600; }}
 .glance-root label.glance-meta, .glance-meta label {{ color: {t['muted']}; font-size: 12px; }}
 .glance-root label.glance-section {{ color: {t['muted']}; font-size: 12px; font-weight: 600; }}

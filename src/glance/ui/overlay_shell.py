@@ -154,7 +154,8 @@ class ShellOverlay:
         except ShellUnavailable:
             log_event("shell_copy_failed")
 
-    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None]) -> None:
+    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None],
+                 at: tuple[int, int] | None = None) -> None:
         self._ask_done = on_done
         try:
             self._bus.call("Ask", {"prompt": prompt, "placeholder": sc.ASK_PLACEHOLDER})

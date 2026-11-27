@@ -409,7 +409,8 @@ class FakeOverlay:
     def copy_to_clipboard(self, text: str) -> None:
         self.clipboard.append(text)
 
-    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None]) -> None:
+    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None],
+                 at: tuple[int, int] | None = None) -> None:
         """Records the question; the test answers with `asked[-1][1](text, focus_returned)`."""
         self.asked.append((prompt, on_done))
 

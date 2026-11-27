@@ -87,7 +87,7 @@ def test_shell_shot_bar_clicks_and_clipboard():
     s.show_bar(view, Rect(1, 2, 3, 4))
     method, payload = bus.calls[-1]
     assert method == "ShotBar" and payload["region"] == [1, 2, 3, 4]
-    assert payload["view"]["buttons"][0]["label"] == "Copy"
+    assert payload["view"]["buttons"][0]["label"] == "Text"
     assert s.on_clicked({"target": "shot", "args": {"action": "save"}}) is True
     assert s.on_clicked({"target": "action", "args": {"action": "close"}}) is False
     assert acts == ["save"]

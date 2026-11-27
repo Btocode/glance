@@ -698,7 +698,8 @@ class MacOverlay:
         pb.clearContents()
         pb.setString_forType_(text, NSPasteboardTypeString)
 
-    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None]) -> None:
+    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None],
+                 at: tuple[int, int] | None = None) -> None:
         """A small key panel with one text field; Return submits, Esc cancels. The app that
         was frontmost is activated again before `on_done` is called."""
         self._close_ask(submit=False, reactivate=False)

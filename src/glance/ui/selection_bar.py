@@ -113,6 +113,32 @@ def place_bar(mark_xy: tuple[int, int], size: tuple[int, int],
     return x, y
 
 
+RESULT_BELOW = 16      # the result panel's top: this far under the point (clear of its line)
+RESULT_ABOVE = 22      # ... or its bottom this far over it, with no room below
+RESULT_LEFT = 32       # its left edge: this far left of the point
+RESULT_RESERVE_H = 360  # the side (below / above) is picked for this much height
+
+
+def place_result(point: tuple[int, int], size: tuple[int, int], mons: list[Rect],
+                 reserve_h: int = RESULT_RESERVE_H) -> tuple[int, int]:
+    """Top-left of the result panel (Explain, Translate…) for a selection that ended at
+    `point`: under that line, never over it. With no room under it for the panel's full
+    height (`reserve_h`) it goes above the line instead. The side is picked for the full
+    height, so the panel does not jump as its answer comes in: it grows down (or, above the
+    line, up). Kept whole on the point's monitor."""
+    x, y = point
+    w, h = size
+    mon = _monitor(x, y, mons)
+    px, py = x - RESULT_LEFT, y + RESULT_BELOW
+    if mon is None:
+        return px, py
+    if py + max(h, reserve_h) > mon.y + mon.h and y - RESULT_ABOVE - max(h, reserve_h) >= mon.y:
+        py = y - RESULT_ABOVE - h
+    px = max(mon.x, min(px, mon.x + mon.w - w))
+    py = max(mon.y, min(py, mon.y + mon.h - h))
+    return px, py
+
+
 def excerpt(text: str, limit: int = EXCERPT_CHARS) -> str:
     one = " ".join(text.split())
     return one if len(one) <= limit else one[:limit - 1].rstrip() + "…"

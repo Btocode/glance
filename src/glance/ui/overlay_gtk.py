@@ -59,7 +59,8 @@ SPIN_MS = look.FRAME_MS  # the working animation's frame time, only while workin
 DRAWER_MIN_W = 520
 SEL_W = 460  # select-anything's panel
 GAP = 4  # between the strip and the drawer
-SHADOW = (10, 4, 10, 16)  # left, top, right, bottom room for the drawer's soft shadow
+SHADOW = (12, 8, 12, 16)  # left, top, right, bottom: room for the drawer's whole shadow
+# (0 4px 12px: it must fit in these margins, else the window edge cuts it into a dark band)
 NO_SHADOW = (0, 0, 0, 0)  # without a compositor nothing is see-through: no room, no shadow
 _LIST_MAX_H = 240
 _MAX_CHOICES = 5
@@ -893,7 +894,13 @@ class GtkOverlay:
         h = self._size_drawer(SEL_W, False) + self._shadow[1] + self._shadow[3]
         x, y = self._panel_point
         sh = self._shadow
-        xy = clamp_to_monitor(x - sh[0], y - sh[1], (self._panel_size[0], h), mons)
+        if self._panel_view is not None and self._panel_view.mode == "result":
+            # under the selected line, never over it (`selection_bar.place_result`)
+            card = (self._panel_size[0] - sh[0] - sh[2], h - sh[1] - sh[3])
+            cx, cy = sb.place_result((x, y), card, mons)
+            xy = (cx - sh[0], cy - sh[1])
+        else:
+            xy = clamp_to_monitor(x - sh[0], y - sh[1], (self._panel_size[0], h), mons)
         if xy != self._panel_xy or not self._panel.get_visible():
             self._panel_xy = xy
             self._panel.move(*xy)
@@ -1040,7 +1047,8 @@ class GtkOverlay:
 
     # ------------------------------------------------------------------ "Rewrite as…"
 
-    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None]) -> None:
+    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None],
+                 at: tuple[int, int] | None = None) -> None:
         """Ask for one line of text in a small window that takes the keyboard focus.
 
         It opens over the drawer's "Rewrite as…" field when the drawer is up. On Enter the
@@ -1071,7 +1079,7 @@ class GtkOverlay:
         win.connect("key-press-event", self._ask_key)
         win.connect("delete-event", lambda *_a: self._ask_close() or True)
         win.connect("focus-out-event", self._ask_focus_out)
-        at = self._ask_position()
+        at = at or self._ask_position()  # `at`: the caller's place for it (the shot card)
         if at is not None:
             win.move(*at)
         win.show_all()

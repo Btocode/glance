@@ -44,7 +44,8 @@ class OverlayPort(Protocol):
     def monitors(self) -> list[Rect]: ...
     def copy_to_clipboard(self, text: str) -> None: ...
 
-    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None]) -> None:
+    def ask_text(self, prompt: str, on_done: Callable[[str, bool], None],
+                 at: tuple[int, int] | None = None) -> None:
         """Ask the user for one line of text in a window that takes the keyboard focus.
 
         When they submit, the window that was active before is activated again and
