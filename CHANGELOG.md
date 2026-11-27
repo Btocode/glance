@@ -28,6 +28,10 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
   it grows into the card under that toolbar only when there is something to show, and the
   toolbar never moves. Ask is typed in the card itself instead of a window of its own.
 
+### Changed
+- The selection bar is shorter: Explain, Summarize, Translate, Copy and ⋯ (Translate to…,
+  tones). Fix grammar, Rewrite… and Reply… are gone from it (Super+Alt+A still rewrites).
+
 ### Fixed
 - The selection mark never showed in Chrome, Slack or Discord on X11: the mouse button's
   release went unreported while the app held the pointer (Glance now asks for XInput 2.2

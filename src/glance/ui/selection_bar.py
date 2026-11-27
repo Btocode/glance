@@ -74,7 +74,7 @@ def bar_view(translate_to: str, tones: tuple[tuple[str, str], ...] = (),
              more_open: bool = False, hint: str | None = None) -> SelectionBarView:
     """The action bar. `tones` are (key, label) of the audience's tone chips, offered under
     `⋯` as one-click rewrites."""
-    actions = (EXPLAIN, SUMMARIZE, translate(translate_to), FIX, REWRITE, REPLY, COPY, MORE)
+    actions = (EXPLAIN, SUMMARIZE, translate(translate_to), COPY, MORE)
     more: tuple[BarAction, ...] = ()
     if more_open:
         from glance.ui.look import tone_glyph

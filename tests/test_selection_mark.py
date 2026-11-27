@@ -215,8 +215,7 @@ def test_click_opens_the_bar_with_its_actions(b):
     b.settle()
     b.bar.open_bar()
     v = b.overlay.selmark
-    assert [a.key for a in v.actions] == ["explain", "summarize", "translate", "fix",
-                                          "rewrite", "reply", "copy", "more"]
+    assert [a.key for a in v.actions] == ["explain", "summarize", "translate", "copy", "more"]
     assert v.translate_to == "English" and v.hint == "Super+Alt+A"
     b.bar.toggle_more()
     assert b.overlay.selmark.more[0].key == "translate_to"
