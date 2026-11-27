@@ -99,6 +99,10 @@ GENERAL: tuple[Field, ...] = (
     Field(("general", "check"), "Check my writing", "choice",
           "On the shortcut checks only when you ask; while typing checks as you go.",
           choices=(("shortcut", "On shortcut"), ("typing", "While typing"))),
+    Field(("general", "checker"), "Checked by", "choice",
+          "AI checks your text with a fast model; the local checker is used only when no AI "
+          "answers. Local shows the quick local fixes at once and adds the AI's.",
+          choices=(("ai", "AI (fast model)"), ("local", "Local + AI"))),
     Field(("general", "correction"), "Correction strength", "choice",
           "Minimal fixes mistakes in your own words; fluent may also rephrase a little "
           "to fix awkward grammar.",

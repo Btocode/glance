@@ -277,6 +277,7 @@ class AiCoordinator:
         writeback: Callable[[FieldSnapshot], str] = lambda s: "auto",
         max_words: Callable[[], int] = lambda: DEFAULT_MAX_WORDS,
         correction: Callable[[], str] = lambda: "minimal",
+        checker: Callable[[], str] = lambda: "local",
     ) -> None:
         self._c = controller
         self._supervisor = supervisor
@@ -290,6 +291,7 @@ class AiCoordinator:
         self._writeback = writeback  # the field's app `writeback` setting
         self._max_words = max_words  # `[ai] max_words`: the most words one call is sent
         self._correction = correction  # `[general] correction`: "minimal" or "fluent"
+        self._checker = checker  # `[general] checker`: "ai" or "local"
         self._ai = "off"  # off (not known yet) | ok | none | limit
         self._probing = False
         self._overrides: dict[str, str] = {}  # context key -> profile name, this session
@@ -333,6 +335,7 @@ class AiCoordinator:
         c.extra_issues.append(self._issues)
         c.extra_ignored.append(self._ignored)
         c.extra_corrects.append(self._corrects)
+        c.extra_local_hidden.append(self._local_hidden)
         c.extra_status.append(self._status)
         c.extra_use.append(self._use_selected)
         c.extra_preview.append(self._preview_strip)
@@ -540,6 +543,18 @@ class AiCoordinator:
     def _corrects(self, s: FieldSnapshot) -> bool:
         entry = self._entry_for(s)
         return entry is not None and entry.corrects and entry.words is None
+
+    def _local_hidden(self, s: FieldSnapshot) -> bool:
+        """`[general] checker = "ai"`: while the AI's check of this text is on its way (or
+        it answered), the local checker's findings stay out of the strip: the AI's are the
+        check. Back as soon as there is no AI answer for it (none connected, it failed)."""
+        if self._checker() != "ai" or self._failure(s) is not None:
+            return False
+        job = self._job
+        if job is not None and job.gen == self._c.generation and not job.cancelled:
+            return True
+        entry = self._entry_for(s)
+        return entry is not None and entry.corrects
 
     def _ignored(self, _s: FieldSnapshot) -> frozenset[str]:
         r = self._resolved

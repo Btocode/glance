@@ -254,7 +254,10 @@ def test_shell_overlay_sends_the_toolbar_in_the_scene():
     ov.show_status(view(StatusState.IDLE), sa.ANCHOR)
     run()
     assert "toolbar" not in sa.last_scene(bus)["status"]
-    ov.on_clicked({"target": "hover", "args": {}})
+    ov.on_clicked({"target": "hover", "args": {}})  # resting on the icon opens nothing
+    run()
+    assert "toolbar" not in sa.last_scene(bus)["status"]
+    ov.on_clicked({"target": "rightclick", "args": {}})
     run()
     status = sa.last_scene(bus)["status"]
     bar = status["toolbar"]
@@ -275,7 +278,7 @@ def test_shell_overlay_sends_the_toolbar_in_the_scene():
     run()
     assert "toolbar" not in sa.last_scene(bus)["status"]
     # the extension's real size places it again
-    ov.on_clicked({"target": "hover", "args": {}})
+    ov.on_clicked({"target": "rightclick", "args": {}})
     ov.on_sized({"toolbar_w": 500, "toolbar_h": 36})
     run()
     assert ov._placed["toolbar"][2:] == (500, 36)

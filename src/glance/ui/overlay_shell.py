@@ -23,7 +23,7 @@ from glance.protocol import Rect
 from glance.shellbus import ShellBus, ShellUnavailable
 from glance.ui import scene as sc
 from glance.ui.chip_model import ChipView
-from glance.ui.icon_toolbar import place_toolbar, toolbar_piece
+from glance.ui.icon_toolbar import HOVER_OPENS, place_toolbar, toolbar_piece
 from glance.ui.panel_model import PanelView, suggested_box
 from glance.ui.placement import Anchor, clamp_to_monitor, place_status, place_strip
 from glance.ui.status_model import StatusState, StatusView
@@ -158,7 +158,10 @@ class ShellOverlay:
                  at: tuple[int, int] | None = None) -> None:
         self._ask_done = on_done
         try:
-            self._bus.call("Ask", {"prompt": prompt, "placeholder": sc.ASK_PLACEHOLDER})
+            payload: dict[str, Any] = {"prompt": prompt, "placeholder": sc.ASK_PLACEHOLDER}
+            if at is not None:  # the caller's place for it (the shot card's body)
+                payload["at"] = [int(at[0]), int(at[1])]
+            self._bus.call("Ask", payload)
         except ShellUnavailable:
             self._ask_done = None
 
@@ -219,7 +222,9 @@ class ShellOverlay:
             self._on_chip_click()
             self._queue()
             return
-        if target == "hover":  # the pointer rested on the icon: its toolbar, if it has one now
+        if target == "hover":  # the pointer rested on the icon (older extensions send it)
+            if not HOVER_OPENS:  # resting on the icon opens nothing: a right-click does
+                return
             self._menu = self._icon_toolbar(False) if self._status is not None else None
             self._queue()
             return
@@ -352,7 +357,14 @@ class ShellOverlay:
                                                suggested, s.note if s is not None else None)
                         placed["panel"] = (card_x, card_y, card_w, card_h)
         if self._panel is not None and self._panel_anchor is None:
-            x, y = clamp_to_monitor(*self._panel_point, (SEL_W, self._sizes["panel_h"]), mons)
+            size = (SEL_W, self._sizes["panel_h"])
+            if self._panel.mode == "result":
+                # under the selected line, never over it (`selection_bar.place_result`)
+                from glance.ui import selection_bar as sb
+
+                x, y = sb.place_result(self._panel_point, size, mons)
+            else:
+                x, y = clamp_to_monitor(*self._panel_point, size, mons)
             panel = sc.panel_piece(self._panel, x, y, SEL_W, False)
             placed["panel"] = (x, y, SEL_W, self._sizes["panel_h"])
         if self._ghost is not None:

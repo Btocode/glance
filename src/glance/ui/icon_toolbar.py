@@ -2,10 +2,10 @@
 as the selection action bar (`selection_bar.BarAction`). Pure; the three renderers (GTK on
 X11, the GNOME Shell extension, macOS) draw exactly these items.
 
-The pointer resting on the icon for `OPEN_MS` (never while the user is typing: keys within
-the last `TYPING_QUIET_MS`), or a right-click on it, opens the toolbar; it closes `CLOSE_MS`
-after the pointer has left both the icon and the toolbar. A plain click on the icon is still
-the default check.
+A right-click on the icon opens the toolbar (resting the pointer on it does not: `HOVER_OPENS`
+is off, a hover menu got in the way of writing); it closes `CLOSE_MS` after the pointer has
+left both the icon and the toolbar, or on Esc. A plain click on the icon is still the default
+check.
 
     Check · Friendlier · Direct · Shorter · Professional · Rewrite… · ⋯
 
@@ -31,7 +31,8 @@ from glance.ui.status_model import (
     StatusView,
 )
 
-OPEN_MS = 250
+HOVER_OPENS = False  # resting the pointer on the icon opens nothing; a right-click does
+OPEN_MS = 250  # (when HOVER_OPENS) how long the pointer rests on the icon first
 CLOSE_MS = 400
 TYPING_QUIET_MS = 600
 GAP = 6  # between the caret line (or the icon) and the toolbar

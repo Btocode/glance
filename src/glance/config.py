@@ -27,6 +27,10 @@ CHECK_MODES = ("shortcut", "typing")
 # `[general] correction`: "minimal" corrects mistakes only, in the writer's words; "fluent"
 # may also reword a sentence a little to make it grammatical (never its meaning, names or code).
 CORRECTION_MODES = ("minimal", "fluent")
+# `[general] checker`: "ai" (default) — with an AI connected, the check is the AI's; the local
+# checker's findings only show when no AI answers. "local": the local checker's findings show
+# at once and the AI's are added (the behaviour before 0.5).
+CHECKERS = ("ai", "local")
 
 POLL_MS = 1000
 
@@ -72,6 +76,7 @@ class GeneralCfg:
     # the status icon) checks the field and opens the strip. "typing": check as you type.
     check: str = "shortcut"
     correction: str = "minimal"  # CORRECTION_MODES
+    checker: str = "ai"  # CHECKERS
     hotkeys: dict[str, str] = field(default_factory=_default_hotkeys)
 
 
@@ -342,6 +347,9 @@ def _parse(data: dict[str, Any]) -> Config:
     if general.check not in CHECK_MODES:
         log_event("config_value_ignored", key="general.check")
         general = dataclasses.replace(general, check=GeneralCfg.check)
+    if general.checker not in CHECKERS:
+        log_event("config_value_ignored", key="general.checker")
+        general = dataclasses.replace(general, checker=GeneralCfg.checker)
     if general.correction not in CORRECTION_MODES:
         log_event("config_value_ignored", key="general.correction")
         general = dataclasses.replace(general, correction=GeneralCfg.correction)

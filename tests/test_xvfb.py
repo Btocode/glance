@@ -236,6 +236,7 @@ def test_status_icon_states_and_its_click(probe):
 
 def test_status_icon_toolbar(probe):
     items = ["Check", "Friendlier", "Direct", "Shorter", "Professional", "Rewrite…", "⋯"]
+    assert probe["hover_items"] is None  # resting on the icon opens nothing
     assert probe["menu_items"] == items
     _x, y, w, h = probe["menu_geometry"]
     assert w > 3 * h and y >= probe["caret_bottom"]  # one slim row, under the caret line

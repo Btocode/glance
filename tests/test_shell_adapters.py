@@ -287,6 +287,30 @@ def test_the_open_panel_shows_the_strip_s_text_in_its_place():
     assert scene["panel"]["follow"] is False and scene["panel"]["x"] == 500
 
 
+
+def test_a_result_panel_sits_under_the_selected_line_never_over_it():
+    from glance.ui import selection_bar as sb
+
+    bus = bus_with_monitors()
+    ov, run, *_ = make_overlay(bus)
+    ov.show_panel(PanelView(mode="result"), 500, 300)
+    run()
+    panel = last_scene(bus)["panel"]
+    assert panel["y"] == 300 + sb.RESULT_BELOW and panel["x"] == 500 - sb.RESULT_LEFT
+    ov.show_panel(PanelView(mode="result"), 500, 760)  # no room under it: above the line
+    run()
+    panel = last_scene(bus)["panel"]
+    assert panel["y"] + ov._sizes["panel_h"] <= 760 - sb.RESULT_ABOVE
+
+
+def test_ask_goes_where_the_caller_says():
+    bus = bus_with_monitors()
+    ov, _run, *_ = make_overlay(bus)
+    ov.ask_text("Ask about this image", lambda *_a: None, at=(40, 50))
+    assert [p for m, p in bus.calls if m == "Ask"][-1]["at"] == [40, 50]
+    ov.ask_text("Rewrite as", lambda *_a: None)
+    assert "at" not in [p for m, p in bus.calls if m == "Ask"][-1]
+
 def test_reported_sizes_place_again():
     bus = bus_with_monitors()
     ov, run, *_ = make_overlay(bus)

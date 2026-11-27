@@ -156,6 +156,9 @@ class Controller:
         self.extra_issues: list[Callable[[FieldSnapshot], list[Issue]]] = []
         self.extra_ignored: list[Callable[[FieldSnapshot], frozenset[str]]] = []
         self.extra_corrects: list[Callable[[FieldSnapshot], bool]] = []
+        # True: the local checker's findings are not shown for this text (the AI's check is
+        # coming, `[general] checker = "ai"`); they come back when no AI answers.
+        self.extra_local_hidden: list[Callable[[FieldSnapshot], bool]] = []
         self.requested_gen: int | None = None
         self.extra_status: list[Callable[[], dict[str, Any]]] = []
         self.extra_use: list[Callable[[], bool]] = []
@@ -935,6 +938,9 @@ class Controller:
         kept = self._filter.apply(s.text, found, s.wm_class, extra_ignored=ignored)
         ai_corrects = any(self._call("extra_corrects", p, s, default=False)
                           for p in self.extra_corrects)
+        if not ai_corrects and any(self._call("extra_local_hidden", p, s, default=False)
+                                   for p in self.extra_local_hidden):
+            kept = [i for i in kept if i.source != "harper"]
         self._issues = combine_sources(s.text, kept, ai_corrects)
 
     def _anchor(self, s: FieldSnapshot) -> tuple[int, int] | None:

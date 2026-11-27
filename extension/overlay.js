@@ -22,7 +22,6 @@ const MARK_PX = 18;  // the brand mark in the icon's (invisible) click target
 const GHOST_GAP = 6;
 const SPIN_MS = 125;
 // The status icon's toolbar (glance/ui/icon_toolbar.py: OPEN_MS, CLOSE_MS).
-const MENU_OPEN_MS = 250;
 const MENU_CLOSE_MS = 400;
 const ASK_RETURN_MS = 1500;
 const LINE_FIXES = 3;
@@ -451,9 +450,9 @@ export class Overlay {
     }
 
     // ------------------------------------------------------------------ the icon's toolbar
-    // The pointer resting on the icon asks glanced for the toolbar ('hover'; a right-click:
-    // 'rightclick'); glanced sends it in the scene (none while the user types). Leaving the
-    // icon and the toolbar ends it.
+    // A right-click on the icon asks glanced for the toolbar ('rightclick'; resting the
+    // pointer on it opens nothing); glanced sends it in the scene. Leaving the icon and the
+    // toolbar ends it ('hover_end').
 
     _cancelMenuTimers() {
         for (const name of ['_menuOpen', '_menuClose']) {
@@ -470,14 +469,7 @@ export class Overlay {
                 GLib.source_remove(this._menuClose);
                 this._menuClose = 0;
             }
-            if (this._icon.hover && !this._scene?.status?.toolbar && !this._menuOpen) {
-                this._menuOpen = GLib.timeout_add(GLib.PRIORITY_DEFAULT, MENU_OPEN_MS, () => {
-                    this._menuOpen = 0;
-                    if (this._icon.hover)
-                        this._cb.clicked('hover', {});
-                    return GLib.SOURCE_REMOVE;
-                });
-            }
+            // resting on the icon opens nothing (icon_toolbar.HOVER_OPENS): a right-click does
             return;
         }
         if (this._menuOpen) {
@@ -523,7 +515,7 @@ export class Overlay {
     _toolbar(actions, onAction, prefix, {more = [], note = null, hint = null} = {}) {
         const t = this._t;
         const bar = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
-            `border-radius: 10px; padding: 4px; spacing: 4px; box-shadow: 0 4px 14px ${t.shadow};`});
+            `border-radius: 10px; padding: 4px; spacing: 4px; box-shadow: none;`});
         const row = hbox({style: 'spacing: 2px;'});
         const lead = this._mark(16);
         lead.style = 'margin: 0 4px;';
@@ -747,7 +739,7 @@ export class Overlay {
             return;
         const t = this._t;
         const card = vbox({style: `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
-            `border-radius: 12px; padding: 14px 16px; spacing: 14px; box-shadow: 0 8px 24px ${t.shadow};`});
+            `border-radius: 12px; padding: 14px 16px; spacing: 14px; box-shadow: 0 4px 12px ${t.shadow};`});
         card.set_width(panel.w);
         if (panel.view.mode === 'selection')
             this._fillSelection(card, panel);
@@ -1282,12 +1274,12 @@ export class Overlay {
 
     // ------------------------------------------------------------------ "Rewrite as…"
 
-    ask({prompt, placeholder}, window) {
+    ask({prompt, placeholder, at}, window) {
         this._closeAsk(false);
         const t = this._t;
         const box = vbox({reactive: true, style: `background-color: ${t.surface}; border: 1px solid ` +
             `${t.hairline}; border-radius: 12px; padding: 12px 14px; spacing: 6px; ` +
-            `box-shadow: 0 6px 18px ${t.shadow};`});
+            `box-shadow: 0 4px 12px ${t.shadow};`});
         box.add_child(this._label(prompt ?? '', 'muted', 12));
         const entry = new St.Entry({hint_text: placeholder ?? '', can_focus: true,
             style: this._font(13, `color: ${t.text}; background-color: ${t.surface}; ` +
@@ -1297,7 +1289,9 @@ export class Overlay {
         Main.layoutManager.addTopChrome(box);
         const anchor = this._named.get('rewrite-as');
         let x, y;
-        if (anchor && anchor.mapped) {
+        if (Array.isArray(at) && at.length === 2 && at.every(Number.isFinite)) {
+            [x, y] = at; // the caller's place for it (over the shot card's body)
+        } else if (anchor && anchor.mapped) {
             [x, y] = anchor.get_transformed_position();
             x -= 14;
             y -= 30;

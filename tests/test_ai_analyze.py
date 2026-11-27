@@ -585,3 +585,30 @@ def test_no_strip_when_the_tone_fits_and_nothing_needs_fixing(tmp_path):
     rig = Rig(tmp_path, analysis=CALM)
     rig.analyzed(snap(text="send me the report now, I need it before the meeting starts."))
     assert rig.overlay.strip is None
+
+
+# ---------------------------------------------------------------- `[general] checker = "ai"`
+
+
+def test_ai_checker_hides_local_findings_while_the_ai_checks(tmp_path):
+    rig = Rig(tmp_path, delay_ms=500, patterns=TYPO, checker=lambda: "ai")
+    rig.analyzed()
+    assert rig.ai._job is not None  # the AI's check is on its way
+    assert not [i for i in rig.c.issues if i.source == "harper"]
+    rig.clock.advance(500)  # it answered without a corrected text: the local fixes join it
+    assert [i.source for i in rig.c.issues if i.source == "harper"] == ["harper"]
+
+
+def test_ai_checker_shows_local_findings_when_the_ai_fails(tmp_path):
+    rig = Rig(tmp_path, delay_ms=200, patterns=TYPO, checker=lambda: "ai")
+    rig.backend.script(BackendError("timeout", "boom"))
+    rig.analyzed()
+    assert not [i for i in rig.c.issues if i.source == "harper"]
+    rig.clock.advance(200)
+    assert [i.source for i in rig.c.issues] == ["harper"]
+
+
+def test_local_checker_shows_local_findings_at_once(tmp_path):
+    rig = Rig(tmp_path, delay_ms=500, patterns=TYPO, checker=lambda: "local")
+    rig.analyzed()
+    assert [i.source for i in rig.c.issues if i.source == "harper"] == ["harper"]

@@ -21,7 +21,10 @@ const MIN_SIDE = 4;            // geometry.MIN_SIDE
 const LABEL_OFFSET = [16, 18]; // geometry.LABEL_OFFSET
 const BAR_GAP = 8;             // geometry.BAR_GAP
 const DIM = 'rgba(8, 13, 18, 0.45)';
-const BAR_W = 560;
+const BAR_W = 460;           // the card (shot_gtk.BAR_W)
+const BODY_MIN_H = 132;       // the body keeps this height: the card barely resizes per step
+const RESULT_MAX_H = 260;
+const FRAME_PAD = 3;          // the region's outline sits just outside it
 const CAPTURE_DELAY_MS = 80;   // the picker is gone from the screen by then
 
 function rect(x, y, w, h) {
@@ -38,23 +41,37 @@ function inside(r, x, y) {
     return r.x <= x && x < r.x + r.w && r.y <= y && y < r.y + r.h;
 }
 
-// geometry.bar_position: under the region, right-aligned; above; else inside its bottom.
-export function barPosition(region, size, monitors) {
+const CARD_RESERVE_H = 420;     // geometry.CARD_RESERVE_H
+
+// geometry.bar_position: beside the region, never over it while there is room. Right of it
+// (tops aligned), else left, else under, else above, else under or above with room for its
+// present height only, else inside its top-right corner. The side is picked for the card's
+// full height (reserveH), so it does not jump sides as a result fills it.
+export function barPosition(region, size, monitors, reserveH = CARD_RESERVE_H) {
     const [w, h] = size;
+    const tall = Math.max(h, reserveH);
     const cx = region.x + Math.floor(region.w / 2), cy = region.y + Math.floor(region.h / 2);
     const mon = monitors.find(m => inside(m, cx, cy)) ?? monitors[0] ??
-        rect(region.x, region.y, Math.max(region.w, w), region.h + h + BAR_GAP);
-    let x = region.x + region.w - w;
-    let y;
-    const below = region.y + region.h + BAR_GAP, above = region.y - BAR_GAP - h;
-    if (below + h <= mon.y + mon.h)
-        y = below;
-    else if (above >= mon.y)
-        y = above;
+        rect(region.x, region.y, region.w + w + BAR_GAP, Math.max(region.h, tall));
+    const right = mon.x + mon.w, bottom = mon.y + mon.h;
+    const fitsH = Math.min(tall, mon.h);
+    let x, y;
+    if (region.x + region.w + BAR_GAP + w <= right)
+        [x, y] = [region.x + region.w + BAR_GAP, region.y];
+    else if (region.x - BAR_GAP - w >= mon.x)
+        [x, y] = [region.x - BAR_GAP - w, region.y];
+    else if (region.y + region.h + BAR_GAP + fitsH <= bottom)
+        [x, y] = [region.x, region.y + region.h + BAR_GAP];
+    else if (region.y - BAR_GAP - fitsH >= mon.y)
+        [x, y] = [region.x, region.y - BAR_GAP - h];
+    else if (region.y + region.h + BAR_GAP + h <= bottom) // room for it as it is, not grown
+        [x, y] = [region.x + region.w - w, region.y + region.h + BAR_GAP];
+    else if (region.y - BAR_GAP - h >= mon.y)
+        [x, y] = [region.x + region.w - w, region.y - BAR_GAP - h];
     else
-        y = region.y + region.h - h - BAR_GAP;
-    x = Math.max(mon.x, Math.min(x, mon.x + mon.w - w));
-    y = Math.max(mon.y, Math.min(y, mon.y + mon.h - h));
+        [x, y] = [region.x + region.w - w - 2 * BAR_GAP, region.y + 2 * BAR_GAP];
+    x = Math.max(mon.x, Math.min(x, right - w));
+    y = Math.max(mon.y, Math.min(y, bottom - h));
     return [x, y];
 }
 
@@ -63,8 +80,11 @@ export class ShotUi {
     constructor(cb) {
         this._cb = cb;
         this._pick = null;      // the picker's state while it is up
-        this._bar = null;
+        this._bar = null;       // the card, one actor while the shot is up
+        this._frame = null;     // the region's outline
         this._barKey = '';
+        this._barRect = null;
+        this._lastView = null;
         this._named = new Map();
     }
 
@@ -386,35 +406,153 @@ export class ShotUi {
             y_align: Clutter.ActorAlign.CENTER});
     }
 
+    // A header tool (Copy image, Save): a small outlined button.
+    _tool(b) {
+        const t = this._t;
+        const bin = new St.Bin({y_align: Clutter.ActorAlign.CENTER});
+        const text = new St.Label({text: b.label, y_align: Clutter.ActorAlign.CENTER});
+        text.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        bin.set_child(text);
+        const plain = `font-family: ${this._look.font ?? 'sans-serif'}; font-size: 12px; ` +
+            `background-color: transparent; color: ${t.text}; border: 1px solid ${t.card_border}; ` +
+            'border-radius: 7px; padding: 3px 9px;';
+        bin.style = plain;
+        bin.connect('notify::hover', () => {
+            bin.style = bin.hover ? `${plain} border-color: ${t.accent};` : plain;
+        });
+        clickable(bin, () => this._cb.clicked(b.key));
+        this._named.set(`shot:${b.key}`, bin);
+        return bin;
+    }
+
+    // A tab: one row, always in the same place; the selected one is lit, a muted one dimmed
+    // (a click on it makes glanced say why).
+    _tab(b) {
+        const t = this._t;
+        const bin = new St.Bin({x_expand: true, x_align: Clutter.ActorAlign.FILL,
+            y_align: Clutter.ActorAlign.CENTER});
+        const text = new St.Label({text: b.label, x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER});
+        text.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        bin.set_child(text);
+        const font = `font-family: ${this._look.font ?? 'sans-serif'}; font-size: 13px; ` +
+            'border-radius: 7px; padding: 5px 12px;';
+        const plain = b.selected
+            ? `${font} background-color: ${t.highlight_rgba}; color: ${t.accent}; font-weight: 600;`
+            : `${font} background-color: transparent; color: ${t.muted};`;
+        bin.style = plain;
+        if (b.muted)
+            bin.opacity = 128;
+        if (!b.selected) {
+            bin.connect('notify::hover', () => {
+                bin.style = bin.hover ? `${font} background-color: transparent; color: ${t.text};` : plain;
+            });
+        }
+        clickable(bin, () => this._cb.clicked(b.key));
+        this._named.set(`shot:${b.key}`, bin);
+        return bin;
+    }
+
+    _vbox(params = {}) {
+        const box = new St.BoxLayout(params);
+        if (box.orientation !== undefined)
+            box.orientation = Clutter.Orientation.VERTICAL;
+        else
+            box.vertical = true;
+        return box;
+    }
+
+    // The body: the hint, the notice, or the result (title + note, then the text, skeleton
+    // lines while it is worked on, or why it failed). Returns the footer's actions.
+    _body(card, view, words) {
+        const t = this._t;
+        const notice = Boolean(view.notice);
+        const body = this._vbox({style: notice
+            ? `background-color: ${t.warn_bg}; border: 1px solid ${t.warn_border}; ` +
+              `border-radius: 8px; padding: 12px; spacing: 8px; min-height: ${BODY_MIN_H}px;`
+            : `background-color: ${t.card}; border: 1px solid ${t.card_border}; ` +
+              `border-radius: 8px; padding: 12px; spacing: 8px; min-height: ${BODY_MIN_H}px;`});
+        this._named.set('shot:body', body);
+        card.add_child(body);
+        if (notice) {
+            body.add_child(this._label(view.notice.text, 'warn_text', 13));
+            return view.notice.buttons ?? [];
+        }
+        const r = view.result;
+        if (!r) {
+            body.add_child(this._label(view.hint ?? words.hint ?? '', 'text', 14, 'font-weight: 600;'));
+            if (words.hint_sub)
+                body.add_child(this._label(words.hint_sub, 'muted', 12));
+            return [];
+        }
+        const head = new St.BoxLayout({style: 'spacing: 8px;'});
+        head.add_child(this._label(r.title, 'muted', 12, 'font-weight: 600;', false));
+        head.add_child(new St.Widget({x_expand: true}));
+        body.add_child(head);
+        if (r.state === 'failed') {
+            body.add_child(this._label(r.note || 'That did not work. Try again', 'warn_text', 12));
+            return [];
+        }
+        if (r.note)
+            head.add_child(this._label(r.note, 'muted', 12, '', false));
+        if (r.text !== null && r.text !== undefined) {
+            const scroll = new St.ScrollView({style: `max-height: ${RESULT_MAX_H}px;`,
+                hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
+            const holder = this._vbox({});
+            holder.add_child(this._label(r.text, 'text', 13.5));
+            if (scroll.set_child)
+                scroll.set_child(holder);
+            else
+                scroll.add_actor(holder);
+            this._named.set('shot:result', scroll);
+            body.add_child(scroll);
+            return r.actions ?? [];
+        }
+        if (r.state === 'loading') {
+            for (const frac of [1.0, 0.86, 0.6]) { // skeleton lines, the answer's shape
+                const bar = new St.Widget({style: `background-color: ${t.skeleton}; border-radius: 5px; ` +
+                    'margin: 2px 0;', x_align: Clutter.ActorAlign.START});
+                bar.set_size(Math.round((BAR_W - 60) * frac), 10);
+                body.add_child(bar);
+            }
+        }
+        return [];
+    }
+
+    // One card beside the region, the same actor from start to finish: a render refills it
+    // in place (it never closes and opens again somewhere else).
     showBar({view, region, tokens = {}, look = {}, words = {}}) {
-        const key = JSON.stringify([view, region, tokens]);
+        const key = JSON.stringify([view, region, tokens, words]);
         if (this._bar && key === this._barKey)
-            return {ok: true};
+            return {ok: true, rect: this._barRect};
         this._barKey = key;
+        this._lastView = view;
         this._t = tokens;
         this._look = look;
         this._named.clear();
         this._bannerText = null;
         const t = tokens;
-        const vbox = params => {
-            const box = new St.BoxLayout(params);
-            if (box.orientation !== undefined)
-                box.orientation = Clutter.Orientation.VERTICAL;
-            else
-                box.vertical = true;
-            return box;
-        };
-        const card = vbox({reactive: true, style: `background-color: ${t.surface}; border: 1px solid ` +
-            `${t.hairline}; border-radius: 12px; padding: 14px 16px; spacing: 12px; ` +
-            `box-shadow: 0 8px 24px ${t.shadow};`});
-        card.set_width(BAR_W);
-        // header: the mark, "Glance Shot", the size; Esc Close
+        const reg = rect(...region);
+        this._showFrame(reg);
+        let card = this._bar;
+        if (!card) {
+            card = this._vbox({reactive: true});
+            card.set_width(BAR_W);
+            Main.layoutManager.addTopChrome(card);
+            this._bar = card;
+        }
+        card.destroy_all_children();
+        card.style = `background-color: ${t.surface}; border: 1px solid ${t.hairline}; ` +
+            `border-radius: 12px; padding: 14px 16px; spacing: 12px; box-shadow: 0 4px 12px ${t.shadow};`;
+        // header: the mark, "Glance Shot", the size; the image tools; Esc Close
         const header = new St.BoxLayout({style: 'spacing: 10px;'});
         header.add_child(this._mark(20));
-        const titles = vbox({x_expand: true, y_align: Clutter.ActorAlign.CENTER, style: 'spacing: 1px;'});
+        const titles = this._vbox({x_expand: true, y_align: Clutter.ActorAlign.CENTER, style: 'spacing: 1px;'});
         titles.add_child(this._label(words.title ?? 'Glance Shot', 'text', 14, 'font-weight: 600;', false));
         titles.add_child(this._label(view.size, 'muted', 12, '', false));
         header.add_child(titles);
+        for (const b of view.tools ?? [])
+            header.add_child(this._tool(b));
         const close = new St.Bin({y_align: Clutter.ActorAlign.CENTER,
             style: 'background-color: transparent; border-radius: 6px; padding: 2px 4px;'});
         const inner = new St.BoxLayout({style: 'spacing: 6px;'});
@@ -425,86 +563,58 @@ export class ShotUi {
         this._named.set('shot:close', close);
         header.add_child(close);
         card.add_child(header);
-        const row = new St.BoxLayout({style: 'spacing: 6px;'});
+        // the tabs
+        const tabs = new St.BoxLayout({style: `background-color: ${t.group}; border: 1px solid ` +
+            `${t.card_border}; border-radius: 9px; padding: 3px; spacing: 2px;`});
         for (const b of view.buttons) {
             if (b.key !== 'close')
-                row.add_child(this._button(b));
+                tabs.add_child(this._tab(b));
         }
-        card.add_child(row);
-        if (view.notice) {
-            const box = vbox({style: `background-color: ${t.warn_bg}; border: 1px solid ${t.warn_border}; ` +
-                'border-radius: 9px; padding: 8px 10px; spacing: 8px;'});
-            box.add_child(this._label(view.notice.text, 'warn_text', 13));
-            const actions = new St.BoxLayout({style: 'spacing: 6px;'});
-            for (const b of view.notice.buttons)
-                actions.add_child(this._button(b));
-            box.add_child(actions);
-            card.add_child(box);
-        }
+        card.add_child(tabs);
+        const actions = this._body(card, view, words);
+        // the footer: the actions on the left, what just happened on the right
+        const foot = new St.BoxLayout({style: 'spacing: 6px; min-height: 32px;'});
+        for (const b of actions)
+            foot.add_child(this._button(b));
         if (view.banner) {
-            const warn = view.warn;
-            const box = new St.Bin({style: warn
-                ? `background-color: ${t.warn_bg}; border: 1px solid ${t.warn_border}; border-radius: 9px; padding: 8px 10px;`
-                : `background-color: ${t.highlight}; border: 1px solid ${t.card_border}; border-radius: 9px; padding: 8px 10px;`});
-            box.set_child(this._label(view.banner, warn ? 'warn_text' : 'text', 13));
-            this._named.set('shot:banner', box);
+            const status = this._label(view.banner, view.warn ? 'warn_text' : 'accent', 12, '', false);
+            foot.add_child(new St.Widget({x_expand: true}));
+            status.y_align = Clutter.ActorAlign.CENTER;
+            this._named.set('shot:banner', status);
             this._bannerText = view.banner;
-            card.add_child(box);
+            foot.add_child(status);
         }
-        const r = view.result;
-        if (r) {
-            const box = vbox({style: 'spacing: 8px;'});
-            const head = new St.BoxLayout({style: 'spacing: 8px;'});
-            head.add_child(this._label(r.title, 'muted', 12, 'font-weight: 600;', false));
-            head.add_child(new St.Widget({x_expand: true}));
-            if (r.note)
-                head.add_child(this._label(r.note, 'muted', 12, '', false));
-            box.add_child(head);
-            if (r.text !== null && r.text !== undefined) {
-                const scroll = new St.ScrollView({style: `background-color: ${t.card}; border: 1px solid ` +
-                    `${t.card_border}; border-radius: 8px; padding: 10px 12px; max-height: 240px;`,
-                hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
-                const text = this._label(r.text, 'text', 13.5);
-                const holder = vbox({});
-                holder.add_child(text);
-                if (scroll.set_child)
-                    scroll.set_child(holder);
-                else
-                    scroll.add_actor(holder);
-                this._named.set('shot:result', scroll);
-                box.add_child(scroll);
-                if (r.actions?.length) {
-                    const actions = new St.BoxLayout({style: 'spacing: 6px;'});
-                    for (const b of r.actions)
-                        actions.add_child(this._button(b));
-                    box.add_child(actions);
-                }
-            } else if (r.state === 'loading') {
-                box.add_child(this._label('…', 'muted', 12));
-            }
-            card.add_child(box);
-        }
-        const old = this._bar;
-        this._bar = card;
-        Main.layoutManager.addTopChrome(card);
+        card.add_child(foot);
         const [, h] = card.get_preferred_height(BAR_W);
-        const reg = rect(...region);
-        const [x, y] = barPosition(reg, [BAR_W, h], this._monitors());
+        const [x, y] = barPosition(reg, [BAR_W, Math.ceil(h)], this._monitors());
         card.set_position(x, y);
-        if (old) {
-            Main.layoutManager.removeChrome(old);
-            old.destroy();
+        card.get_parent()?.set_child_above_sibling(card, null);
+        this._barRect = [x, y, BAR_W, Math.ceil(h)];
+        return {ok: true, rect: this._barRect};
+    }
+
+    // The captured region, outlined just outside it while its card is up; clicks go through.
+    _showFrame(reg) {
+        if (!this._frame) {
+            this._frame = new St.Widget({reactive: false});
+            Main.layoutManager.addTopChrome(this._frame, {affectsInputRegion: false});
         }
-        return {ok: true};
+        this._frame.style = `border: 2px solid ${this._t.accent_fill ?? '#3ECF8E'};`;
+        this._frame.set_position(reg.x - FRAME_PAD, reg.y - FRAME_PAD);
+        this._frame.set_size(reg.w + 2 * FRAME_PAD, reg.h + 2 * FRAME_PAD);
+        this._frame.show();
     }
 
     hideBar() {
-        if (this._bar) {
-            Main.layoutManager.removeChrome(this._bar);
-            this._bar.destroy();
-            this._bar = null;
+        for (const actor of [this._bar, this._frame]) {
+            if (actor) {
+                Main.layoutManager.removeChrome(actor);
+                actor.destroy();
+            }
         }
+        this._bar = this._frame = null;
         this._barKey = '';
+        this._barRect = null;
         this._named.clear();
         return {ok: true};
     }
@@ -544,6 +654,8 @@ export class ShotUi {
             selection: p?.selection ? [p.selection.x, p.selection.y, p.selection.w, p.selection.h] : null,
             label: p?.label?.visible ? p.label.text : null,
             bar: geo(this._bar),
+            frame: geo(this._frame),
+            selected: this._bar ? (this._lastView?.buttons ?? []).filter(b => b.selected).map(b => b.key) : [],
             banner: this._bar ? this._bannerText ?? null : null,
             named: [...this._named.keys()],
         };

@@ -210,7 +210,8 @@ def build_ai(controller: Any, clock: Any, cfg: Callable[[], Any],
         rich=lambda s: is_rich_editor(s.wm_class, cfg()),
         writeback=lambda s: cfg().app(s.wm_class).writeback,
         max_words=lambda: cfg().ai.max_words,
-        correction=lambda: cfg().general.correction)
+        correction=lambda: cfg().general.correction,
+        checker=lambda: cfg().general.checker)
     holder.append(ai)
     ai.attach()
     return ai, supervisor

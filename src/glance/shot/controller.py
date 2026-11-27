@@ -166,7 +166,6 @@ class ShotController:
         if result is None:
             log_event("shot_cancelled")
             return
-        cfg = self._cfg()
         # A shot is the user's own deliberate capture: nothing in it is off limits. It can be
         # copied, saved, read and (on an explicit Explain / Ask click) sent to the AI.
         private = None

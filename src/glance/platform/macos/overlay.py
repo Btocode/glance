@@ -59,6 +59,7 @@ from glance.ui import icon_toolbar as tb
 from glance.ui import look
 from glance.ui.chip_model import ChipView
 from glance.ui.icon_toolbar import CLOSE_MS as MENU_CLOSE_MS
+from glance.ui.icon_toolbar import HOVER_OPENS as MENU_HOVER_OPENS
 from glance.ui.icon_toolbar import OPEN_MS as MENU_OPEN_MS
 from glance.ui.icon_toolbar import IconToolbar
 from glance.ui.panel_model import PanelView, SuggestedBox, ToneChip, suggested_box
@@ -76,6 +77,7 @@ _SOURCE_OVER = 2  # NSCompositingOperationSourceOver
 _SOURCE_ATOP = 5  # NSCompositingOperationSourceAtop
 SPIN_MS = look.FRAME_MS  # the working animation's frame time, only while working
 DRAWER_MIN_W = 520
+SEL_RESULT_W = 460  # the selection actions' result panel (as the GTK one)
 GAP = 4
 PAD = 10
 FONT_PX = 13.0
@@ -615,6 +617,7 @@ class MacOverlay:
         bx, by = sb.place_bar((x, y), (int(w), int(h)), self.monitors())
         self._sel_rect = Rect(bx, by, int(w), int(h))
         place(self._sel, self._sel_rect)
+        self._sel.invalidateShadow()  # the shadow follows the new shape
         self._sel.orderFrontRegardless()
 
     def _sel_bar(self, view: Any) -> tuple[Any, float, float]:
@@ -701,7 +704,8 @@ class MacOverlay:
     def ask_text(self, prompt: str, on_done: Callable[[str, bool], None],
                  at: tuple[int, int] | None = None) -> None:
         """A small key panel with one text field; Return submits, Esc cancels. The app that
-        was frontmost is activated again before `on_done` is called."""
+        was frontmost is activated again before `on_done` is called. `at`: its top-left
+        (top-left space), e.g. over Glance Shot's card; else under the drawer or strip."""
         self._close_ask(submit=False, reactivate=False)
         from AppKit import NSApp
 
@@ -722,7 +726,7 @@ class MacOverlay:
         card.addSubview_(field)
         panel.setContentView_(card)
         panel.on_cancel = lambda: self._close_ask(submit=False)
-        at = self._ask_position()
+        at = at or self._ask_position()  # `at`: the caller's place for it (the shot card)
         mons = self.monitors()
         x, y = at if at is not None else (mons[0].x + 200, mons[0].y + 200) if mons else (200, 200)
         place(panel, Rect(int(x), int(y), int(w), 74))
@@ -828,7 +832,8 @@ class MacOverlay:
         else:
             self._in_menu = True
         self._cancel("_menu_close")
-        if where == "icon" and self._menu_view is None and self._menu_open is None:
+        if (MENU_HOVER_OPENS and where == "icon" and self._menu_view is None
+                and self._menu_open is None):  # off: only a right-click opens it
             self._menu_open = self._clock.call_later(MENU_OPEN_MS, self._menu_open_due)
 
     def _menu_leave(self, where: str) -> None:
@@ -871,6 +876,7 @@ class MacOverlay:
         line = None if a is None else (a.caret or a.prev_char)
         mx, my = tb.place_toolbar(icon, line, (int(w), int(h)), self.monitors())
         place(self._menu, Rect(mx, my, int(w), int(h)))
+        self._menu.invalidateShadow()  # the shadow follows the new shape
         self._menu.orderFrontRegardless()
 
     def _hide_menu(self) -> None:
@@ -922,6 +928,7 @@ class MacOverlay:
             strip_y, card_y = p.y, p.y + strip_h + (GAP if strip else 0)
         if strip:
             place(self._strip, Rect(p.x, strip_y, p.w, strip_h))
+            self._strip.invalidateShadow()  # the shadow follows the new shape
             if not self._strip.isVisible():
                 self._strip.orderFrontRegardless()
         if drawer:
@@ -929,14 +936,24 @@ class MacOverlay:
             if mon is not None:
                 x = max(mon.x, min(x, mon.x + mon.w - card_w))
             place(self._panel, Rect(x, card_y, card_w, card_h))
+            self._panel.invalidateShadow()  # the shadow follows the new shape
             if not self._panel.isVisible():
                 self._panel.orderFrontRegardless()
 
     def _place_selection(self, mons: list[Rect]) -> None:
-        w = DRAWER_MIN_W
+        from glance.ui import selection_bar as sb
+
+        view = self._panel_view
+        result = view is not None and view.mode == "result"
+        w = SEL_RESULT_W if result else DRAWER_MIN_W
         h = self._build_drawer(w)
-        x, y = clamp_to_monitor(self._panel_point[0], self._panel_point[1] + 12, (w, h), mons)
+        if result:  # under the selected line, never over it
+            x, y = sb.place_result(self._panel_point, (w, h), mons)
+        else:
+            x, y = clamp_to_monitor(self._panel_point[0], self._panel_point[1] + 12, (w, h),
+                                    mons)
         place(self._panel, Rect(x, y, w, h))
+        self._panel.invalidateShadow()  # the shadow follows the new shape
         if not self._panel.isVisible():
             self._panel.orderFrontRegardless()
 

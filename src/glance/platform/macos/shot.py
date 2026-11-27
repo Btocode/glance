@@ -36,7 +36,6 @@ from glance.platform.macos.appkit_util import (
     tokens,
 )
 from glance.platform.macos.overlay import (
-    PAD,
     _attr,
     _Button,
     _Card,
@@ -44,6 +43,7 @@ from glance.platform.macos.overlay import (
     _keycap,
     _label,
     _mark_view,
+    _skeleton,
     cgcolor,
 )
 from glance.protocol import Rect
@@ -55,7 +55,17 @@ from glance.shot.picker import HINT, Picker
 from glance.ui import look
 from glance.ui.ports import WindowInfo
 
-BAR_W = 560.0
+BAR_W = 460.0  # the card
+CARD_PAD = 16.0
+HEADER_H = 34.0
+TAB_ROW_H = 34.0
+TAB_PAD = 3.0
+TAB_GAP = 2.0
+BODY_PAD = 12.0
+BODY_MIN_H = 132.0  # the body keeps at least this height: the card barely resizes per step
+RESULT_MAX_H = 260.0  # longer text scrolls
+FOOT_H = 32.0
+FRAME_PAD = 3  # the region's outline sits just outside it: the shot itself stays clear
 DIM = 0.45
 PNG_TYPE = "public.png"
 NO_PERMISSION = ("Glance Shot needs Screen Recording",
@@ -252,6 +262,21 @@ class _PickerView(_Flipped):
         attr.drawAtPoint_(NSMakePoint(x - ox + 10, y - oy + 5))
 
 
+class _Outline(_Flipped):
+    """The captured region's outline: a 2px ring in `ink`, clear inside."""
+
+    def drawRect_(self, _rect):
+        ink = getattr(self, "ink", None)
+        if ink is None:
+            return
+        b = self.bounds()
+        ink.setStroke()
+        ring = NSBezierPath.bezierPathWithRect_(
+            NSMakeRect(1, 1, b.size.width - 2, b.size.height - 2))
+        ring.setLineWidth_(2.0)
+        ring.stroke()
+
+
 # ---------------------------------------------------------------------- MacShot
 
 
@@ -274,7 +299,11 @@ class MacShot:
         self._view: Any = None
         self._bar = make_panel()
         self._bar_key: Any = None
+        self._bar_h = 0
         self._region: Rect | None = None
+        self._frame: Any = None  # the region's outline, made on first use
+        self._frame_rect: Rect | None = None
+        self._frame_ink: str | None = None
 
     # ------------------------------------------------------------------ the picker
 
@@ -383,21 +412,19 @@ class MacShot:
             self._close_picker()
             self._finish(None)
 
-    # ------------------------------------------------------------------ the bar
+    # ------------------------------------------------------------------ the card
 
     def _button(self, b: bm.ShotButton) -> Any:
+        """A result action or a notice button: the primary one an emerald pill, the others
+        outlined."""
         t = self.t
-        btn = _Button.buttonWithTitle_target_action_(b.label, self._target, "fire:")
-        btn.setTag_(self._target.add(lambda: self._act(b.key)))
-        btn.setRefusesFirstResponder_(True)
-        btn.setBordered_(False)
+        btn = self._plain_button(b)
         primary = b.primary and not b.muted
         fg = t["on_accent"] if primary else t["muted"] if b.muted else t["text"]
         btn.setAttributedTitle_(_attr(b.label, color(fg), bold=primary, size=12.5))
         btn.sizeToFit()
         f = btn.frame()
-        btn.setFrameSize_((f.size.width + 22, max(26.0, f.size.height + 8)))
-        btn.setWantsLayer_(True)
+        btn.setFrameSize_((f.size.width + 24, 30.0))
         layer = btn.layer()
         layer.setCornerRadius_(7.0)
         if primary:
@@ -407,31 +434,148 @@ class MacShot:
                 layer.setBackgroundColor_(cgcolor(t["card"]))
             layer.setBorderColor_(cgcolor(t["card_border"]))
             layer.setBorderWidth_(1.0)
+        return btn
+
+    def _plain_button(self, b: bm.ShotButton) -> Any:
+        btn = _Button.buttonWithTitle_target_action_(b.label, self._target, "fire:")
+        btn.setTag_(self._target.add(lambda: self._act(b.key)))
+        btn.setRefusesFirstResponder_(True)
+        btn.setBordered_(False)
+        btn.setWantsLayer_(True)
         if b.tip:
             btn.setToolTip_(b.tip)
         btn.setAccessibilityIdentifier_(f"shot:{b.key}")
         return btn
 
-    def _box(self, fill: str, border: str, width: float, views: list[Any]) -> Any:
-        card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, 10))
-        card.fill, card.border, card.radius = color(fill), color(border), 9.0
-        y = 8.0
-        for v in views:
-            v.setFrameOrigin_(NSMakePoint(10, y))
-            card.addSubview_(v)
-            y += v.frame().size.height + 6
-        card.setFrameSize_((width, y + 2))
-        return card
+    def _tool(self, b: bm.ShotButton) -> Any:
+        """Copy image, Save: small outlined buttons in the header."""
+        t = self.t
+        btn = self._plain_button(b)
+        btn.setAttributedTitle_(_attr(b.label, color(t["text"]), size=12.5))
+        btn.sizeToFit()
+        f = btn.frame()
+        btn.setFrameSize_((f.size.width + 18, 26.0))
+        layer = btn.layer()
+        layer.setCornerRadius_(7.0)
+        layer.setBorderColor_(cgcolor(t["card_border"]))
+        layer.setBorderWidth_(1.0)
+        return btn
 
-    def _row(self, buttons: list[Any]) -> Any:
-        row = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, BAR_W - 2 * PAD, 10))
-        x = h = 0.0
-        for b in buttons:
-            b.setFrameOrigin_(NSMakePoint(x, 0))
-            row.addSubview_(b)
-            x += b.frame().size.width + 6
-            h = max(h, b.frame().size.height)
-        row.setFrameSize_((BAR_W - 2 * PAD, h))
+    def _tabs(self, view: bm.ShotBarView, width: float) -> Any:
+        """The tab row: one rounded group, equal widths, the selected tab tinted."""
+        t = self.t
+        tabs = [b for b in view.buttons if b.key != "close"]
+        group = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, TAB_ROW_H))
+        group.fill, group.border, group.radius = color(t["group"]), color(t["card_border"]), 9.0
+        if not tabs:
+            return group
+        inner = width - 2 * TAB_PAD
+        tw = (inner - TAB_GAP * (len(tabs) - 1)) / len(tabs)
+        x = TAB_PAD
+        for b in tabs:
+            btn = self._plain_button(b)
+            fg = t["accent"] if b.selected else t["muted"]
+            btn.setAttributedTitle_(_attr(b.label, color(fg), bold=b.selected, size=13.0))
+            btn.setFrame_(NSMakeRect(x, TAB_PAD, tw, TAB_ROW_H - 2 * TAB_PAD))
+            layer = btn.layer()
+            layer.setCornerRadius_(7.0)
+            if b.selected:
+                layer.setBackgroundColor_(color(t["highlight_rgba"]).CGColor())
+            if b.muted:
+                btn.setAlphaValue_(0.5)
+            group.addSubview_(btn)
+            x += tw + TAB_GAP
+        return group
+
+    def _body(self, view: bm.ShotBarView, width: float) -> Any:
+        """The hint, the notice, or the result, in one box of at least BODY_MIN_H."""
+        t = self.t
+        inner = width - 2 * BODY_PAD
+        views: list[tuple[Any, float]] = []  # (view, gap after it)
+        fill, border = t["card"], t["card_border"]
+        if view.notice is not None:
+            fill, border = t["warn_bg"], t["warn_border"]
+            views.append((_label(view.notice.text, color(t["warn_text"]), inner, size=13.0), 0))
+        elif view.result is not None:
+            views.extend(self._result(view.result, inner))
+        else:
+            views.append((_label(view.hint or bm.HINT, color(t["text"]), inner, bold=True,
+                                 size=13.5), 6))
+            views.append((_label(bm.HINT_SUB, color(t["muted"]), inner, size=12.0), 0))
+        box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, BODY_MIN_H))
+        box.fill, box.border, box.radius = color(fill), color(border), 8.0
+        y = BODY_PAD
+        for v, gap in views:
+            v.setFrameOrigin_(NSMakePoint(BODY_PAD, y))
+            box.addSubview_(v)
+            y += v.frame().size.height + gap
+        box.setFrameSize_((width, max(BODY_MIN_H, y + BODY_PAD)))
+        box.setAccessibilityIdentifier_("shot:body")
+        return box
+
+    def _result(self, r: bm.ShotResult, inner: float) -> list[tuple[Any, float]]:
+        t = self.t
+        head = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, inner, 18))
+        title = _label(r.title, color(t["muted"]), inner, bold=True, lines=1, size=12.0)
+        title.sizeToFit()
+        title.setFrameOrigin_(NSMakePoint(0, 0))
+        head.addSubview_(title)
+        if r.state == "failed":
+            why = _label(r.note or "That did not work. Try again", color(t["warn_text"]), inner,
+                         size=12.5)
+            return [(head, 8), (why, 0)]
+        if r.note:
+            room = inner - title.frame().size.width - 12
+            note = _label(r.note, color(t["muted"]), room, lines=1, size=12.0)
+            note.setAlignment_(2)  # right
+            note.setFrame_(NSMakeRect(inner - room, 0, room, title.frame().size.height))
+            head.addSubview_(note)
+        out: list[tuple[Any, float]] = [(head, 8)]
+        if r.text is not None:
+            text = _label(r.text, color(t["text"]), inner - 14, size=13.5)
+            full = text.frame().size.height
+            th = min(RESULT_MAX_H, full)
+            scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, inner, th))
+            scroll.setHasVerticalScroller_(full > RESULT_MAX_H)
+            scroll.setAutohidesScrollers_(True)
+            scroll.setDrawsBackground_(False)
+            scroll.setBorderType_(0)  # NSNoBorder
+            doc = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, inner - 14, full))
+            doc.addSubview_(text)
+            scroll.setDocumentView_(doc)
+            out.append((scroll, 0))
+        elif r.state == "loading":
+            for share in look.SKELETON_SUGGESTED:  # skeleton lines, the answer's shape
+                out.append((_skeleton(t, inner * share), look.SKELETON_GAP + 4))
+        return out
+
+    def _footer(self, view: bm.ShotBarView, width: float) -> Any:
+        """The notice's buttons or the result's actions on the left; the status on the
+        right."""
+        t = self.t
+        row = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, width, FOOT_H))
+        actions: tuple[bm.ShotButton, ...] = ()
+        if view.notice is not None:
+            actions = view.notice.buttons
+        elif view.result is not None and view.result.text is not None:
+            actions = view.result.actions
+        x = 0.0
+        for b in actions:
+            btn = self._button(b)
+            btn.setFrameOrigin_(NSMakePoint(x, (FOOT_H - btn.frame().size.height) / 2))
+            row.addSubview_(btn)
+            x += btn.frame().size.width + 6
+        if view.banner:
+            room = width - x - 8
+            ink = t["warn_text"] if view.warn else t["accent"]
+            status = _label(view.banner, color(ink), max(40.0, room), lines=1, size=12.5)
+            status.setAlignment_(2)  # right
+            sh = status.frame().size.height
+            status.setFrame_(NSMakeRect(width - max(40.0, room), (FOOT_H - sh) / 2,
+                                        max(40.0, room), sh))
+            status.setToolTip_(view.banner)
+            status.setAccessibilityIdentifier_("shot:status")
+            row.addSubview_(status)
         return row
 
     def show_bar(self, view: bm.ShotBarView, region: Rect) -> None:
@@ -441,80 +585,109 @@ class MacShot:
         if key != self._bar_key:
             self._bar_key = key
             self._target.reset()
-            self._build(view)
-        w, h = self._bar.frame().size.width, self._bar.frame().size.height
-        x, y = geo.bar_position(region, (round(w), round(h)), monitors())
-        place(self._bar, Rect(x, y, round(w), round(h)))
-        self._bar.orderFrontRegardless()
+            self._bar_h = self._build(view)
+        h = self._bar_h
+        x, y = geo.bar_position(region, (round(BAR_W), h), monitors())
+        # One frame change, content already in place: the card does not flicker; on the
+        # same side its top-left stays put and it only grows down.
+        place(self._bar, Rect(x, y, round(BAR_W), h))
+        self._bar.invalidateShadow()
+        self._show_frame(region)
+        if not self._bar.isVisible():
+            self._bar.orderFrontRegardless()
 
-    def _build(self, view: bm.ShotBarView) -> None:
+    def _build(self, view: bm.ShotBarView) -> int:
         t = self.t
-        inner = BAR_W - 2 * PAD
+        inner = BAR_W - 2 * CARD_PAD
         card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, BAR_W, 10))
         card.fill, card.border, card.radius = color(t["surface"]), color(t["hairline"]), 12.0
-        y = PAD + 4
+        # the header: logo, "Glance Shot", the size; Copy image, Save, Esc Close
+        y = 14.0
         mark = _mark_view(20.0)
-        mark.setFrameOrigin_(NSMakePoint(PAD + 4, y + 4))
+        mark.setFrameOrigin_(NSMakePoint(CARD_PAD, y + 6))
         card.addSubview_(mark)
-        title = _label(bm.TITLE, color(t["text"]), 200, bold=True, lines=1, size=14.0)
-        title.setFrameOrigin_(NSMakePoint(PAD + 32, y))
+        title = _label(bm.TITLE, color(t["text"]), 160, bold=True, lines=1, size=14.0)
+        title.setFrameOrigin_(NSMakePoint(CARD_PAD + 28, y))
         card.addSubview_(title)
-        size = _label(view.size, color(t["muted"]), 200, lines=1, size=12.0)
-        size.setFrameOrigin_(NSMakePoint(PAD + 32, y + 18))
+        size = _label(view.size, color(t["muted"]), 160, lines=1, size=12.0)
+        size.setFrameOrigin_(NSMakePoint(CARD_PAD + 28, y + 18))
         card.addSubview_(size)
         esc = _keycap(look.ESC_KEY, t)
         close = _Button.buttonWithTitle_target_action_(look.CLOSE, self._target, "fire:")
         close.setTag_(self._target.add(lambda: self._act("close")))
         close.setBordered_(False)
+        close.setRefusesFirstResponder_(True)
         close.setAttributedTitle_(_attr(look.CLOSE, color(t["muted"]), size=12.0))
         close.sizeToFit()
         close.setAccessibilityIdentifier_("shot:close")
-        cx = BAR_W - PAD - 4 - close.frame().size.width
-        close.setFrameOrigin_(NSMakePoint(cx, y + 6))
-        esc.setFrameOrigin_(NSMakePoint(cx - esc.frame().size.width - 6, y + 7))
+        mid = y + HEADER_H / 2
+        cx = BAR_W - CARD_PAD - close.frame().size.width
+        close.setFrameOrigin_(NSMakePoint(cx, mid - close.frame().size.height / 2))
+        ex = cx - esc.frame().size.width - 5
+        esc.setFrameOrigin_(NSMakePoint(ex, mid - esc.frame().size.height / 2))
         card.addSubview_(esc)
         card.addSubview_(close)
-        y += 44
-        rows: list[Any] = [self._row([self._button(b) for b in view.buttons
-                                      if b.key != "close"])]
-        if view.notice is not None:
-            rows.append(self._box(t["warn_bg"], t["warn_border"], inner, [
-                _label(view.notice.text, color(t["warn_text"]), inner - 20),
-                self._row([self._button(b) for b in view.notice.buttons])]))
-        if view.banner:
-            fill, border, ink = ((t["warn_bg"], t["warn_border"], t["warn_text"]) if view.warn
-                                 else (t["highlight"], t["card_border"], t["text"]))
-            rows.append(self._box(fill, border, inner,
-                                  [_label(view.banner, color(ink), inner - 20)]))
-        r = view.result
-        if r is not None:
-            head = _label(r.title + (f"  ·  {r.note}" if r.note else ""), color(t["muted"]),
-                          inner, lines=1, size=12.0)
-            rows.append(head)
-            if r.text is not None:
-                text = _label(r.text, color(t["text"]), inner - 24, size=13.5)
-                th = min(240.0, text.frame().size.height)
-                scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, inner - 4, th + 4))
-                scroll.setHasVerticalScroller_(text.frame().size.height > 240)
-                scroll.setDrawsBackground_(False)
-                doc = _Flipped.alloc().initWithFrame_(
-                    NSMakeRect(0, 0, inner - 24, text.frame().size.height))
-                doc.addSubview_(text)
-                scroll.setDocumentView_(doc)
-                rows.append(self._box(t["card"], t["card_border"], inner, [scroll]))
-                if r.actions:
-                    rows.append(self._row([self._button(b) for b in r.actions]))
-            elif r.state == "loading":
-                rows.append(_label("…", color(t["muted"]), inner, size=12.0))
-        for v in rows:
-            v.setFrameOrigin_(NSMakePoint(PAD + 4, y))
-            card.addSubview_(v)
-            y += v.frame().size.height + 10
-        card.setFrameSize_((BAR_W, y + PAD - 4))
+        x = ex - 12
+        for b in reversed(view.tools):
+            tool = self._tool(b)
+            x -= tool.frame().size.width
+            tool.setFrameOrigin_(NSMakePoint(x, mid - tool.frame().size.height / 2))
+            card.addSubview_(tool)
+            x -= 8
+        y += HEADER_H + 12
+        tabs = self._tabs(view, inner)
+        tabs.setFrameOrigin_(NSMakePoint(CARD_PAD, y))
+        card.addSubview_(tabs)
+        y += TAB_ROW_H + 12
+        body = self._body(view, inner)
+        body.setFrameOrigin_(NSMakePoint(CARD_PAD, y))
+        card.addSubview_(body)
+        y += body.frame().size.height + 12
+        foot = self._footer(view, inner)
+        foot.setFrameOrigin_(NSMakePoint(CARD_PAD, y))
+        card.addSubview_(foot)
+        y += FOOT_H + CARD_PAD - 2
+        card.setFrameSize_((BAR_W, y))
         self._bar.setContentView_(card)
-        self._bar.setContentSize_((BAR_W, y + PAD - 4))
+        return round(y)
+
+    def ask_point(self) -> tuple[int, int] | None:
+        """Where Ask…'s one-line entry goes: over the card's body (top-left space)."""
+        if not self._bar.isVisible():
+            return None
+        x, y, _w, _h = frame_of(self._bar)
+        return x + 16, y + 104
+
+    # ------------------------------------------------------------------ the region outline
+
+    def _show_frame(self, region: Rect) -> None:
+        """A 2px accent ring just outside the region while its card is up; clicks go
+        through it."""
+        p = FRAME_PAD
+        r = Rect(region.x - p, region.y - p, region.w + 2 * p, region.h + 2 * p)
+        if self._frame is None:
+            self._frame = make_panel(click_through=True)
+            self._frame.setHasShadow_(False)
+        if self._frame_rect != r or self._frame_ink != self.t["accent_fill"]:
+            self._frame_rect, self._frame_ink = r, self.t["accent_fill"]
+            ring = _Outline.alloc().initWithFrame_(NSMakeRect(0, 0, r.w, r.h))
+            ring.ink = color(self.t["accent_fill"])
+            self._frame.setContentView_(ring)
+            place(self._frame, r)
+        if not self._frame.isVisible():
+            self._frame.orderFrontRegardless()
+
+    def _hide_frame(self) -> None:
+        if self._frame is not None:
+            self._frame.orderOut_(None)
+        self._frame_rect = None
+
+    def frame_geometry(self) -> tuple[int, int, int, int] | None:
+        f = self._frame
+        return frame_of(f) if f is not None and f.isVisible() else None
 
     def hide_bar(self) -> None:
+        self._hide_frame()
         self._bar.orderOut_(None)
         self._bar_key = None
         self._region = None

@@ -35,6 +35,7 @@ from glance.ui import look
 from glance.ui import selection_bar as sb
 from glance.ui.chip_model import ChipView
 from glance.ui.icon_toolbar import CLOSE_MS as MENU_CLOSE_MS
+from glance.ui.icon_toolbar import HOVER_OPENS as MENU_HOVER_OPENS
 from glance.ui.icon_toolbar import OPEN_MS as MENU_OPEN_MS
 from glance.ui.icon_toolbar import IconToolbar
 from glance.ui.panel_model import (
@@ -1285,7 +1286,8 @@ class GtkOverlay:
         else:
             self._in_menu = True
         self._cancel_source("_menu_close_src")
-        if where == "icon" and self._menu_view is None and self._menu_open_src is None:
+        if (MENU_HOVER_OPENS and where == "icon" and self._menu_view is None
+                and self._menu_open_src is None):
             self._menu_open_src = GLib.timeout_add(MENU_OPEN_MS, self._menu_open_due)
         return False
 

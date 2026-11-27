@@ -304,10 +304,16 @@ def main() -> int:
     wx, wy, ww, wh = out["icon_window"]
     click(wx + ww - 2, wy + wh - 2)  # inside its window, outside the circle: goes through
     out["icon_corner_click_holder"] = holder_clicks()
-    # the toolbar: the pointer resting on the icon opens it, a click on an item runs it
+    # the toolbar: the pointer resting on the icon opens nothing (right-click only),
+    # a right-click opens it and a click on an item runs it
     xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
     d.sync()
     pump(0.6)
+    out["hover_items"] = overlay.toolbar_items()
+    xtest.fake_input(d, X.ButtonPress, 3)
+    xtest.fake_input(d, X.ButtonRelease, 3)
+    d.sync()
+    pump(0.3)
     out["menu_items"] = overlay.toolbar_items()
     out["menu_geometry"] = overlay.toolbar_geometry()
     out["caret_bottom"] = ANCHOR.caret.y + ANCHOR.caret.h
@@ -390,6 +396,8 @@ def main() -> int:
             pump(0.3)
             ix, iy, iw, ih = overlay.status_geometry()
             xtest.fake_input(d, X.MotionNotify, x=ix + iw // 2, y=iy + ih // 2)
+            xtest.fake_input(d, X.ButtonPress, 3)
+            xtest.fake_input(d, X.ButtonRelease, 3)
             d.sync()
             pump(0.7)
             grab(f"v3-{name}-{theme}", [field(), overlay.toolbar_geometry()])

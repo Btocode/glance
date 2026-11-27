@@ -29,6 +29,7 @@ from glance.ui.theme import FONT, MONO
 CAPTURE_TIMEOUT_MS = 10_000
 SHOT_LOOK = {**LOOK, "font": FONT, "mono": MONO}
 MAX_PNG_B64 = 96 * 1024 * 1024  # an 8K screen as PNG is far below this
+ASK_DX, ASK_DY = 16, 104  # Ask…'s entry: from the card's top-left to over its body
 
 
 def _windows(raw: Any) -> tuple[WindowInfo, ...]:
@@ -56,6 +57,7 @@ class ShellShot:
         self._tokens = tokens
         self._act = on_action
         self._on_done: Callable[[PickResult | None], None] | None = None
+        self._card: tuple[int, ...] | None = None  # the card on screen: x, y, w, h
 
     # ------------------------------------------------------------------ the picker
 
@@ -129,13 +131,29 @@ class ShellShot:
         payload = {"view": dataclasses.asdict(view),
                    "region": [region.x, region.y, region.w, region.h],
                    "tokens": self._tokens(), "look": SHOT_LOOK,
-                   "words": {"title": bm.TITLE, "esc": look.ESC_KEY, "close": look.CLOSE}}
+                   "words": {"title": bm.TITLE, "esc": look.ESC_KEY, "close": look.CLOSE,
+                             "hint": bm.HINT, "hint_sub": bm.HINT_SUB}}
         try:
-            self._bus.call("ShotBar", payload)
+            answer = self._bus.call("ShotBar", payload)
         except ShellUnavailable:
+            return
+        r = answer.get("rect") if isinstance(answer, dict) else None
+        try:
+            self._card = tuple(int(v) for v in r) if isinstance(r, list) and len(r) == 4 \
+                else self._card
+        except (TypeError, ValueError):
             pass
 
+    def ask_point(self) -> tuple[int, int] | None:
+        """Where Ask…'s one-line entry goes: over the card's body (the extension reports
+        where it put the card)."""
+        if self._card is None:
+            return None
+        x, y = self._card[0], self._card[1]
+        return x + ASK_DX, y + ASK_DY
+
     def hide_bar(self) -> None:
+        self._card = None
         try:
             self._bus.call("ShotBar", {"hide": True})
         except ShellUnavailable:

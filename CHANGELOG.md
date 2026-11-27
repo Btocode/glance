@@ -9,6 +9,25 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
+### Changed
+- The check is the AI's (`[general] checker = "ai"`, the new default): with an AI connected
+  the strip shows the loader until the fast model answers, and the local checker's findings
+  show only when no AI answers. `checker = "local"` (Settings ▸ General ▸ Checked by) keeps
+  the old local-first behaviour.
+- Glance Shot is one card beside the captured region, which stays outlined: Copy image and
+  Save in its header, then Text · Explain · Translate · Ask… as tabs, and the result in the
+  same card. Nothing closes and reopens elsewhere; going back to a tab shows its result
+  again without asking again. Explain without a vision AI explains the text read locally.
+- Selection actions' answer (Explain, Translate…) opens under the selected line instead of
+  over it, and stays in place for follow-ups.
+- The status icon's toolbar opens on right-click only, not on hover.
+
+### Fixed
+- A dark band around Glance's floating windows on X11: their shadow was larger than the room
+  left for it and was cut off at the window's edge.
+
 ## [0.4.0] - 2026-11-27
 
 The first tagged release.
@@ -110,7 +129,8 @@ The first public version, for Linux on X11.
   systemd user unit.
 - MIT licence, contributing guide, code of conduct and security policy.
 
-[Unreleased]: https://github.com/Btocode/glance/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Btocode/glance/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Btocode/glance/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Btocode/glance/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Btocode/glance/commit/597c07d
 [0.2.0]: https://github.com/Btocode/glance/commit/68f756f

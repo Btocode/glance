@@ -42,7 +42,7 @@ class FakeBus:
             if self.png is None:
                 return {"ok": False}
             return {"ok": True, "png": base64.b64encode(self.png).decode()}
-        return {"ok": True}
+        return getattr(self, "answers", {}).get(method, {"ok": True})
 
 
 def test_shell_shot_picks_captures_and_reports():
@@ -93,8 +93,14 @@ def test_shell_shot_bar_clicks_and_clipboard():
     assert acts == ["save"]
     assert s.copy_image(b"PNG") is True
     assert bus.calls[-1] == ("ShotClipboard", {"png": "UE5H"})
+    assert payload["words"]["hint_sub"] == bm.HINT_SUB
+    assert s.ask_point() is None  # the extension did not say where the card is
+    bus.answers = {"ShotBar": {"ok": True, "rect": [600, 40, 460, 300]}}
+    s.show_bar(view, Rect(1, 2, 3, 4))
+    assert s.ask_point() == (616, 144)  # over the card's body
     s.hide_bar()
     assert bus.calls[-1] == ("ShotBar", {"hide": True})
+    assert s.ask_point() is None
 
 
 def test_bus_names_and_extension_caller_check():
