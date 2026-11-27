@@ -1,5 +1,6 @@
 """`glance` command line.
 
+    glance start                start Glance again (after Quit in the tray)
     glance status [--json]      what glanced is doing (never any text)
     glance pause [DURATION]     30m, 2h, 45s; a bare number is minutes; none: until resumed
     glance resume
@@ -459,6 +460,7 @@ def _main(argv: list[str] | None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("wrapper", help="claude zsh wrapper for Ctrl+G")
     w.add_argument("action", choices=["install", "uninstall", "status"])
+    sub.add_parser("start", help="start Glance again (after Quit in the tray)")
     st = sub.add_parser("status", help="what glanced is doing")
     st.add_argument("--json", action="store_true", help="print one JSON object")
     pa = sub.add_parser("pause", help="stop checking until resumed or for DURATION")
@@ -517,6 +519,10 @@ def _main(argv: list[str] | None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "settings":
         return _settings(args.section)
+    if args.cmd == "start":
+        from glance import service
+
+        return service.main(running=lambda: _request("status", {}) is not None)
     if args.cmd == "features":
         return _features(args.name, args.state)
     if args.cmd in ("status", "pause", "resume"):

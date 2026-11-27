@@ -416,7 +416,7 @@ class Daemon(_Base):
     def run(self, env):
         st = env.ctl("status", {})
         if st is None:
-            return self.result("fail", "glanced is not running", "systemctl --user start glance")
+            return self.result("fail", "glanced is not running", "glance start")
         if st.get("capture_connected") is False:
             return self.result("fail", "the capture helper is not connected",
                                "systemctl --user restart glance")

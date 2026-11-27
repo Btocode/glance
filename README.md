@@ -103,7 +103,7 @@ Uninstall keeps `~/.config/glance/config.toml`. It leaves the accessibility sett
 
 ## Troubleshooting
 
-Start with `glance doctor`. It checks everything and says what to do. `glance doctor --fix` repairs what Glance owns. `glance status` shows what Glance is doing (never your text).
+Start with `glance doctor`. It checks everything and says what to do. `glance doctor --fix` repairs what Glance owns. `glance status` shows what Glance is doing (never your text). After Quit in the tray, `glance start` starts it again (it also starts by itself at login).
 
 | Problem | Fix |
 | --- | --- |

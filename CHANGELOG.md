@@ -10,6 +10,8 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
 ## [Unreleased]
 
 ### Added
+- `glance start` starts Glance again after Quit in the tray (systemd user unit on Linux, the
+  login agent on macOS) and waits until it answers.
 - Glance Shot ▸ Mark: draw on a shot (pen, box, arrow, highlighter, undo) before it is
   copied, saved or sent to the AI.
 - Glance Shot ▸ Text ▸ Exact text (AI): the image read word for word by a vision AI, on

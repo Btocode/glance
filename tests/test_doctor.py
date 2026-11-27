@@ -184,10 +184,10 @@ def test_bad_config_fails_with_key_and_reason(home):
     assert r.status == "fail" and "chip_idle_ms" in r.detail
 
 
-def test_daemon_down_is_fail_with_systemctl_hint(home):
+def test_daemon_down_is_fail_with_start_hint(home):
     r = by_id(run_checks(make_env(home, ctl=lambda t, p: None), CHECKS))["daemon"]
     assert r.status == "fail" and "not running" in r.detail
-    assert "systemctl --user start glance" in r.hint
+    assert r.hint == "glance start"
 
 
 def test_daemon_capture_and_harper_states(home):
