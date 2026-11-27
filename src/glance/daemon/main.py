@@ -51,7 +51,9 @@ HARPER_FAILED = ("Glance: the grammar checker keeps stopping",
 CAPTURE_FAILED = ("Glance cannot read text fields right now",
                   "Its capture helper keeps stopping. Glance retries every 30 seconds.")
 _PROBLEMS = {"conflict": "another program uses it", "system": "it is a system shortcut",
-             "invalid": "not a valid shortcut"}
+             "invalid": "not a valid shortcut",
+             "overlay": "Super plus one key opens GNOME's Activities overview; add Alt, or make "
+                        "it a GNOME custom shortcut that runs `glance shot`"}
 
 
 # ---------------------------------------------------------------------- single instance
@@ -810,7 +812,9 @@ def main(argv: list[str] | None = None) -> int:
         nonlocal hotkey_problems
         if chords != bound_chords:
             return  # the config changed again meanwhile: that rebind wins
-        problems = bind_hotkeys(hotkeys, chords, actions, system)
+        problems = bind_hotkeys(hotkeys, chords, actions, system,
+                                overlay_key="gnome" in os.environ.get(
+                                    "XDG_CURRENT_DESKTOP", "").casefold())
         if problems and problems != hotkey_problems:
             lines = [f"{chords[name]} ({name}): {_PROBLEMS[why]}"
                      for name, why in problems.items()]

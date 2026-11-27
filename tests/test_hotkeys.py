@@ -70,3 +70,13 @@ def test_parse_accels_reads_gsettings_output():
         (frozenset({"ctrl", "shift"}), "q"),
         (frozenset(), "xf86keyboard"),
     }
+
+
+def test_super_plus_one_key_is_refused_where_super_opens_the_overview():
+    port = FakeHotkeys()
+    chords = {"shot": "Super+s", "panel": "Super+Alt+space", "pause": "Ctrl+Super+p"}
+    actions = dict.fromkeys(chords, lambda: None)
+    assert bind_hotkeys(port, chords, actions, overlay_key=True) == {"shot": "overlay"}
+    assert "shot" not in port.grabbed()
+    port2 = FakeHotkeys()
+    assert bind_hotkeys(port2, chords, actions) == {}  # elsewhere it is an ordinary chord

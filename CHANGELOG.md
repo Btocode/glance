@@ -33,6 +33,9 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
   tones). Fix grammar, Rewrite… and Reply… are gone from it (Super+Alt+A still rewrites).
 
 ### Fixed
+- On GNOME, a Super+<one key> shortcut (Super+S) is refused with a clear reason: GNOME opens
+  the Activities overview when Super is let go, over the picker. Use Super+Alt+…, or a GNOME
+  custom shortcut that runs `glance shot`.
 - The selection mark never showed in Chrome, Slack or Discord on X11: the mouse button's
   release went unreported while the app held the pointer (Glance now asks for XInput 2.2
   and checks the button's state itself).

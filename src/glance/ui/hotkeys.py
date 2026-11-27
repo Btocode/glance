@@ -58,12 +58,15 @@ class HotkeyPort(Protocol):
 
 def bind_hotkeys(port: HotkeyPort, chords: Mapping[str, str],
                  actions: Mapping[str, Callable[[], None]],
-                 system: Iterable[Chord] = ()) -> dict[str, str]:
+                 system: Iterable[Chord] = (), overlay_key: bool = False) -> dict[str, str]:
     """Grab every chord in `chords` that has an action; never raises for a bad or taken one.
 
     Earlier grabs of these actions are released first, so this is also the reload path.
     Returns what could not be bound, name -> `invalid` (unparsable chord), `system` (the
-    desktop's own shortcut: left alone) or `conflict` (another program holds the grab).
+    desktop's own shortcut: left alone), `conflict` (another program holds the grab) or
+    `overlay` (`overlay_key`: GNOME opens the Activities overview when Super is let go, unless
+    it saw another key; a grabbed Super+<key> hides that key from it, so the overview opens
+    over whatever the shortcut showed).
     """
     reserved = {(mods, key.casefold()) for mods, key in system}
     for name in port.grabbed():
@@ -78,6 +81,8 @@ def bind_hotkeys(port: HotkeyPort, chords: Mapping[str, str],
             mods, key = parse_chord(chord)
             if (mods, key.casefold()) in reserved:
                 problems[name] = "system"
+            elif overlay_key and mods == frozenset({"super"}):
+                problems[name] = "overlay"
             elif not port.grab(name, chord, action):
                 problems[name] = "conflict"
         except ValueError:

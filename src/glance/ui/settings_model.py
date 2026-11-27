@@ -217,7 +217,9 @@ HOTKEY_LABELS: dict[str, str] = {
 }
 LIVE_PROBLEMS = {"conflict": "Another program already uses it",
                  "system": "It is one of the desktop's own shortcuts",
-                 "invalid": "Not a valid shortcut"}
+                 "invalid": "Not a valid shortcut",
+                 "overlay": "On GNOME, Super plus one key also opens the Activities overview: "
+                            "add Alt (Super+Alt+…)"}
 _MODS_ORDER = ("Ctrl", "Super", "Shift", "Alt")
 _MOD_KEYS = {"shift_l", "shift_r", "control_l", "control_r", "alt_l", "alt_r", "super_l",
              "super_r", "meta_l", "meta_r", "hyper_l", "hyper_r", "iso_level3_shift",
