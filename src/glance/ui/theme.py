@@ -259,6 +259,18 @@ def css(t: dict[str, str]) -> str:
 .glance-tabs button.glance-tab.glance-muted {{ opacity: 0.5; }}
 .glance-shot-body {{ background-color: {t['card']}; border: 1px solid {t['card_border']};
     border-radius: 8px; padding: 12px; }}
+.glance-shot-item.glance-selected {{ background-color: {t['highlight_rgba']}; }}
+.glance-shot-item.glance-selected label {{ color: {t['accent']}; font-weight: 600; }}
+.glance-shot-item.glance-muted {{ opacity: 0.5; }}
+.glance-shot-sep {{ background-color: {t['hairline']}; min-width: 1px; margin: 6px 0; }}
+.glance-shot.glance-shot-open {{ padding: 6px 6px 10px 6px; }}
+.glance-shot-open .glance-shot-body {{ margin: 0 4px; }}
+button.glance-chip {{ background-color: {t['group']}; background-image: none; box-shadow: none;
+    border: 1px solid {t['card_border']}; border-radius: 14px; padding: 3px 12px;
+    color: {t['text']}; font-size: 13px; }}
+button.glance-chip:hover {{ border-color: {t['accent']}; }}
+button.glance-chip.glance-selected {{ background-color: {t['highlight_rgba']};
+    border-color: {t['accent_fill']}; color: {t['accent']}; font-weight: 600; }}
 .glance-shot-body scrolledwindow, .glance-shot-body undershoot,
 .glance-shot-body overshoot {{ background: none; border: none; box-shadow: none; }}
 button.glance-tool {{ background-color: transparent; background-image: none; border: 1px solid

@@ -8,6 +8,7 @@ it draws itself. With --shots it saves shot-picker-<theme>.png, shot-bar-<theme>
 shot-notice-<theme>.png (light and dark) in DIR.
 """
 import argparse
+import dataclasses
 import json
 import sys
 import time
@@ -18,7 +19,7 @@ import gi
 gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GLib, Gtk
-from Xlib import X, display
+from Xlib import XK, X, display
 from Xlib.ext import xtest
 
 from glance.protocol import Rect
@@ -126,7 +127,7 @@ def main() -> int:
 
     keys = Keys()
     acts: list = []
-    shot = GtkShot(keys, acts.append)
+    shot = GtkShot(keys, lambda key, args=None: acts.append(key if args is None else [key, args]))
     results: list = []
 
     def save(name: str, rect: tuple[int, int, int, int] | None = None) -> None:
@@ -196,7 +197,14 @@ def main() -> int:
             bm.ANSWER_ACTIONS, note="Answered by Anthropic"))
         notice = bm.ShotBarView(size, tabs(shown="explain"), tools=tools, notice=bm.ShotNotice(
             bm.notice_text("Anthropic (api.anthropic.com)")))
-        return start, text, loading, explain, notice
+        choose = bm.ShotBarView(size, tabs(shown="translate"), tools=tools, result=bm.ShotResult(
+            bm.TRANSLATE_TO, None, "choose", choices=bm.languages("English")))
+        asking = bm.ShotBarView(size, tabs(shown="ask"), tools=tools, expanded=True, asking=True)
+        copied = bm.ShotBarView(size, tabs(), tools=tools, banner="Image copied to the clipboard")
+        views = [start, text, loading, explain, notice, choose, asking, copied]
+        views = [v if v is asking or v is start or v is copied
+                 else dataclasses.replace(v, expanded=True) for v in views]
+        return tuple(views)
 
     def save_scene(name, pad=24):
         x, y, w, h = shot.bar_geometry()
@@ -228,7 +236,7 @@ def main() -> int:
             "rect": [res.shot.rect.x, res.shot.rect.y, res.shot.rect.w, res.shot.rect.h],
             "png": list(png_size(res.shot.png)), "bytes": len(res.shot.png)}
         out[f"picker_closed_{theme}"] = shot.picker_window is None and not keys.grabs
-        start, text, loading, explain, notice = bar_views()
+        start, text, loading, explain, notice, choose, asking, copied = bar_views()
         shot.show_bar(text, region)
         pump(0.4)
         geo = shot.bar_geometry()
@@ -238,13 +246,50 @@ def main() -> int:
                                      shot.bar_window.is_active()]
         save_scene(f"shot-bar-{theme}")
         tops = []
-        for name, view in (("start", start), ("text", text), ("loading", loading),
-                           ("explain", explain), ("notice", notice)):
+        for name, view in (("start", start), ("copied", copied), ("text", text),
+                           ("loading", loading), ("explain", explain), ("notice", notice),
+                           ("choose", choose), ("asking", asking)):
             shot.show_bar(view, region)
             pump(0.4)
             tops.append(shot.bar_geometry()[:2])
             save_scene(f"shot-{name}-{theme}")
         out[f"card_stays_put_{theme}"] = len(set(tops)) == 1
+        # Ask in the card: typed there (the keyboard is the card's while it is open)
+        acts.clear()
+        for ch in ("h", "i", "Return"):
+            code = d.keysym_to_keycode(XK.string_to_keysym(ch))
+            xtest.fake_input(d, X.KeyPress, code)
+            xtest.fake_input(d, X.KeyRelease, code)
+        d.sync()
+        pump(0.4)
+        out[f"ask_typed_{theme}"] = list(acts)
+        out[f"focus_after_ask_{theme}"] = focused()
+        # Mark: a box dragged on the shot, then Done
+        marked = []
+        shot.hide_bar()
+        shot.annotate(res.shot, marked.append)
+        pump(0.4)
+        mk = shot.marker
+        cx, cy = res.shot.rect.x, res.shot.rect.y
+        for key in ("mark_box",):
+            mk.act(key)
+        xdrag(cx + 40, cy + 40, cx + 300, cy + 140)
+        xrelease()
+        mk.act("mark_arrow")
+        xdrag(cx + 500, cy + 250, cx + 320, cy + 150)
+        xrelease()
+        pump(0.3)
+        mx, my = mk.bar.get_position()
+        mw, mh = mk.bar.get_size()
+        save(f"shot-mark-{theme}", (min(cx, mx) - 24, min(cy, my) - 24,
+                                    max(cx + res.shot.rect.w, mx + mw) - min(cx, mx) + 48,
+                                    max(cy + res.shot.rect.h, my + mh) - min(cy, my) + 48))
+        out[f"mark_strokes_{theme}"] = [t for t, _p in mk.strokes]
+        mk.finish()
+        pump(0.2)
+        out[f"marked_{theme}"] = bool(marked and marked[0] and marked[0] != res.shot.png)
+        shot.show_bar(notice, region)
+        pump(0.3)
         acts.clear()
         out[f"clicked_{theme}"] = [click_button("notice_send"), click_button("copy")]
         out[f"acts_{theme}"] = list(acts)

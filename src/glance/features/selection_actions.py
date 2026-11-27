@@ -392,10 +392,10 @@ class SelectionActions:
             self._overlay.copy_to_clipboard(text)
         elif key == "rewrite":
             self._sa.open_text(active, text, point)
-        elif key == "translate_to":
-            self._overlay.ask_text(TRANSLATE_PROMPT,
-                                   lambda lang, _back: self._translate_to(active, text, point,
-                                                                          lang))
+        elif key == "translate_to":  # the languages to pick from, in the answer panel
+            res = self._open_result(active, text, point, "choose", TRANSLATE_TITLE)
+            res.state = "ready"
+            self._render()
         elif key == "reply":
             self._overlay.ask_text(REPLY_PROMPT, lambda what, _back: self._start(
                 active, text, point, "reply", what.strip() or None))
@@ -578,8 +578,16 @@ class SelectionActions:
         self._render()
 
     def result_action(self, key: str) -> None:
-        """One of the result panel's extra buttons (text from a shot): it acts on the text."""
+        """One of the result panel's extra buttons (text from a shot: it acts on the text;
+        "Translate to…": a language)."""
         r = self._res
+        if r is not None and r.action == "choose":
+            if key.startswith("lang:"):
+                self._translate_to(r.window, r.text, r.xy, key[5:])
+            elif key == "lang_other":
+                self._overlay.ask_text(TRANSLATE_PROMPT, lambda lang, _back: self._res is r
+                                       and self._translate_to(r.window, r.text, r.xy, lang))
+            return
         if r is None or not r.from_shot or key not in dict(self._result_actions(r)):
             log_event("selection_action_unknown")
             return
@@ -672,16 +680,27 @@ class SelectionActions:
             return
         can_replace = (r.state == "ready" and r.applicable and bool(r.answer)
                        and self._verified_edit(r) is not None)
+        choices: tuple[tuple[str, str], ...] = ()
+        if r.action == "choose":
+            from glance.languages import choices as languages
+
+            current = self._cfg().selection.translate_to
+            choices = (*((f"lang:{n}", n) for n in languages(current)),
+                       ("lang_other", OTHER_LANGUAGE))
         view = PanelView(mode="result", result=ResultView(
             title=r.title, source="" if r.action == "text" else sb.excerpt(r.text),
             text=r.answer, state=r.state, note=r.note, can_replace=can_replace,
-            can_follow=self._supervisor is not None and not r.private,
+            can_follow=self._supervisor is not None and not r.private and not choices,
+            choices=choices, chosen=f"lang:{self._cfg().selection.translate_to}"
+            if choices else None,
             actions=self._result_actions(r),
             origin=None if not r.from_shot else "shot_text" if r.action == "text" else "shot"))
         self._overlay.show_panel(view, *r.xy)
 
 
 TRANSLATE_PROMPT = "Translate to which language?"
+TRANSLATE_TITLE = "Translate to"
+OTHER_LANGUAGE = "Other…"
 REPLY_PROMPT = "What should the reply say? (optional)"
 FOLLOW_PROMPT = "Ask a follow-up"
 FIX_TITLE = "Fix grammar"

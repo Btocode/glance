@@ -28,6 +28,15 @@ ASK_IMAGE = (
 
 EXPLAIN_IMAGE_USER = "Explain what this screenshot shows."
 
+EXACT_TEXT_IMAGE = (
+    "You transcribe screenshots. Output every piece of text visible in the image exactly as "
+    "it appears: the same words, spelling (mistakes included), capitalisation, punctuation, "
+    "numbers and symbols, in reading order (top to bottom, left to right), one line of the "
+    "image per line, keeping the indentation of code and lists. Do not translate, correct, "
+    "summarise, describe or comment; output nothing but the text. If there is no text, output "
+    "nothing.")
+EXACT_TEXT_USER = "Transcribe the text in this screenshot exactly."
+
 
 def translate_system(target: str) -> str:
     return (

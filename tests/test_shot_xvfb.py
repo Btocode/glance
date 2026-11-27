@@ -70,6 +70,15 @@ def test_bar_under_the_region_without_focus(probe, theme):
     assert probe[f"focus_after_bar_{theme}"] is True
 
 
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_card_steps_ask_in_place_and_mark(probe, theme):
+    assert probe[f"card_stays_put_{theme}"]  # the toolbar never moves while the card grows
+    assert probe[f"ask_typed_{theme}"] == [["ask_submit", {"text": "hi"}]]
+    assert probe[f"focus_after_ask_{theme}"] is True  # the app kept its focus
+    assert probe[f"mark_strokes_{theme}"] == ["box", "arrow"]
+    assert probe[f"marked_{theme}"] is True
+
+
 def test_keys_and_clipboard(probe):
     assert probe["escape_cancels"] is True
     assert probe["enter_full"] == [1280, 800]

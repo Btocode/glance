@@ -29,7 +29,7 @@ def test_bar_buttons_order_and_tips():
     row = bm.buttons(vision=False, ai=True, images="ask", ocr=True, private=False)
     assert [b.label for b in row] == ["Text", "Explain", "Translate", "Ask…"]
     assert not any(b.selected for b in row)
-    assert [b.label for b in bm.tools()] == ["Copy image", "Save"]
+    assert [b.label for b in bm.tools()] == ["Mark", "Copy", "Save"]
     tips = {b.key: b.tip for b in row if b.muted}
     assert tips == {"ask": bm.NEEDS_VISION}  # Explain falls back to the text read locally
     row = bm.buttons(vision=False, ai=False, images="ask", ocr=True, private=False)
@@ -189,7 +189,8 @@ def test_trigger_picks_and_shows_the_bar(tmp_path):
     r.shoot()
     v = r.ui.view
     assert v.size == "400 × 300" and v.buttons[0].label == "Text"
-    assert v.hint == bm.HINT and v.result is None and v.tools[0].key == "copy"
+    assert v.result is None and not v.expanded  # the slim toolbar only
+    assert [t.key for t in v.tools] == ["mark", "copy", "save"]
     assert r.ui.bars[-1][1] == Rect(100, 100, 400, 300)
     assert ESCAPE in r.hotkeys.grabs
     r.hotkeys.press(ESCAPE)
@@ -232,14 +233,21 @@ def test_extract_text_shows_the_text_card(tmp_path):
     r.c.action("extract")
     res = r.ui.view.result
     assert res.title == "Text" and res.text == "Hello teh world" and res.state == "ready"
-    assert [a.key for a in res.actions] == ["text_copy", "text_fix"]
+    assert [a.key for a in res.actions] == ["text_copy", "text_exact", "text_fix"]
+    assert r.ui.view.expanded
     assert [b.key for b in r.ui.view.buttons if b.selected] == ["extract"]
     r.c.action("text_fix")
     assert r.ui.view.result.text == "Hello the world"
     r.c.action("text_copy")
     assert r.overlay.copied == ["Hello the world"]
-    r.c.action("translate")  # the tab: the same card, the text already read
+    r.c.action("translate")  # the tab: the languages first, nothing sent yet
+    res = r.ui.view.result
+    assert res.state == "choose" and r.sup.texts == []
+    assert [c.label for c in res.choices][:3] == ["English", "Bangla", "Hindi"]
+    assert [c.key for c in res.choices if c.selected] == ["lang:English"]
+    r.c.action("lang:English")  # the same card, the text already read
     assert r.ui.view.result.title == "Translation" and r.ui.view.result.text == "Hola mundo"
+    assert r.ui.view.result.note == "Into English"
     assert [b.key for b in r.ui.view.buttons if b.selected] == ["translate"]
     assert "English" in r.sup.texts[0][0] and "Hello the world" in r.sup.texts[0][1]
     assert r.sup.images == []  # text actions never send the image
@@ -394,3 +402,86 @@ def test_refresh_draws_the_bar_again(tmp_path):
     n = len(r.ui.bars)
     r.c.refresh()
     assert len(r.ui.bars) == n + 1
+
+
+# ------------------------------------------------------------------ the toolbar's newer paths
+
+
+def test_other_language_and_change_language(tmp_path):
+    r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")))
+    r.shoot()
+    r.c.action("translate")
+    r.c.action("lang_other")
+    prompt, done = r.overlay.asked
+    assert prompt == bm.OTHER_PROMPT and r.sup.texts == []
+    done("  Swahili ", True)
+    assert "Swahili" in r.sup.texts[0][0] and r.ui.view.result.note == "Into Swahili"
+    r.c.action("translate_lang")  # back to the choices: the last one first and selected
+    res = r.ui.view.result
+    assert res.state == "choose" and res.choices[0].label == "Swahili"
+    assert [c.label for c in res.choices if c.selected] == ["Swahili"]
+
+
+def test_inline_ask_in_the_card(tmp_path):
+    r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")))
+    r.ui.inline_ask = True
+    r.shoot()
+    r.c.action("ask")
+    v = r.ui.view
+    assert v.asking and v.expanded and r.overlay.asked is None  # no window of its own
+    assert [b.key for b in v.buttons if b.selected] == ["ask"]
+    r.c.action("ask_cancel")
+    assert not r.ui.view.asking and not r.ui.view.expanded
+    r.c.action("ask")
+    r.c.action("ask_submit", {"text": "what is the error?"})
+    assert "what is the error?" in r.sup.images[0][3] and r.ui.view.result.title == "Answer"
+
+
+def test_exact_text_reads_the_image_with_the_ai(tmp_path):
+    r = Rig(tmp_path, sup=FakeSup(out="Build failed\n  client.push(release)\n"))
+    png = r.shoot()
+    r.c.action("extract")
+    r.c.action("text_exact")
+    assert r.ui.view.notice is not None and r.sup.images == []  # the notice first
+    r.c.action("notice_send")
+    res = r.ui.view.result
+    assert r.sup.images[0][1] == png and res.title == "Text"
+    assert res.text == "Build failed\n  client.push(release)"  # indentation kept
+    assert res.note == bm.EXACT_NOTE.format(backend="Anthropic (api.anthropic.com)")
+    assert [b.key for b in r.ui.view.buttons if b.selected] == ["extract"]
+    r.c.action("translate")
+    r.c.action("lang:Spanish")
+    assert "client.push(release)" in r.sup.texts[0][1]  # the exact text is translated
+
+
+def test_exact_text_is_muted_without_a_vision_ai(tmp_path):
+    r = Rig(tmp_path, sup=FakeSup(vision=False))
+    r.shoot()
+    r.c.action("extract")
+    exact = next(b for b in r.ui.view.result.actions if b.key == "text_exact")
+    assert exact.muted and exact.tip == bm.NEEDS_VISION
+    r.c.action("text_exact")
+    assert r.ui.view.banner == bm.NEEDS_VISION and r.sup.images == []
+
+
+def test_mark_replaces_the_image_for_copy_and_the_ai(tmp_path):
+    r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")))
+    r.shoot()
+    r.c.action("mark")
+    assert r.ui.view.banner == bm.MARK_UNAVAILABLE  # this desktop's renderer cannot
+    marked = encode_png(b"\xff" * 12, 2, 2)
+    calls = []
+    r.ui.annotate = lambda shot, done: calls.append(done)
+    r.c.action("explain")
+    assert len(r.sup.images) == 1
+    r.c.action("mark")
+    assert [t.key for t in r.ui.view.tools if t.selected] == ["mark"]
+    calls[0](marked)
+    assert r.ui.view.banner.startswith("Marked up")
+    r.c.action("copy")
+    assert r.ui.copied == [marked]
+    r.c.action("explain")  # the old answer was about the old image: asked again
+    assert len(r.sup.images) == 2 and r.sup.images[1][1] == marked
+    r.c.action("mark")
+    calls[1](None)  # cancelled: nothing changes
+    assert r.ui.copied == [marked] and not any(t.selected for t in r.ui.view.tools)

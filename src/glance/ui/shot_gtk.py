@@ -45,6 +45,7 @@ from glance.ui.overlay_gtk import (
     _popup,
     _raise,
     _rounded,
+    glyph_path,
 )
 from glance.ui.ports import WindowInfo
 from glance.ui.theme import FONT, MONO, install, rgb, rgba
@@ -174,6 +175,10 @@ class GtkShot:
         # the captured region, outlined while its card is up (clicks go through it)
         self._frame = _popup(Gdk.WindowTypeHint.TOOLTIP)
         self._frame.connect("draw", self._draw_frame)
+        self._entry: Gtk.Entry | None = None
+        self._keys_taken = False
+        self._marker: Any = None  # the Mark window while the shot is being marked up
+        self._placed_for: Rect | None = None
 
     # ------------------------------------------------------------------ the picker
 
@@ -458,11 +463,15 @@ class GtkShot:
         return True
 
     def hide_bar(self) -> None:
+        self._release_keys()
+        if self._marker is not None:
+            self._marker.cancel()
         self._frame.hide()
         self._bar.hide()
         self._bar_view = None
         self._region = None
         self._bar_xy = None
+        self._placed_for = None
 
     @property
     def bar_window(self) -> Gtk.Window:
@@ -478,9 +487,20 @@ class GtkShot:
             return
         w, h = self._bar.get_size()
         sh = self._shadow
-        x, y = geo.bar_position(self._region, (w - sh[0] - sh[2], h - sh[1] - sh[3]),
-                                self._monitors())
-        xy = (x - sh[0], y - sh[1])
+        if self._bar_xy is not None and self._placed_for == self._region:
+            # Placed once for this shot: the toolbar stays exactly there while the card
+            # grows and shrinks under it (moved up only if it would leave the screen).
+            x, y = self._bar_xy
+            mons = self._monitors()
+            mon = geo.monitor_at(x + sh[0], y + sh[1], mons)
+            if mon is not None and y + h > mon.y + mon.h:
+                y = max(mon.y, mon.y + mon.h - h)
+            xy = (x, y)
+        else:
+            x, y = geo.bar_position(self._region, (w - sh[0] - sh[2], h - sh[1] - sh[3]),
+                                    self._monitors())
+            xy = (x - sh[0], y - sh[1])
+            self._placed_for = self._region
         if xy != self._bar_xy:
             self._bar_xy = xy
             self._bar.move(*xy)
@@ -514,78 +534,84 @@ class GtkShot:
         button.connect("clicked", lambda _b: self._act(b.key))
         return button
 
-    def _header(self, view: bm.ShotBarView) -> Gtk.Widget:
-        header = Gtk.Box(spacing=10)
-        header.pack_start(_mark(20), False, False, 0)
-        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        titles.set_valign(Gtk.Align.CENTER)
-        titles.pack_start(_label(bm.TITLE, "glance-title", wrap=False), False, False, 0)
-        titles.pack_start(_label(view.size, "glance-meta", wrap=False), False, False, 0)
-        header.pack_start(titles, True, True, 0)
-        close = _classes(_pointer(Gtk.Button(can_focus=False, focus_on_click=False)),
-                         "glance-close")
-        inner = Gtk.Box(spacing=6)
-        inner.pack_start(_kbd(look.ESC_KEY), False, False, 0)
-        inner.pack_start(_label(look.CLOSE, wrap=False), False, False, 0)
-        close.add(inner)
-        close.set_name("shot:close")
-        close.set_valign(Gtk.Align.CENTER)
-        close.connect("clicked", lambda _b: self._act("close"))
-        header.pack_end(close, False, False, 0)
-        for b in reversed(view.tools):  # Copy image, Save: they act on the image itself
-            tool = self._button(b, "glance-tool")
-            tool.set_valign(Gtk.Align.CENTER)
-            header.pack_end(tool, False, False, 0)
-        return header
+    def _glyph(self, name: str, px: int = 14, token: str = "accent") -> Gtk.Widget:
+        area = Gtk.DrawingArea()
+        area.set_size_request(px, px)
+        area.set_valign(Gtk.Align.CENTER)
 
-    def _tabs(self, view: bm.ShotBarView) -> Gtk.Widget:
-        row = _classes(Gtk.Box(spacing=2, homogeneous=True), "glance-tabs")
+        def draw(_w: Gtk.Widget, cr: Any) -> bool:
+            glyph_path(cr, name, 0.5, 0.5, px - 1)
+            cr.set_source_rgb(*rgb(self._theme.tokens, token))
+            cr.set_line_width(1.5)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            cr.stroke()
+            return True
+
+        area.connect("draw", draw)
+        return area
+
+    def _item(self, b: bm.ShotButton, label: bool = True) -> Gtk.Button:
+        """One toolbar item, as the selection bar draws them: a line glyph and its label."""
+        button = _pointer(Gtk.Button(can_focus=False, focus_on_click=False))
+        _classes(button, "glance-item", "glance-selbtn", "glance-shot-item")
+        if b.selected:
+            _classes(button, "glance-selected")
+        if b.muted:
+            _classes(button, "glance-muted")
+        inner = Gtk.Box(spacing=5)
+        glyph = bm.GLYPHS.get(b.key)
+        if glyph is not None:
+            inner.pack_start(self._glyph(glyph, 13, "muted" if b.muted else "accent"),
+                             False, False, 0)
+        if label:
+            inner.pack_start(_label(b.label, wrap=False), False, False, 0)
+        button.add(inner)
+        button.set_tooltip_text(b.tip or (None if label else b.label))
+        button.set_name(f"shot:{b.key}")
+        button.connect("clicked", lambda _b: self._act(b.key))
+        return button
+
+    def _toolbar(self, view: bm.ShotBarView) -> Gtk.Widget:
+        """The slim bar: the mark, the tabs, │ Mark · Copy · Save │ close. It is the card's
+        top row too, and never moves while the card grows under it."""
+        row = Gtk.Box(spacing=2)
+        lead = _mark(16)
+        lead.set_margin_start(4)
+        lead.set_margin_end(4)
+        lead.set_tooltip_text(f"{bm.TITLE} · {view.size}")
+        row.pack_start(lead, False, False, 0)
         for b in view.buttons:
             if b.key != "close":
-                row.pack_start(self._button(b, "glance-tab"), True, True, 0)
+                row.pack_start(self._item(b), False, False, 0)
+        row.pack_start(_classes(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL),
+                                "glance-shot-sep"), False, False, 4)
+        for b in view.tools:
+            row.pack_start(self._item(b), False, False, 0)
+        row.pack_start(_classes(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL),
+                                "glance-shot-sep"), False, False, 4)
+        row.pack_start(self._item(bm.ShotButton("close", f"{look.CLOSE} (Esc)"), label=False),
+                       False, False, 0)
         return row
 
     def _rebuild(self, view: bm.ShotBarView) -> None:
+        self._release_keys()
         old = self._bar.get_child()
         if old is not None:
             self._bar.remove(old)
             old.destroy()
-        card = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12),
-                        "glance-drawer", "glance-shot")
-        card.set_size_request(BAR_W, -1)
-        card.pack_start(self._header(view), False, False, 0)
-        card.pack_start(self._tabs(view), False, False, 0)
-        body = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8),
-                        "glance-shot-body")
-        body.set_size_request(-1, _BODY_MIN_H)
-        body.set_name("shot:body")
-        actions: tuple[bm.ShotButton, ...] = ()
-        if view.notice is not None:
-            _classes(body, "glance-banner")
-            body.pack_start(_label(view.notice.text, chars=52), False, False, 0)
-            actions = view.notice.buttons
-        elif view.result is not None:
-            self._result(body, view.result)
-            if view.result.text is not None:
-                actions = view.result.actions
-        else:
-            body.pack_start(_label(view.hint or bm.HINT, "glance-title"), False, False, 0)
-            body.pack_start(_label(bm.HINT_SUB, "glance-meta", chars=52), False, False, 0)
-        card.pack_start(body, False, False, 0)
-        foot = Gtk.Box(spacing=6)
-        foot.set_size_request(-1, 32)
-        for b in actions:
-            foot.pack_start(self._button(b), False, False, 0)
-        if view.banner:
-            status = _classes(_label(view.banner, "glance-status", wrap=False), "glance-status")
-            if view.warn:
-                _classes(status, "glance-warn")
-            status.set_ellipsize(Pango.EllipsizeMode.END)
-            status.set_valign(Gtk.Align.CENTER)
-            status.set_tooltip_text(view.banner)
-            foot.pack_end(status, True, True, 0)
-            status.set_xalign(1)
-        card.pack_start(foot, False, False, 0)
+        self._entry = None
+        card = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10),
+                        "glance-menu", "glance-shot")
+        card.pack_start(self._toolbar(view), False, False, 0)
+        if view.expanded:
+            _classes(card, "glance-shot-open")
+            card.pack_start(self._body(view), False, False, 0)
+            foot = self._foot(view)
+            if foot is not None:
+                card.pack_start(foot, False, False, 0)
+        elif view.banner:
+            card.pack_start(self._status(view), False, False, 0)
         outer = Gtk.Box()
         outer.set_margin_start(self._shadow[0])
         outer.set_margin_top(self._shadow[1])
@@ -595,6 +621,63 @@ class GtkShot:
         outer.show_all()
         self._bar.add(outer)
         self._bar.resize(1, 1)  # shrink to the new content
+        if view.asking and self._entry is not None:
+            GLib.idle_add(self._take_keys)
+
+    def _status(self, view: bm.ShotBarView) -> Gtk.Widget:
+        status = _classes(_label(view.banner or "", "glance-status", wrap=False),
+                          "glance-status")
+        if view.warn:
+            _classes(status, "glance-warn")
+        status.set_ellipsize(Pango.EllipsizeMode.END)
+        status.set_xalign(0)
+        status.set_margin_start(6)
+        status.set_tooltip_text(view.banner)
+        return status
+
+    def _body(self, view: bm.ShotBarView) -> Gtk.Widget:
+        body = _classes(Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8),
+                        "glance-shot-body")
+        body.set_name("shot:body")
+        if view.notice is not None:
+            _classes(body, "glance-banner")
+            body.pack_start(_label(view.notice.text, chars=52), False, False, 0)
+        elif view.asking:
+            body.pack_start(_label(bm.ASK_PROMPT, "glance-section", wrap=False),
+                            False, False, 0)
+            entry = Gtk.Entry(max_length=500)
+            entry.set_placeholder_text(bm.ASK_PLACEHOLDER)
+            entry.set_name("shot:ask")
+            entry.connect("activate", lambda e: self._submit(e.get_text()))
+            entry.connect("key-press-event", self._entry_key)
+            body.pack_start(entry, False, False, 0)
+            hint = Gtk.Box(spacing=6)
+            hint.pack_start(_kbd(look.RETURN_KEY), False, False, 0)
+            hint.pack_start(_label("ask", "glance-meta", wrap=False), False, False, 0)
+            hint.pack_start(_kbd(look.ESC_KEY), False, False, 6)
+            hint.pack_start(_label("back", "glance-meta", wrap=False), False, False, 0)
+            body.pack_start(hint, False, False, 0)
+            self._entry = entry
+        elif view.result is not None:
+            self._result(body, view.result)
+        return body
+
+    def _foot(self, view: bm.ShotBarView) -> Gtk.Widget | None:
+        actions: tuple[bm.ShotButton, ...] = ()
+        if view.notice is not None:
+            actions = view.notice.buttons
+        elif view.result is not None and view.result.text is not None and not view.asking:
+            actions = view.result.actions
+        if not actions and not view.banner:
+            return None
+        foot = Gtk.Box(spacing=6)
+        for b in actions:
+            foot.pack_start(self._button(b), False, False, 0)
+        if view.banner:
+            status = self._status(view)
+            status.set_xalign(1)
+            foot.pack_end(status, True, True, 0)
+        return foot
 
     def _result(self, box: Gtk.Box, r: bm.ShotResult) -> None:
         head = Gtk.Box(spacing=8)
@@ -610,11 +693,20 @@ class GtkShot:
             note.set_ellipsize(Pango.EllipsizeMode.END)
             head.pack_end(note, False, False, 0)
         box.pack_start(head, False, False, 0)
+        if r.state == "choose":
+            flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=False,
+                               column_spacing=6, row_spacing=6, max_children_per_line=8)
+            for c in r.choices:
+                chip = self._button(c, "glance-chip")
+                flow.add(chip)
+            box.pack_start(flow, False, False, 0)
+            return
         if r.text is not None:
-            text = Gtk.Label(label=r.text, xalign=0, yalign=0, wrap=True, max_width_chars=52,
-                             width_chars=46, selectable=False)
+            text = Gtk.Label(label=r.text, xalign=0, yalign=0, wrap=True, max_width_chars=60,
+                             selectable=False)
             text.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            _classes(text, "glance-result-text")
+            if r.title == "Text":
+                _classes(text, "glance-mono")  # what was read, line for line
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
             scroll.set_propagate_natural_height(True)
@@ -624,16 +716,67 @@ class GtkShot:
         elif r.state == "loading":
             for frac in (1.0, 0.86, 0.6):  # skeleton lines, the answer's shape
                 bar = _classes(Gtk.Box(), "glance-skeleton")
-                bar.set_size_request(int((BAR_W - 60) * frac), 10)
+                bar.set_size_request(int(360 * frac), 10)
                 bar.set_halign(Gtk.Align.START)
                 box.pack_start(bar, False, False, 2)
 
+    # ------------------------------------------------------------------ Mark
+
+    def annotate(self, shot: Shot, done: Callable[[bytes | None], None]) -> None:
+        """Mark up the shot (`Marker`); the card steps aside meanwhile and comes back."""
+        if self._marker is not None:
+            self._marker.cancel()
+        self._release_keys()
+        self._bar.hide()
+        self._frame.hide()
+        self._marker = Marker(self, shot, done)
+
+    @property
+    def marker(self) -> Any:
+        return self._marker
+
+    # ------------------------------------------------------------------ Ask, in the card
+
+    inline_ask = True  # the controller types Ask's question here, not in a window of its own
+
+    def _take_keys(self) -> bool:
+        """The question's entry gets the keyboard while it is open (a grab, as a menu
+        takes one); the app keeps its focus and gets the keyboard back on Enter or Esc."""
+        entry, gdk_window = self._entry, self._bar.get_window()
+        if entry is None or gdk_window is None or self._keys_taken:
+            return False
+        seat = Gdk.Display.get_default().get_default_seat()
+        status = seat.grab(gdk_window, Gdk.SeatCapabilities.KEYBOARD, True, None, None,
+                           None, None)
+        self._keys_taken = status == Gdk.GrabStatus.SUCCESS
+        if not self._keys_taken:
+            log_event("shot_ask_grab_failed", status=int(status))
+        self._bar.set_focus(entry)
+        entry.grab_focus()
+        return False
+
+    def _release_keys(self) -> None:
+        if self._keys_taken:
+            self._keys_taken = False
+            Gdk.Display.get_default().get_default_seat().ungrab()
+
+    def _submit(self, text: str) -> None:
+        self._release_keys()
+        self._act("ask_submit", {"text": text})
+
+    def _entry_key(self, _entry: Gtk.Entry, event: Gdk.EventKey) -> bool:
+        if event.keyval == Gdk.KEY_Escape:
+            self._release_keys()
+            self._act("ask_cancel", {})
+            return True
+        return False
+
     def ask_point(self) -> tuple[int, int] | None:
-        """Where Ask…'s one-line entry goes: over the card's body."""
+        """Where a one-line entry of its own goes ("Other…" language): under the toolbar."""
         if self._bar_xy is None or not self._bar.get_visible():
             return None
         x, y = self._bar_xy
-        return x + self._shadow[0] + 16, y + self._shadow[1] + 104
+        return x + self._shadow[0] + 8, y + self._shadow[1] + 52
 
     def _restyle(self) -> None:
         if self._bar_view is not None:
@@ -659,3 +802,252 @@ class GtkShot:
     def close(self) -> None:
         self.cancel_pick()
         self.hide_bar()
+
+
+# ---------------------------------------------------------------------- Mark (X11)
+
+MARK_TOOLS = (("pen", "Pen", "pen"), ("box", "Box", "box"), ("arrow", "Arrow", "arrow"),
+              ("highlight", "Highlight", "lines"))
+MARK_INK = (0.937, 0.267, 0.267, 1.0)        # red: pen, box, arrow
+MARK_HIGHLIGHT = (0.98, 0.80, 0.08, 0.38)    # a highlighter's yellow, see-through
+MARK_WIDTH, HIGHLIGHT_WIDTH = 3.0, 16.0
+
+
+def draw_marks(cr: Any, strokes: list[tuple[str, list[tuple[float, float]]]],
+               scale: float = 1.0) -> None:
+    """The marks, in logical coordinates of the region times `scale` (the PNG's pixels)."""
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.set_line_join(cairo.LINE_JOIN_ROUND)
+    for tool, pts in strokes:
+        if not pts:
+            continue
+        p = [(x * scale, y * scale) for x, y in pts]
+        if tool == "highlight":
+            cr.set_source_rgba(*MARK_HIGHLIGHT)
+            cr.set_line_width(HIGHLIGHT_WIDTH * scale)
+            cr.set_line_cap(cairo.LINE_CAP_BUTT)
+        else:
+            cr.set_source_rgba(*MARK_INK)
+            cr.set_line_width(MARK_WIDTH * scale)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        (x0, y0), (x1, y1) = p[0], p[-1]
+        if tool == "box":
+            cr.rectangle(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+            cr.stroke()
+        elif tool == "arrow":
+            import math
+
+            cr.move_to(x0, y0)
+            cr.line_to(x1, y1)
+            cr.stroke()
+            angle = math.atan2(y1 - y0, x1 - x0)
+            head = 14 * scale
+            for side in (-0.45, 0.45):
+                cr.move_to(x1, y1)
+                cr.line_to(x1 - head * math.cos(angle + side), y1 - head * math.sin(angle + side))
+            cr.stroke()
+        else:
+            cr.move_to(*p[0])
+            for q in p[1:]:
+                cr.line_to(*q)
+            if len(p) == 1:
+                cr.line_to(p[0][0] + 0.1, p[0][1])
+            cr.stroke()
+
+
+def marked_png(shot: Shot, strokes: list[tuple[str, list[tuple[float, float]]]]) -> bytes:
+    """The shot's PNG with the marks drawn on it, at its own pixel size."""
+    import io
+
+    surface = cairo.ImageSurface.create_from_png(io.BytesIO(shot.png))
+    cr = cairo.Context(surface)
+    scale = surface.get_width() / max(1, shot.rect.w)
+    draw_marks(cr, strokes, scale)
+    out = io.BytesIO()
+    surface.write_to_png(out)
+    return out.getvalue()
+
+
+class Marker:
+    """Draw on a shot: the frozen region in a window of its own, right where it was taken
+    (override-redirect: the app keeps its focus), and a small bar of tools above it. Pen,
+    Box, Arrow, Highlight; Undo (Ctrl+Z); Done (Enter) gives the marked-up PNG, Cancel (Esc)
+    None. The keyboard is Glance's only while this is up."""
+
+    def __init__(self, owner: GtkShot, shot: Shot, done: Callable[[bytes | None], None]) -> None:
+        import io
+
+        self._owner, self._shot, self._done = owner, shot, done
+        self.tool = "pen"
+        self.strokes: list[tuple[str, list[tuple[float, float]]]] = []
+        self._drawing = False
+        self._finished = False
+        r = shot.rect
+        self._image = cairo.ImageSurface.create_from_png(io.BytesIO(shot.png))
+        self.canvas = _popup(Gdk.WindowTypeHint.TOOLTIP)
+        self.canvas.set_size_request(r.w, r.h)
+        self.canvas.resize(r.w, r.h)
+        self.canvas.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
+                               | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.KEY_PRESS_MASK)
+        self.canvas.connect("draw", self._draw)
+        self.canvas.connect("button-press-event", self._press)
+        self.canvas.connect("motion-notify-event", self._motion)
+        self.canvas.connect("button-release-event", self._release)
+        self.canvas.connect("key-press-event", self._key)
+        self.canvas.move(r.x, r.y)
+        self.canvas.show_all()
+        self.canvas.move(r.x, r.y)
+        gdk_window = self.canvas.get_window()
+        if gdk_window is not None:
+            gdk_window.set_cursor(Gdk.Cursor.new_from_name(Gdk.Display.get_default(),
+                                                           "crosshair"))
+        self.bar = _popup(Gdk.WindowTypeHint.POPUP_MENU)
+        self.bar.connect("draw", _clear)
+        self._build_bar()
+        self._place_bar()
+        _raise(self.canvas)
+        _raise(self.bar)
+        self._grabbed = False
+        GLib.idle_add(self._grab)
+
+    # -- the bar of tools
+    def _build_bar(self) -> None:
+        old = self.bar.get_child()
+        if old is not None:
+            self.bar.remove(old)
+            old.destroy()
+        row = _classes(Gtk.Box(spacing=2), "glance-menu", "glance-shot")
+        lead = _mark(16)
+        lead.set_margin_start(4)
+        lead.set_margin_end(4)
+        row.pack_start(lead, False, False, 0)
+        for key, label, _glyph in MARK_TOOLS:
+            b = bm.ShotButton(f"mark_{key}", label, selected=key == self.tool)
+            row.pack_start(self._button(b, "pen" if key == "pen" else _glyph), False, False, 0)
+        row.pack_start(_classes(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL),
+                                "glance-shot-sep"), False, False, 4)
+        row.pack_start(self._button(bm.ShotButton("mark_undo", "Undo")), False, False, 0)
+        row.pack_start(self._button(bm.ShotButton("mark_cancel", "Cancel")), False, False, 0)
+        done = _pointer(Gtk.Button(label="Done", can_focus=False, focus_on_click=False))
+        _classes(done, "glance-primary")
+        done.set_name("shot:mark_done")
+        done.connect("clicked", lambda _b: self.finish())
+        row.pack_start(done, False, False, 4)
+        row.show_all()
+        self.bar.add(row)
+        self.bar.resize(1, 1)
+
+    def _button(self, b: bm.ShotButton, glyph: str | None = None) -> Gtk.Button:
+        button = _pointer(Gtk.Button(can_focus=False, focus_on_click=False))
+        _classes(button, "glance-item", "glance-selbtn", "glance-shot-item")
+        if b.selected:
+            _classes(button, "glance-selected")
+        inner = Gtk.Box(spacing=5)
+        if glyph in look.GLYPHS:
+            inner.pack_start(self._owner._glyph(glyph, 13), False, False, 0)
+        inner.pack_start(_label(b.label, wrap=False), False, False, 0)
+        button.add(inner)
+        button.set_name(f"shot:{b.key}")
+        button.connect("clicked", lambda _b: self.act(b.key))
+        return button
+
+    def _place_bar(self) -> None:
+        r = self._shot.rect
+        w, h = self.bar.get_preferred_size()[1].width, self.bar.get_preferred_size()[1].height
+        mons = self._owner._monitors()
+        mon = geo.monitor_at(r.x + r.w // 2, r.y + r.h // 2, mons) or Rect(0, 0, 10 ** 5, 10 ** 5)
+        y = r.y - h - 8 if r.y - h - 8 >= mon.y else r.y + r.h + 8
+        if y + h > mon.y + mon.h:
+            y = r.y + 8  # no room around it: inside the region's top
+        x = max(mon.x, min(r.x, mon.x + mon.w - w))
+        self.bar.move(x, y)
+        self.bar.show_all()
+        self.bar.move(x, y)
+        gdk_window = self.bar.get_window()
+        if gdk_window is not None and not self._owner._composited:
+            gdk_window.shape_combine_region(_rounded(0, 0, w, h, 10), 0, 0)
+
+    def act(self, key: str) -> None:
+        if key.startswith("mark_") and key[5:] in {t[0] for t in MARK_TOOLS}:
+            self.tool = key[5:]
+            self._build_bar()
+        elif key == "mark_undo":
+            if self.strokes:
+                self.strokes.pop()
+                self.canvas.queue_draw()
+        elif key == "mark_cancel":
+            self.cancel()
+
+    # -- drawing
+    def _draw(self, widget: Gtk.Widget, cr: Any) -> bool:
+        w, h = widget.get_allocated_width(), widget.get_allocated_height()
+        cr.save()
+        cr.scale(w / max(1, self._image.get_width()), h / max(1, self._image.get_height()))
+        cr.set_source_surface(self._image, 0, 0)
+        cr.paint()
+        cr.restore()
+        draw_marks(cr, self.strokes)
+        cr.set_source_rgba(*rgba(self._owner._theme.tokens["accent_fill"]))
+        cr.set_line_width(2)
+        cr.rectangle(1, 1, w - 2, h - 2)
+        cr.stroke()
+        return True
+
+    def _press(self, _w: Gtk.Widget, ev: Gdk.EventButton) -> bool:
+        if ev.button == 1:
+            self._drawing = True
+            self.strokes.append((self.tool, [(ev.x, ev.y)]))
+            self.canvas.queue_draw()
+        return True
+
+    def _motion(self, _w: Gtk.Widget, ev: Gdk.EventMotion) -> bool:
+        if self._drawing and self.strokes:
+            tool, pts = self.strokes[-1]
+            if tool in ("box", "arrow"):
+                pts[1:] = [(ev.x, ev.y)]
+            else:
+                pts.append((ev.x, ev.y))
+            self.canvas.queue_draw()
+        return True
+
+    def _release(self, w: Gtk.Widget, ev: Gdk.EventButton) -> bool:
+        if ev.button == 1 and self._drawing:
+            self._motion(w, ev)  # type: ignore[arg-type]
+            self._drawing = False
+        return True
+
+    def _key(self, _w: Gtk.Widget, ev: Gdk.EventKey) -> bool:
+        if ev.keyval == Gdk.KEY_Escape:
+            self.cancel()
+        elif ev.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self.finish()
+        elif ev.keyval in (Gdk.KEY_z, Gdk.KEY_Z) and ev.state & Gdk.ModifierType.CONTROL_MASK:
+            self.act("mark_undo")
+        return True
+
+    def _grab(self) -> bool:
+        gdk_window = self.canvas.get_window()
+        if gdk_window is not None and not self._finished:
+            seat = Gdk.Display.get_default().get_default_seat()
+            self._grabbed = seat.grab(gdk_window, Gdk.SeatCapabilities.KEYBOARD, True, None,
+                                      None, None, None) == Gdk.GrabStatus.SUCCESS
+        return False
+
+    # -- the end
+    def finish(self) -> None:
+        png = marked_png(self._shot, self.strokes) if self.strokes else None
+        self._end(png)
+
+    def cancel(self) -> None:
+        self._end(None)
+
+    def _end(self, png: bytes | None) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        if self._grabbed:
+            Gdk.Display.get_default().get_default_seat().ungrab()
+        self.canvas.destroy()
+        self.bar.destroy()
+        self._owner._marker = None
+        self._done(png)

@@ -344,9 +344,11 @@ def test_translate_to_asks_remembers_and_translates(b):
     _bar(b)
     b.bar.toggle_more()
     b.bar.act("translate_to")
-    prompt, done = b.overlay.asked[-1]
-    assert prompt == "Translate to which language?"
-    done("  Bangla ", True)
+    r = b.overlay.panel.result  # the languages first, in the answer panel; nothing sent
+    assert r.title == "Translate to" and not b.rig.backend.calls
+    assert [label for _k, label in r.choices][:3] == ["English", "Bangla", "Hindi"]
+    assert r.chosen == "lang:English" and r.choices[-1] == ("lang_other", "Other…")
+    b.bar.result_action("lang:Bangla")
     assert b.remembered == [("selection.translate_to", "Bangla")]
     (call,) = [c for c in b.rig.backend.calls if c.kind == "rewrite"]
     assert call.custom == "Target language: Bangla"
@@ -589,3 +591,16 @@ def test_shot_text_from_a_private_region_never_goes_to_the_ai(b):
     b.rig.clock.advance(0)
     assert b.rig.backend.calls == []
     assert b.overlay.panel.result.text == "the password hint"  # the local checker alone
+
+
+
+def test_translate_to_other_language(b):
+    _bar(b)
+    b.bar.toggle_more()
+    b.bar.act("translate_to")
+    b.bar.result_action("lang_other")
+    prompt, done = b.overlay.asked[-1]
+    assert prompt == "Translate to which language?"
+    done("  Swahili ", True)
+    assert b.remembered == [("selection.translate_to", "Swahili")]
+    assert b.overlay.panel.result.title == "Translate to Swahili"

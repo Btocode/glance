@@ -23,6 +23,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 from Xlib import X, Xatom, display
 from Xlib.ext import xtest
 
+from glance.languages import POPULAR
 from glance.ui import selection_bar as sb
 from glance.ui.overlay_gtk import GtkOverlay, button_text
 from glance.ui.panel_model import PanelView, ResultView
@@ -174,6 +175,10 @@ def main() -> int:
                 ("translate", ResultView("Translate to Spanish", src, SPANISH, "ready",
                                          can_replace=True)),
                 ("working", ResultView("Summary", src, None, "loading")),
+                ("choose", ResultView("Translate to", src, None, "ready", can_follow=False,
+                                      choices=(*((f"lang:{n}", n) for n in POPULAR),
+                                               ("lang_other", "Other…")),
+                                      chosen="lang:English")),
                 # Glance Shot's Extract text, handed to this panel
                 ("shot-text", ResultView("Extracted text", "", SHOT_TEXT, "ready", actions=(
                     ("fix", "Fix grammar"), ("translate", "Translate to English"),

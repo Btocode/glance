@@ -1,18 +1,23 @@
 """The shot card's model: what every renderer draws after a region was picked.
 
-One card beside the region, the same window from start to finish (nothing closes and reopens
+First a slim floating toolbar beside the region (the selection bar's look), nothing else:
+
+    [logo] Text · Explain · Translate · Ask… │ Mark · Copy · Save │ ✕
+
+`expanded` False. A tab that has something to show grows the card under that same toolbar,
+which stays where it is (the same window from start to finish: nothing closes and reopens
 somewhere else while the user steps through it):
 
-    [logo] Glance Shot · 760 × 300          [Copy] [Save]   Esc Close
-    [ Text ][ Explain ][ Translate ][ Ask… ]       <- the tabs: always this row, this place
+    [logo] Text · Explain · Translate · Ask… │ Mark · Copy · Save │ ✕   <- never moves
     ┌──────────────────────────────────────┐
-    │ the hint, the notice, or the result  │       <- the body: the only part that changes
+    │ the notice, the language choices,    │    <- the body: the only part that changes
+    │ the question being typed, the result │
     └──────────────────────────────────────┘
-    [Copy] [Fix grammar]            note          <- the result's actions
+    [Copy] [Fix grammar]            status        <- the result's actions
 
-Copy and Save act on the image and say so in the banner; a tab fills the body (the tab stays
-selected while its result is on show). The one-time notice before an image goes to an AI is
-drawn in the body too.
+Copy, Save and Mark act on the image and say so in the status line (under the toolbar while
+it is not expanded); a tab fills the body (the tab stays selected while its result is on
+show). The one-time notice before an image goes to an AI is drawn in the body too.
 """
 from __future__ import annotations
 
@@ -37,11 +42,20 @@ ACTIONS: tuple[tuple[str, str], ...] = (
     ("translate", "Translate"),
     ("ask", "Ask…"),
 )
-# (key, label): the image tools in the header.
+# (key, label): the image tools, after the tabs.
 TOOLS: tuple[tuple[str, str], ...] = (
-    ("copy", "Copy image"),
+    ("mark", "Mark"),
+    ("copy", "Copy"),
     ("save", "Save"),
 )
+# Line glyphs (glance.ui.look.GLYPHS) for the toolbar's items, as the selection bar has them.
+GLYPHS = {"extract": "lines", "explain": "spark", "translate": "globe", "ask": "ask",
+          "mark": "pen", "copy": "copy", "save": "save", "close": "close"}
+TRANSLATE_TO = "Translate to"
+OTHER_LANGUAGE = "Other…"
+OTHER_PROMPT = "Translate to which language?"
+MARK_UNAVAILABLE = "Marking up a shot is not available on this desktop yet"
+EXACT_NOTE = "Read by {backend}, exactly as shown"
 AI_ACTIONS = frozenset({"ask"})                     # the image goes to the AI
 TEXT_AI_ACTIONS = frozenset({"translate"})          # local OCR, then the text goes
 # Explain: the image with a vision AI, else the text read locally with any AI.
@@ -80,6 +94,8 @@ class ShotResult:
     state: str  # loading | ready | failed
     actions: tuple[ShotButton, ...] = ()
     note: str | None = None  # muted, under the text ("Read locally", "by claude")
+    # Chips in the body (state "choose"): the languages Translate offers ("lang:<name>").
+    choices: tuple[ShotButton, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -90,8 +106,10 @@ class ShotBarView:
     warn: bool = False  # the banner is a warning (amber), not a confirmation
     notice: ShotNotice | None = None
     result: ShotResult | None = None
-    tools: tuple[ShotButton, ...] = ()  # Copy image, Save: in the header
-    hint: str | None = HINT  # the body before any tab was picked
+    tools: tuple[ShotButton, ...] = ()  # Mark, Copy, Save: after the tabs
+    hint: str | None = HINT  # (unused since the toolbar: kept for older renderers)
+    expanded: bool = False  # the card's body is open (a result, the notice, a choice, Ask)
+    asking: bool = False  # the body is the question's entry (Enter asks, Esc goes back)
 
 
 def notice_text(backend_label: str) -> str:
@@ -130,14 +148,35 @@ def tools() -> tuple[ShotButton, ...]:
 
 TEXT_ACTIONS: tuple[tuple[str, str], ...] = (
     ("text_copy", "Copy text"),
+    ("text_exact", "Exact text (AI)"),
     ("text_fix", "Fix grammar"),
 )
 
 
-def text_actions(*, ai: bool = False, private: bool = False) -> tuple[ShotButton, ...]:
-    """Under the text read from the shot: Copy text (primary) and Fix grammar (local).
-    Translate and Explain are the tabs above."""
-    return tuple(ShotButton(k, label, primary=k == "text_copy") for k, label in TEXT_ACTIONS)
+def text_actions(*, ai: bool = False, private: bool = False,
+                 vision: bool = False) -> tuple[ShotButton, ...]:
+    """Under the text read from the shot: Copy text (primary), Exact text (AI: the image is
+    read by a vision AI, word for word, on this click) and Fix grammar (local). Translate
+    and Explain are the tabs above."""
+    out = []
+    for k, label in TEXT_ACTIONS:
+        tip = None
+        if k == "text_exact":
+            tip = PRIVATE if private else NEEDS_VISION if not vision else None
+        out.append(ShotButton(k, label, primary=k == "text_copy", muted=tip is not None,
+                              tip=tip))
+    return tuple(out)
+
+
+def languages(current: str) -> tuple[ShotButton, ...]:
+    """Translate's choices: the popular languages (the last one used selected), Other…"""
+    from glance.languages import choices
+
+    out = [ShotButton(f"lang:{name}", name, selected=name.casefold() == current.casefold())
+           for name in choices(current)]
+    return (*out, ShotButton("lang_other", OTHER_LANGUAGE))
 
 
 ANSWER_ACTIONS = (ShotButton("text_copy", "Copy", primary=True),)
+TRANSLATION_ACTIONS = (ShotButton("text_copy", "Copy", primary=True),
+                       ShotButton("translate_lang", "Change language"))

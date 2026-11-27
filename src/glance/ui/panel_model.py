@@ -52,6 +52,10 @@ class ResultView:
     # from a Glance Shot offers ("fix", "Fix grammar"), ("translate", …), ("explain", …).
     actions: tuple[tuple[str, str], ...] = ()
     origin: str | None = None         # "shot" / "shot_text": from a Glance Shot (`look.subline`)
+    # "Translate to…": chips instead of an answer (`res_action` with the key, "lang:<name>"
+    # or "lang_other"); `chosen` is the one drawn selected (the last language used).
+    choices: tuple[tuple[str, str], ...] = ()
+    chosen: str | None = None
 
 
 @dataclass(frozen=True)

@@ -726,7 +726,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         from glance.ui.shot_gtk import GtkShot
 
-        shot_ui = GtkShot(hotkeys, lambda key: shot.action(key))
+        shot_ui = GtkShot(hotkeys, lambda key, args=None: shot.action(key, args))
     shot = build_shot(ui=shot_ui, controller=controller, supervisor=ai_supervisor,
                       cfg=current_config, overlay=overlay, notifier=notifier, hotkeys=hotkeys,
                       run_ai=run_ai, grammar=harper,

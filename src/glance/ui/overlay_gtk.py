@@ -1826,6 +1826,17 @@ class GtkOverlay:
         box.pack_start(head, False, False, 0)
         if r.source:
             box.pack_start(_label(f"“{r.source}”", "glance-meta"), False, False, 0)
+        if r.choices:  # "Translate to…": the languages, one click each
+            flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=6,
+                               row_spacing=6, max_children_per_line=6)
+            for key, label in r.choices:
+                chip = self._button(label, "res_action", "glance-chip", key=key)
+                if key == r.chosen:
+                    _classes(chip, "glance-selected")
+                flow.add(chip)
+            box.pack_start(flow, False, False, 0)
+            card.pack_start(box, False, False, 0)
+            return
         if r.text:
             text = Gtk.Label(label=r.text, xalign=0, wrap=True, selectable=False,
                              max_width_chars=58)
@@ -1844,10 +1855,10 @@ class GtkOverlay:
         if r.note:
             card.pack_start(_classes(_label(r.note), "glance-banner"), False, False, 0)
         if r.actions:  # text from a shot: Fix grammar, Translate, Explain
-            more = Gtk.Box(spacing=8)
+            more = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=8,
+                               row_spacing=6, max_children_per_line=6)
             for key, label in r.actions:
-                more.pack_start(self._button(label, "res_action", "glance-secondary", key=key),
-                                False, False, 0)
+                more.add(self._button(label, "res_action", "glance-secondary", key=key))
             card.pack_start(more, False, False, 0)
         footer = Gtk.Box(spacing=8)
         if r.can_follow and r.state != "loading":

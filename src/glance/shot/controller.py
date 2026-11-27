@@ -28,6 +28,7 @@ from glance.ui.ports import WindowInfo
 ESCAPE = "shot_escape"  # the transient Escape grab while the bar is up
 COPIED = "Image copied to the clipboard"
 COPIED_TEXT = "Text copied to the clipboard"
+MARKED = "Marked up: Copy, Save and the AI get the marked shot"
 COPY_FAILED = "Could not copy the image"
 SAVE_FAILED = "Could not save the image"
 READING = "Reading the text…"
@@ -90,6 +91,8 @@ class _Session:
     text: str | None = None  # the OCR text, once read (Translate and Explain reuse it)
     ticket: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
+    asking: bool = False  # the body is Ask's entry (renderers with `inline_ask`)
+    marking: bool = False  # the region is being marked up (`annotate`)
 
     @property
     def result(self) -> bm.ShotResult | None:
@@ -101,7 +104,7 @@ class _Session:
         self.shown = tab
 
 
-_TAB = {"text_translate": "translate", "text_explain": "explain"}
+_TAB = {"text_translate": "translate", "text_explain": "explain", "text_exact": "extract"}
 
 
 class ShotController:
@@ -130,6 +133,7 @@ class ShotController:
         self._now = now
         self._sess: _Session | None = None
         self._picking = False
+        self._lang: str | None = None  # the language Translate used last (this run)
         self._tickets = 0
 
     # ------------------------------------------------------------------ entry points
@@ -204,15 +208,23 @@ class ShotController:
             return
         if key in dict(bm.ACTIONS) and key != "ask" and key in s.results \
                 and s.results[key].state != "failed" and s.busy != key:
-            s.shown, s.notice = key, None  # back to a tab already done: its result, at once
+            s.shown, s.notice, s.asking = key, None, False  # a tab already done: its result
             s.banner, s.warn = None, False
             log_event("shot_action", key=key)
             self._render()
             return
+        if key.startswith("lang:"):
+            log_event("shot_action", key="lang")
+            self._translate_to(key[5:])
+            return
         handler = {
             "copy": self._copy, "save": self._save, "extract": self._extract,
             "explain": self._explain, "ask": lambda: self._image_ai("ask"),
-            "translate": self._translate, "close": self.close,
+            "translate": self._choose_language, "close": self.close,
+            "lang_other": self._other_language, "translate_lang": self._choose_language,
+            "ask_submit": lambda: self._ask_submit((args or {}).get("text", "")),
+            "ask_cancel": self._ask_cancel, "mark": self._mark,
+            "text_exact": self._exact_text,
             "text_copy": self._text_copy, "text_fix": self._text_fix,
             "text_translate": lambda: self._text_ai("text_translate"),
             "text_explain": lambda: self._text_ai("text_explain"),
@@ -319,8 +331,11 @@ class ShotController:
 
     def _extract(self) -> None:
         def show(s: _Session, text: str) -> None:
-            s.put("extract", bm.ShotResult("Text", text, "ready", bm.text_actions(),
-                                           note="Read on this computer"))
+            s.put("extract", bm.ShotResult(
+                "Text", text, "ready", bm.text_actions(
+                    private=bool(s.private), vision=self._vision() is not None
+                    and self._cfg().shot.ai_images != "never"),
+                note="Read on this computer"))
             self._render()
 
         self._ocr(show, "extract")
@@ -335,8 +350,70 @@ class ShotController:
             return
         self._ocr(lambda _s, text: self._text_ai("text_explain", text), "explain")
 
-    def _translate(self) -> None:
-        self._ocr(lambda s, text: self._text_ai("text_translate", text), "translate")
+    # ------------------------------------------------------------------ Translate
+
+    def target(self) -> str:
+        """The language Translate offers first: the last one used, else `[selection]
+        translate_to`."""
+        return self._lang or prompts.translate_target(self._cfg())
+
+    def _choose_language(self) -> None:
+        """Translate: the body shows the languages to pick from (nothing is sent yet)."""
+        s = self._sess
+        assert s is not None
+        s.notice, s.asking = None, False
+        s.banner, s.warn = None, False
+        s.put("translate", bm.ShotResult(bm.TRANSLATE_TO, None, "choose",
+                                         choices=bm.languages(self.target())))
+        self._render()
+
+    def _other_language(self) -> None:
+        s = self._sess
+        assert s is not None
+        at = getattr(self._ui, "ask_point", lambda: None)()
+        self._overlay.ask_text(bm.OTHER_PROMPT,
+                               lambda lang, _back: self._sess is s and self._translate_to(lang),
+                               at=at)
+
+    def _translate_to(self, lang: str) -> None:
+        lang = " ".join(lang.split())[:40]
+        if not lang or self._sess is None:
+            return
+        self._lang = lang
+        self._ocr(lambda _s, text: self._text_ai("text_translate", text, target=lang),
+                  "translate")
+
+    # ------------------------------------------------------------------ Mark
+
+    def _mark(self) -> None:
+        """Draw on the shot (a pen, boxes, arrows, a highlighter) before it is copied, saved
+        or sent: the renderer's `annotate`, which gives back the marked-up PNG (or None)."""
+        s = self._sess
+        assert s is not None
+        annotate = getattr(self._ui, "annotate", None)
+        if annotate is None:
+            self._say(bm.MARK_UNAVAILABLE, warn=True)
+            return
+        s.marking = True
+        self._render()
+
+        def done(png: bytes | None) -> None:
+            if self._sess is not s:
+                return
+            s.marking = False
+            if png:
+                s.pick = replace(s.pick, shot=replace(s.pick.shot, png=png))
+                # Answers about the old image go; the text read from it stays (marks add none).
+                for k in ("explain", "ask"):
+                    s.results.pop(k, None)
+                if s.shown in ("explain", "ask"):
+                    s.shown = None
+                log_event("shot_marked")
+                self._say(MARKED)
+            else:
+                self._render()
+
+        annotate(s.pick.shot, done)
 
     # ------------------------------------------------------------------ text actions
 
@@ -374,7 +451,7 @@ class ShotController:
                     s.results.pop(k, None)
         self._say(TEXT_FIXED.format(n=n, es="" if n == 1 else "es"))
 
-    def _text_ai(self, key: str, text: str | None = None) -> None:
+    def _text_ai(self, key: str, text: str | None = None, target: str | None = None) -> None:
         from glance.privacy.redact import shield, unshield
 
         s = self._sess
@@ -389,7 +466,7 @@ class ShotController:
             return
         translate = key == "text_translate"
         title = "Translation" if translate else "Explanation"
-        system = (prompts.translate_system(prompts.translate_target(self._cfg())) if translate
+        system = (prompts.translate_system(target or self.target()) if translate
                   else prompts.EXPLAIN_TEXT)
         shielded = shield(text)
         user = prompts.text_user(shielded.text)
@@ -400,7 +477,8 @@ class ShotController:
 
         self._ask_ai(s, key, title, lambda: self._sup.answer_text(system, user), finish,
                      note="From the text read on this computer" if key == "text_explain"
-                     else None)
+                     else f"Into {target or self.target()}" if translate else None,
+                     actions=bm.TRANSLATION_ACTIONS if translate else bm.ANSWER_ACTIONS)
 
     # ------------------------------------------------------------------ images to the AI
 
@@ -420,10 +498,41 @@ class ShotController:
         s = self._sess
         assert s is not None
         if key == "ask":
+            if getattr(self._ui, "inline_ask", False):
+                s.asking, s.notice = True, None  # the question is typed in the card itself
+                s.banner, s.warn = None, False
+                s.shown = "ask"
+                self._render()
+                return
             at = getattr(self._ui, "ask_point", lambda: None)()
             self._overlay.ask_text(bm.ASK_PROMPT, lambda q, _back: self._asked(s, q), at=at)
             return
         self._gate_image(s, key, prompts.EXPLAIN_IMAGE, prompts.EXPLAIN_IMAGE_USER)
+
+    def _ask_submit(self, question: str) -> None:
+        s = self._sess
+        if s is None or not s.asking:
+            return
+        s.asking = False
+        if not question.strip():
+            self._ask_cancel()
+            return
+        self._asked(s, question)
+
+    def _ask_cancel(self) -> None:
+        s = self._sess
+        if s is None:
+            return
+        s.asking = False
+        if s.shown == "ask" and "ask" not in s.results:
+            s.shown = None
+        self._render()
+
+    def _exact_text(self) -> None:
+        """Text, word for word: the image to a vision AI (the notice first, as Explain)."""
+        s = self._sess
+        assert s is not None
+        self._gate_image(s, "text_exact", prompts.EXACT_TEXT_IMAGE, prompts.EXACT_TEXT_USER)
 
     def _asked(self, s: _Session, question: str) -> None:
         q = question.strip()
@@ -446,6 +555,11 @@ class ShotController:
                 return
             s.notice = None
             log_event("shot_image_sent", backend=name)
+            if key == "text_exact":
+                self._ask_ai(s, key, "Text", lambda: self._sup.see(name, png, system, user),
+                             lambda raw: raw.strip("\n"), note=bm.EXACT_NOTE.format(
+                                 backend=label), actions=bm.text_actions(vision=True))
+                return
             self._ask_ai(s, key, "Explanation" if key == "explain" else "Answer",
                          lambda: self._sup.see(name, png, system, user), str.strip,
                          note=f"Answered by {label}")
@@ -457,7 +571,7 @@ class ShotController:
             s.notice = (bkey, send)
             s.notice_label = label
             s.banner = None
-            s.shown = key  # the tab the notice is for
+            s.shown = _TAB.get(key, key)  # the tab the notice is for
             self._render()
         else:
             self._say(bm.IMAGES_OFF, warn=True)
@@ -478,7 +592,8 @@ class ShotController:
             self._render()
 
     def _ask_ai(self, s: _Session, key: str, title: str, call: Callable[[], Iterator[str]],
-                finish: Callable[[str], str], note: str | None) -> None:
+                finish: Callable[[str], str], note: str | None,
+                actions: tuple[bm.ShotButton, ...] = bm.ANSWER_ACTIONS) -> None:
         tab = _TAB.get(key, key)
         s.busy = key
         s.banner, s.warn, s.notice = None, False, None
@@ -505,7 +620,12 @@ class ShotController:
                 s.busy = None
             text, why = out
             if text:
-                s.results[tab] = bm.ShotResult(title, text, "ready", bm.ANSWER_ACTIONS, note=note)
+                s.results[tab] = bm.ShotResult(title, text, "ready", actions, note=note)
+                if key == "text_exact":  # the exact text is the text from now on
+                    s.text = text
+                    for k in ("translate", "explain"):
+                        if k in s.results and s.results[k].note != NO_VISION_NOTE:
+                            s.results.pop(k, None)
             else:
                 s.results[tab] = bm.ShotResult(title, None, "failed", note=why or FAILED)
             self._render()
@@ -529,9 +649,13 @@ class ShotController:
         notice = None
         if s.notice is not None:
             notice = bm.ShotNotice(bm.notice_text(s.notice_label))
+        result = None if notice is not None or s.asking else s.result
+        tools = tuple(replace(t, selected=t.key == "mark" and s.marking)
+                      for t in bm.tools())
         return bm.ShotBarView(size_label(s.pick.shot.rect), self._buttons(s), s.banner, s.warn,
-                              notice, None if notice is not None else s.result,
-                              tools=bm.tools())
+                              notice, result, tools=tools,
+                              expanded=notice is not None or result is not None or s.asking,
+                              asking=s.asking)
 
     def refresh(self) -> None:
         """Draw the bar again (the desktop switched between light and dark)."""
