@@ -4,6 +4,7 @@
 // glyphs and the places all come from Python.
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
+import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
@@ -27,13 +28,13 @@ const ASK_RETURN_MS = 1500;
 const LINE_FIXES = 3;
 const MAX_CHOICES = 5;
 
-function rgb(hex) {
+export function rgb(hex) {
     const h = (hex || '#000000').replace('#', '');
     return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
 }
 
 // `#rrggbb` or `rgba(r, g, b, a)` as [r, g, b, a] in 0..1.
-function rgba(value) {
+export function rgba(value) {
     const m = /rgba\(([^)]*)\)/.exec(value || '');
     if (!m)
         return [...rgb(value), 1];
@@ -128,6 +129,78 @@ export function clickable(actor, onClick, onSecondary = null) {
         return Clutter.EVENT_PROPAGATE;
     });
     return actor;
+}
+
+// Children in rows that wrap at the width the parent gives (St has no flow box): chips,
+// a row of actions. Height-for-width, so nothing is measured before it is on the stage.
+const FlowLayout = GObject.registerClass(
+class GlanceFlowLayout extends Clutter.LayoutManager {
+    _init(gap = 6, rowGap = 6) {
+        super._init();
+        this._gap = gap;
+        this._rowGap = rowGap;
+    }
+
+    _rows(container, forWidth) {
+        const rows = [];
+        let row = [], used = 0, tall = 0;
+        for (const child of container.get_children()) {
+            if (!child.visible)
+                continue;
+            const [, w] = child.get_preferred_width(-1);
+            const [, h] = child.get_preferred_height(w);
+            if (row.length && forWidth >= 0 && used + this._gap + w > forWidth) {
+                rows.push({row, tall});
+                row = [];
+                used = tall = 0;
+            }
+            used += (row.length ? this._gap : 0) + w;
+            row.push([child, w, h]);
+            tall = Math.max(tall, h);
+        }
+        if (row.length)
+            rows.push({row, tall});
+        return rows;
+    }
+
+    vfunc_get_preferred_width(container, _forHeight) {
+        let min = 0, nat = 0, n = 0;
+        for (const child of container.get_children()) {
+            if (!child.visible)
+                continue;
+            const [cMin, cNat] = child.get_preferred_width(-1);
+            min = Math.max(min, cMin);
+            nat += cNat + (n++ ? this._gap : 0);
+        }
+        return [min, nat];
+    }
+
+    vfunc_get_preferred_height(container, forWidth) {
+        const rows = this._rows(container, forWidth);
+        const h = rows.reduce((sum, r) => sum + r.tall, 0) + Math.max(0, rows.length - 1) * this._rowGap;
+        return [h, h];
+    }
+
+    vfunc_allocate(container, box) {
+        const rows = this._rows(container, box.get_width());
+        let y = 0;
+        for (const {row, tall} of rows) {
+            let x = 0;
+            for (const [child, w, h] of row) {
+                const cb = new Clutter.ActorBox();
+                cb.set_origin(x, y + Math.round((tall - h) / 2));
+                cb.set_size(w, h);
+                child.allocate(cb);
+                x += w + this._gap;
+            }
+            y += tall + this._rowGap;
+        }
+    }
+});
+
+// A box whose children wrap into rows.
+export function flowBox(gap = 6, rowGap = 6, params = {}) {
+    return new St.Widget({layout_manager: new FlowLayout(gap, rowGap), x_expand: true, ...params});
 }
 
 function textButton(label, params = {}) {
@@ -353,6 +426,10 @@ export class Overlay {
                 'border-radius: 7px; padding: 5px 10px;', `border-color: ${t.accent};`, 12],
             on: [`background-color: ${t.hover}; color: ${t.text}; border-radius: 6px; padding: 2px 7px; ` +
                 'font-weight: 600;', '', 15],
+            chip: [`background-color: ${t.group}; color: ${t.text}; border: 1px solid ${t.card_border}; ` +
+                'border-radius: 14px; padding: 3px 12px;', `border-color: ${t.accent};`, 13],
+            chosen: [`background-color: ${t.highlight_rgba}; color: ${t.accent}; border: 1px solid ` +
+                `${t.accent_fill}; border-radius: 14px; padding: 3px 12px; font-weight: 600;`, '', 13],
         };
         const [base, hover, px] = styles[kind] ?? styles.link;
         const button = textButton(label, {y_align: Clutter.ActorAlign.CENTER});
@@ -1162,6 +1239,16 @@ export class Overlay {
         section.add_child(head);
         if (r.source)
             section.add_child(this._label(`“${r.source}”`, 'muted', 12));
+        if (r.choices?.length) {  // "Translate to…": the languages, one click each
+            const chips = flowBox(6, 6);
+            for (const [key, label] of r.choices) {
+                chips.add_child(this._button(label, key === r.chosen ? 'chosen' : 'chip',
+                    this._act('res_action', {key}), `res_action:${key}`));
+            }
+            section.add_child(chips);
+            card.add_child(section);
+            return;
+        }
         let text;
         if (r.text) {
             text = this._label(r.text, 'text', 14);
@@ -1185,7 +1272,7 @@ export class Overlay {
         if (r.note)
             card.add_child(this._banner(r.note));
         if (r.actions?.length) {  // text from a shot: Fix grammar, Translate, Explain
-            const more = hbox({style: 'spacing: 8px;'});
+            const more = flowBox(8, 6);
             for (const [key, label] of r.actions)
                 more.add_child(this._button(label, 'secondary', this._act('res_action', {key}),
                     `res_action:${key}`));
@@ -1382,6 +1469,8 @@ export class Overlay {
             panel: geo(this._panel) ? {rect: geo(this._panel), mode: s?.panel?.view?.mode,
                 result: s?.panel?.view?.result ? {state: s.panel.view.result.state,
                     actions: (s.panel.view.result.actions ?? []).map(([key]) => key),
+                    choices: (s.panel.view.result.choices ?? []).map(([key]) => key),
+                    chosen: s.panel.view.result.chosen ?? null,
                     text: this._named.get('result-text')?.clutter_text?.get_text() ?? null}
                     : null} : null,
             ghost: geo(this._ghost) ? {rect: geo(this._ghost)} : null,

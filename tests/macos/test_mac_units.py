@@ -170,3 +170,34 @@ def test_capture_print_mode_starts_and_stops(tmp_path):
     _out, err = p.communicate(timeout=10)
     assert p.returncode == 0, err
     assert "capture_started mode=print" in err
+
+
+def test_shot_marker_draws_on_the_png_at_its_own_size():
+    import Quartz as Q
+    from AppKit import NSApplication
+
+    from glance.platform.macos.shot import MacShot, png_of
+    from glance.protocol import Rect
+    from glance.shot.image import Shot, png_size
+
+    NSApplication.sharedApplication().setActivationPolicy_(1)
+    space = Q.CGColorSpaceCreateWithName(Q.kCGColorSpaceSRGB)
+    ctx = Q.CGBitmapContextCreate(None, 400, 200, 8, 0, space, Q.kCGImageAlphaPremultipliedLast)
+    Q.CGContextSetRGBFillColor(ctx, 1, 1, 1, 1)
+    Q.CGContextFillRect(ctx, Q.CGRectMake(0, 0, 400, 200))
+    png = png_of(Q.CGBitmapContextCreateImage(ctx))
+    keys: list = []
+    shot = MacShot(lambda _k, _a: None, lambda fn: fn(), keys=keys.append)
+    got: list = []
+    shot.annotate(Shot(png, 400, 200, Rect(100, 100, 200, 100)), got.append)
+    m = shot.marker
+    m.act("mark_box")
+    m.press(20, 20)
+    m.release(120, 80)
+    m.act("mark_highlight")
+    m.press(10, 50)
+    m.release(150, 50)
+    m.act("mark_undo")
+    m.finish()
+    assert keys == [True, False] and shot.marker is None
+    assert got and got[0] is not None and got[0] != png and png_size(got[0]) == (400, 200)

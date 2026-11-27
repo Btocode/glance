@@ -721,7 +721,8 @@ def main(argv: list[str] | None = None) -> int:
     if wayland:
         from glance.ui.shot_shell import ShellShot
 
-        shot_ui: Any = ShellShot(shell, lambda: theme.tokens, lambda key: shot.action(key))
+        shot_ui: Any = ShellShot(shell, lambda: theme.tokens,
+                                 lambda key, args=None: shot.action(key, args))
         theme.on_change(lambda: shot.refresh())
     else:
         from glance.ui.shot_gtk import GtkShot

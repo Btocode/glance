@@ -93,7 +93,9 @@ export default class GlanceExtension extends Extension {
         });
         this._shot = new ShotUi({
             picked: result => this._daemon('ShotPicked', result),
-            clicked: action => this._daemon('Clicked', {target: 'shot', args: {action}}),
+            // `args`: Ask's question ('ask_submit'), Mark's strokes ('mark_done')
+            clicked: (action, args = null) => this._daemon('Clicked',
+                {target: 'shot', args: args ? {action, args} : {action}}),
         });
         // Transient grabs never outlive an answering glanced (see keyguard.js).
         this._guard = new KeyGuard({
@@ -579,7 +581,11 @@ export default class GlanceExtension extends Extension {
     }
 
     _mShotBar(payload) {
-        return payload?.hide ? this._shot.hideBar() : this._shot.showBar(payload);
+        if (payload?.hide)
+            return this._shot.hideBar();
+        if (payload?.mark)  // Mark: the frozen region and its tools (shot.js)
+            return this._shot.mark(payload.mark);
+        return this._shot.showBar(payload);
     }
 
     _mShotClipboard(payload) {
@@ -620,7 +626,8 @@ export default class GlanceExtension extends Extension {
     }
 
     _mTestAskText({text, submit}) {
-        return {ok: this._overlay.askText(text, Boolean(submit))};
+        return {ok: this._overlay.askText(text, Boolean(submit)) ||
+            this._shot.askText(text, Boolean(submit))};
     }
 
     _mTestOverlay() {

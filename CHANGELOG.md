@@ -9,6 +9,23 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
 
 ## [Unreleased]
 
+### Added
+- Glance Shot ▸ Mark: draw on a shot (pen, box, arrow, highlighter, undo) before it is
+  copied, saved or sent to the AI.
+- Glance Shot ▸ Text ▸ Exact text (AI): the image read word for word by a vision AI, on
+  that click (the local reading stays the instant, private one).
+- Translate offers the popular languages as one-click choices (and Other…), in Glance Shot
+  and in the selection bar's Translate to….
+
+### Changed
+- Glance Shot starts as a slim floating toolbar beside the region, like the selection bar;
+  it grows into the card under that toolbar only when there is something to show, and the
+  toolbar never moves. Ask is typed in the card itself instead of a window of its own.
+
+### Fixed
+- Selection actions never appeared in Chrome, Electron apps and Firefox on X11: their
+  selection is owned by a hidden helper window the privacy gate could not tie to the app.
+
 ## [0.5.0] - 2026-11-27
 
 ### Added

@@ -321,9 +321,18 @@ def main(argv: list[str] | None = None) -> int:
     # Glance Shot: the picker (ScreenCaptureKit / CGWindowListCreateImage), the bar
     from glance.daemon.shot_wiring import ShotSwitch, build_shot, shot_request
     from glance.platform.macos.shot import MacShot
+    from glance.shot.controller import ESCAPE
     from glance.ui.settings_model import settings_request
 
-    shot_ui = MacShot(lambda key: shot.action(key), clock.post, notifier.notify)
+    def shot_keys(taken: bool) -> None:
+        """A shot panel has the keyboard (Ask's field, Mark): Escape is its, not the hotkey's."""
+        if taken:
+            hotkeys.ungrab(ESCAPE)
+        elif shot.is_open:
+            hotkeys.grab(ESCAPE, "Escape", shot.close)
+
+    shot_ui = MacShot(lambda key, args=None: shot.action(key, args), clock.post,
+                      notifier.notify, keys=shot_keys)
     shot = build_shot(ui=shot_ui, controller=controller, supervisor=ai_supervisor,
                       cfg=current_config, overlay=overlay, notifier=notifier, hotkeys=hotkeys,
                       run_ai=run_ai, grammar=harper,

@@ -5,7 +5,9 @@
 
 The shortcut opens the extension's picker; a drag with the shell's virtual pointer picks the
 test app's window; the image comes back to glanced through `ShotCapture` (refused to anyone
-else); the bar's Copy puts image/png on the clipboard; Esc closes it. With
+else); the shot starts as a slim toolbar beside the region; its Copy puts image/png on the
+clipboard, Mark draws on the frozen region in the shell (the card's toolbar comes back where
+it was), Esc closes it. With
 $GLANCE_TEST_OCR_MODELS (a directory holding the two ocrs models) and glance_core 0.3,
 Extract text reads the app's text on the device.
 """
@@ -123,9 +125,12 @@ def test_shortcut_opens_the_picker_and_a_drag_captures(desk):
     fx, fy, fw, fh = shot_state(shell)["frame"]
     assert fx < x0 and fy < y0 and fx + fw > x1 and fy + fh > y1
     named = shot_state(shell)["named"]
-    for key in ("shot:copy", "shot:save", "shot:extract", "shot:explain", "shot:translate",
-                "shot:ask", "shot:body", "shot:close"):
+    for key in ("shot:toolbar", "shot:mark", "shot:copy", "shot:save", "shot:extract",
+                "shot:explain", "shot:translate", "shot:ask", "shot:close"):
         assert key in named, named
+    # a slim toolbar, nothing under it until a tab has something to show
+    assert "shot:body" not in named and not shot_state(shell)["expanded"]
+    assert bh < 80, bar
     assert not shot_state(shell)["picking"]
     snap(shell, "shot-start")
 
@@ -146,9 +151,38 @@ def test_copy_puts_the_image_on_the_clipboard(desk):
     bar = shot_state(shell)["bar"]
     assert wait_for(lambda: shot_state(shell).get("banner") == "Image copied to the clipboard", 5)
     assert shot_state(shell)["bar"][:2] == bar[:2]  # the same card, in the same place
+    assert "shot:banner" in shot_state(shell)["named"]  # one line under the toolbar
     # the clipboard holds image/png now: not plain text a save could restore
     saved = shell.call("ClipboardSave", {"which": "clipboard"})
     assert saved == {"restorable": False}, saved
+    snap(shell, "shot-copied")
+
+
+def test_mark_draws_on_the_region_and_the_toolbar_comes_back(desk):
+    shell, app, glance, _root = desk
+    st = shot_state(shell)
+    toolbar = st["toolbar"]
+    assert shell.call("TestClick", {"target": "shot:mark"})["ok"]
+    m = wait_for(lambda: shot_state(shell).get("marking"), 5)
+    assert m, shot_state(shell)
+    assert not shot_state(shell).get("bar")  # the card steps aside meanwhile
+    x, y, w, h = m["rect"]
+    assert shell.call("TestClick", {"target": "shot:mark_box"})["ok"]
+    assert wait_for(lambda: (shot_state(shell).get("marking") or {}).get("tool") == "box", 5)
+    pointer(shell, x + w // 4, y + h // 4)
+    button(shell, True)
+    for i in range(1, 5):
+        pointer(shell, x + w // 4 + w * i // 10, y + h // 4 + h * i // 10)
+    button(shell, False)
+    assert wait_for(lambda: (shot_state(shell).get("marking") or {}).get("strokes") == 1, 5)
+    snap(shell, "shot-mark")
+    assert shell.call("TestClick", {"target": "shot:mark_done"})["ok"]
+    assert wait_for(lambda: (shot_state(shell).get("banner") or "").startswith("Marked up"), 5), \
+        shot_state(shell)
+    st = shot_state(shell)
+    assert not st.get("marking") and st["toolbar"][:2] == toolbar[:2]  # where it was
+    assert glance.status().get("shot_open")
+    assert (shell.focused() or {}).get("pid") == app.proc.pid  # focus stays with the app
 
 
 def test_ask_without_a_vision_ai_says_so(desk):
@@ -170,6 +204,8 @@ def test_escape_closes_the_bar(desk):
     assert wait_for(lambda: not shot_state(shell).get("bar"), 5)
     focus = shell.focused() or {}
     assert focus.get("pid") == app.proc.pid  # the app has its window back
+
+
 def test_text_is_read_into_the_card(desk):
     """Text reads the window on the device and shows it in the shot's own card (the same
     card, in the same place), with Copy text and Fix grammar under it."""
@@ -197,13 +233,16 @@ def test_text_is_read_into_the_card(desk):
             pointer(shell, x0 + (x1 - x0) * i // 5, y0 + (y1 - y0) * i // 5)
         button(shell, False)
         assert wait_for(lambda: "shot:extract" in shot_state(shell).get("named", []), 15)
-    bar = shot_state(shell)["bar"]
+    toolbar = shot_state(shell)["toolbar"]
     assert shell.call("TestClick", {"target": "shot:extract"})["ok"]
     st = wait_for(lambda: "shot:text_fix" in shot_state(shell).get("named", [])
                   and shot_state(shell), 30)
     assert st, (shot_state(shell), glance.status())
     assert glance.status()["shot_result"] == "ready"
     assert st["selected"] == ["extract"] and "shot:text_copy" in st["named"]
-    assert st["bar"][:2] == bar[:2]  # the same card, in the same place
+    # the card grew under the toolbar, which did not move
+    assert st["expanded"] and "shot:body" in st["named"]
+    assert st["toolbar"][:2] == toolbar[:2], (st["toolbar"], toolbar)
+    assert st["result_text"]
     assert (shell.focused() or {}).get("pid") == app.proc.pid  # focus stays with the app
     snap(shell, "shot-text")

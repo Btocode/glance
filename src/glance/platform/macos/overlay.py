@@ -445,6 +445,48 @@ def _glyph(name: str, fg: Any, px: float = 14.0) -> Any:
     return view
 
 
+def _semibold(size: float) -> Any:
+    try:
+        return NSFont.systemFontOfSize_weight_(size, 0.3)  # NSFontWeightSemibold
+    except AttributeError:
+        return NSFont.boldSystemFontOfSize_(size)
+
+
+def _chip(target: Any, t: dict[str, str], label: str, selected: bool,
+          fn: Callable[[], None], ident: str | None = None, tip: str | None = None) -> Any:
+    """A rounded choice chip ("Translate to": a language): the selected one tinted, its ink
+    the accent; the click and the hand cursor come from a clear button over it."""
+    fg = color(t["accent"] if selected else t["text"])
+    font = _semibold(13.0) if selected else _font(size=13.0)
+    s = NSAttributedString.alloc().initWithString_attributes_(
+        label, {NSFontAttributeName: font, NSForegroundColorAttributeName: fg})
+    lab = NSTextField.labelWithString_("")
+    lab.setAttributedStringValue_(s)
+    lab.sizeToFit()
+    lw, lh = lab.frame().size.width, lab.frame().size.height
+    w, h = max(56.0, lw + 26), 26.0
+    chip = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
+    chip.fill = color(t["highlight_rgba"] if selected else t["group"])
+    chip.border = color(t["accent_fill"] if selected else t["card_border"])
+    chip.radius = h / 2
+    lab.setFrameOrigin_(NSMakePoint((w - lw) / 2, (h - lh) / 2))
+    chip.addSubview_(lab)
+    b = _Button.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
+    b.setTitle_("")
+    b.setBordered_(False)
+    b.setTransparent_(True)
+    b.setTarget_(target)
+    b.setAction_("fire:")
+    b.setTag_(target.add(fn))
+    b.setRefusesFirstResponder_(True)
+    if ident:
+        b.setAccessibilityIdentifier_(ident)
+    if tip:
+        b.setToolTip_(tip)
+    chip.addSubview_(b)
+    return chip
+
+
 class _Rows:
     """Lays views out top to bottom; each row is one full-width view or a run of small ones
     that wraps at the width."""
@@ -1434,6 +1476,11 @@ class MacOverlay:
         rows.run(head, right=right, gap=8)
         if r.source:
             rows.full(_label(f"“{r.source}”", color(t["muted"]), inner, size=12), gap=4)
+        if r.choices:  # "Translate to…": the languages, one click each, no answer box
+            rows.run([_chip(self._target, t, label, key == r.chosen,
+                            lambda key=key: self._act("res_action", {"key": key}),
+                            f"res:{key}") for key, label in r.choices])
+            return
         if not r.text and r.state == "loading":  # skeleton lines until the answer comes in
             h = len(look.SKELETON_SUGGESTED) * (look.SKELETON_BAR_H + look.SKELETON_GAP) + 13
             box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, inner, h))

@@ -97,10 +97,77 @@ def test_shell_shot_bar_clicks_and_clipboard():
     assert s.ask_point() is None  # the extension did not say where the card is
     bus.answers = {"ShotBar": {"ok": True, "rect": [600, 40, 460, 300]}}
     s.show_bar(view, Rect(1, 2, 3, 4))
-    assert s.ask_point() == (616, 144)  # over the card's body
+    assert s.ask_point() == (608, 88)  # just under the toolbar
     s.hide_bar()
     assert bus.calls[-1] == ("ShotBar", {"hide": True})
     assert s.ask_point() is None
+
+
+def test_shell_shot_inline_ask_forwards_the_question():
+    acts = []
+    s = ShellShot(FakeBus(), dict, lambda key, args=None: acts.append((key, args)))
+    assert s.inline_ask is True
+    s.on_clicked({"target": "shot", "args": {"action": "ask_submit",
+                                             "args": {"text": "what is this?"}}})
+    s.on_clicked({"target": "shot", "args": {"action": "ask_cancel", "args": {}}})
+    s.on_clicked({"target": "shot", "args": {"action": "lang:Bangla"}})
+    assert acts == [("ask_submit", {"text": "what is this?"}), ("ask_cancel", {}),
+                    ("lang:Bangla", None)]
+    view = bm.ShotBarView("3 × 2", bm.buttons(vision=True, ai=True, images="ask", ocr=True,
+                                              private=False), tools=bm.tools())
+    bus = FakeBus()
+    ShellShot(bus, dict, lambda *_a: None).show_bar(view, Rect(1, 2, 3, 4))
+    words = bus.calls[-1][1]["words"]
+    assert words["ask_prompt"] == bm.ASK_PROMPT and words["glyphs"]["save"] == "save"
+
+
+def test_shell_shot_mark_hands_over_a_private_file_and_draws_the_strokes(tmp_path, monkeypatch):
+    from glance.shot.image import Shot, png_size
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    png = encode_png(b"\xff" * (40 * 20 * 3), 40, 20)
+    seen = {}
+
+    class MarkBus(FakeBus):
+        def call(self, method, payload=None, timeout_ms=1500):
+            m = (payload or {}).get("mark")
+            if m:
+                p = Path(m["path"])
+                seen.update(mode=p.stat().st_mode & 0o777, data=p.read_bytes(), path=p,
+                            rect=m["rect"], tools=[t[0] for t in m["tools"]])
+            return super().call(method, payload, timeout_ms)
+
+    s = ShellShot(MarkBus(), dict, lambda *_a: None)
+    shot = Shot(png, 40, 20, Rect(5, 6, 20, 10))  # a 2x screen: 20 x 10 logical
+    out = []
+    s.annotate(shot, out.append)
+    assert seen["mode"] == 0o600 and seen["data"] == png and seen["rect"] == [5, 6, 20, 10]
+    assert not seen["path"].exists()  # gone once the extension read it
+    assert seen["tools"] == ["pen", "box", "arrow", "highlight"]
+    assert out == []  # still marking
+    s.on_clicked({"target": "shot", "args": {"action": "mark_done", "args": {"strokes": [
+        ["box", [[2, 2], [10, 8]]], ["nope", [[1, 1]]], ["pen", [["x", 1], [3, 3]]]]}}})
+    assert len(out) == 1 and out[0] and out[0] != png and png_size(out[0]) == (40, 20)
+    out.clear()
+    s.annotate(shot, out.append)
+    s.on_clicked({"target": "shot", "args": {"action": "mark_cancel", "args": {}}})
+    s.on_clicked({"target": "shot", "args": {"action": "mark_cancel", "args": {}}})
+    assert out == [None]
+    out.clear()
+    s.annotate(shot, out.append)
+    s.on_clicked({"target": "shot", "args": {"action": "mark_done", "args": {"strokes": []}}})
+    assert out == [None]  # nothing drawn: the shot stays as it was
+
+
+def test_shell_shot_mark_without_the_extension_gives_nothing(tmp_path, monkeypatch):
+    from glance.shot.image import Shot
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    png = encode_png(b"\x00" * 12, 2, 2)
+    out = []
+    ShellShot(FakeBus(available=False), dict, lambda *_a: None).annotate(
+        Shot(png, 2, 2, Rect(0, 0, 2, 2)), out.append)
+    assert out == [None] and list(tmp_path.iterdir()) == []
 
 
 def test_bus_names_and_extension_caller_check():

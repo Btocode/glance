@@ -16,14 +16,21 @@ from typing import Any
 
 import objc
 from AppKit import (
+    NSAttributedString,
     NSBezierPath,
     NSColor,
     NSCursor,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+    NSGraphicsContext,
+    NSImage,
     NSPasteboard,
     NSScreenSaverWindowLevel,
     NSScrollView,
+    NSTextField,
+    NSZeroRect,
 )
-from Foundation import NSData, NSMakePoint, NSMakeRect
+from Foundation import NSData, NSMakePoint, NSMakeRect, NSObject
 
 from glance.log import log_event
 from glance.platform.macos.appkit_util import (
@@ -39,10 +46,17 @@ from glance.platform.macos.overlay import (
     _attr,
     _Button,
     _Card,
+    _chip,
+    _fit,
     _Flipped,
+    _font,
+    _glyph,
     _keycap,
     _label,
     _mark_view,
+    _mono,
+    _Rows,
+    _semibold,
     _skeleton,
     cgcolor,
 )
@@ -55,16 +69,15 @@ from glance.shot.picker import HINT, Picker
 from glance.ui import look
 from glance.ui.ports import WindowInfo
 
-BAR_W = 460.0  # the card
-CARD_PAD = 16.0
-HEADER_H = 34.0
-TAB_ROW_H = 34.0
-TAB_PAD = 3.0
-TAB_GAP = 2.0
+TOOLBAR_H = 40.0  # the slim bar; the card grows under it
+TOOLBAR_PAD = 4.0
+ITEM_H = 28.0
+ITEM_PAD = 8.0
+CARD_MIN_W = 460.0  # the card, once it has a body
+INSET = 8.0  # the body's margin in the card
 BODY_PAD = 12.0
-BODY_MIN_H = 132.0  # the body keeps at least this height: the card barely resizes per step
 RESULT_MAX_H = 260.0  # longer text scrolls
-FOOT_H = 32.0
+FOOT_H = 30.0
 FRAME_PAD = 3  # the region's outline sits just outside it: the shot itself stays clear
 DIM = 0.45
 PNG_TYPE = "public.png"
@@ -277,6 +290,91 @@ class _Outline(_Flipped):
         ring.stroke()
 
 
+# ---------------------------------------------------------------------- the toolbar's parts
+
+
+class _Sep(_Flipped):
+    """A toolbar's 1px divider (`ink`)."""
+
+    def drawRect_(self, _rect):
+        ink = getattr(self, "ink", None)
+        if ink is not None:
+            ink.setFill()
+            NSBezierPath.fillRect_(self.bounds())
+
+
+def _separator(t: dict[str, str]) -> Any:
+    sep = _Sep.alloc().initWithFrame_(NSMakeRect(0, 0, 1, 18))
+    sep.ink = color(t["hairline"])
+    return sep
+
+
+def _item(target: Any, t: dict[str, str], b: bm.ShotButton, fn: Callable[[], None],
+          label: bool = True, glyph: str | None = None) -> Any:
+    """One toolbar item, as the selection bar draws them: a line glyph and its label; the
+    selected one on the highlight in the accent, semibold; a muted one at half strength (a
+    click says why)."""
+    glyph = glyph or bm.GLYPHS.get(b.key)
+    parts: list[Any] = []
+    if glyph in look.GLYPHS:
+        parts.append(_glyph(glyph, color(t["muted"] if b.muted else t["accent"]), 13.0))
+    if label:
+        fg = color(t["accent"] if b.selected else t["body"])
+        font = _semibold(13.0) if b.selected else _font(size=13.0)
+        lab = NSTextField.labelWithString_("")
+        lab.setAttributedStringValue_(NSAttributedString.alloc().initWithString_attributes_(
+            b.label, {NSFontAttributeName: font, NSForegroundColorAttributeName: fg}))
+        lab.sizeToFit()
+        parts.append(lab)
+    width = 2 * ITEM_PAD + sum(p.frame().size.width for p in parts) + 5 * (len(parts) - 1)
+    box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, ITEM_H))
+    box.fill = color(t["highlight_rgba"]) if b.selected else None
+    box.border, box.radius = None, 6.0
+    x = ITEM_PAD
+    for p in parts:
+        f = p.frame()
+        p.setFrameOrigin_(NSMakePoint(x, (ITEM_H - f.size.height) / 2))
+        box.addSubview_(p)
+        x += f.size.width + 5
+    cover = _Button.alloc().initWithFrame_(NSMakeRect(0, 0, width, ITEM_H))
+    cover.setTitle_("")
+    cover.setBordered_(False)
+    cover.setTransparent_(True)
+    cover.setTarget_(target)
+    cover.setAction_("fire:")
+    cover.setTag_(target.add(fn))
+    cover.setRefusesFirstResponder_(True)
+    cover.setAccessibilityIdentifier_(f"shot:{b.key}")
+    tip = b.tip or (None if label else b.label)
+    if tip:
+        cover.setToolTip_(tip)
+    box.addSubview_(cover)
+    if b.muted:
+        box.setAlphaValue_(0.5)
+    return box
+
+
+class _ShotField(NSTextField):
+    """Ask's question, typed in the card."""
+
+
+class _AskDelegate(NSObject):
+    """The field's Return and Escape (Escape would otherwise ask the field to complete)."""
+
+    def control_textView_doCommandBySelector_(self, _control, _text_view, selector):
+        owner = getattr(self, "owner", None)
+        name = str(selector)
+        if owner is None:
+            return False
+        if name in ("insertNewline:", "insertNewlineIgnoringFieldEditor:"):
+            owner.ask_key("submit")
+            return True
+        if name in ("cancelOperation:", "complete:"):
+            owner.ask_key("cancel")
+            return True
+        return False
+
+
 # ---------------------------------------------------------------------- MacShot
 
 
@@ -284,10 +382,15 @@ class MacShot:
     """ShotUiPort on macOS. `post(fn)` runs `fn` on the main thread (capture callbacks
     arrive on others)."""
 
-    def __init__(self, on_action: Callable[[str], None],
+    def __init__(self, on_action: Callable[[str, dict[str, Any]], None],
                  post: Callable[[Callable[[], None]], None],
-                 notify: Callable[[str, str], None] = lambda _s, _b: None) -> None:
+                 notify: Callable[[str, str], None] = lambda _s, _b: None,
+                 keys: Callable[[bool], None] = lambda _taken: None) -> None:
+        """`on_action(key, args)`: the controller's `action`. `keys(True)` when one of
+        Glance Shot's panels takes the keyboard (Ask's field, Mark), `keys(False)` when it
+        gives it back: Escape must reach that panel, not close the shot."""
         self._act = on_action
+        self._keys = keys
         self._post = post
         self._notify = notify
         self._target = Target.alloc().init()
@@ -299,7 +402,13 @@ class MacShot:
         self._view: Any = None
         self._bar = make_panel()
         self._bar_key: Any = None
-        self._bar_h = 0
+        self._bar_wh = (0, 0)
+        self._placed: tuple[Rect, tuple[int, int]] | None = None  # (region, top-left)
+        self._view_shown: tuple[bm.ShotBarView, Rect] | None = None
+        self._field: Any = None  # Ask's question, while it is typed
+        self._ask_delegate = _AskDelegate.alloc().init()
+        self._keys_taken = False
+        self._marker: Marker | None = None
         self._region: Rect | None = None
         self._frame: Any = None  # the region's outline, made on first use
         self._frame_rect: Rect | None = None
@@ -414,17 +523,28 @@ class MacShot:
 
     # ------------------------------------------------------------------ the card
 
-    def _button(self, b: bm.ShotButton) -> Any:
+    def _plain_button(self, b: bm.ShotButton, fn: Callable[[], None] | None = None) -> Any:
+        btn = _Button.buttonWithTitle_target_action_(b.label, self._target, "fire:")
+        btn.setTag_(self._target.add(fn or (lambda: self._act(b.key, {}))))
+        btn.setRefusesFirstResponder_(True)
+        btn.setBordered_(False)
+        btn.setWantsLayer_(True)
+        if b.tip:
+            btn.setToolTip_(b.tip)
+        btn.setAccessibilityIdentifier_(f"shot:{b.key}")
+        return btn
+
+    def _button(self, b: bm.ShotButton, fn: Callable[[], None] | None = None) -> Any:
         """A result action or a notice button: the primary one an emerald pill, the others
         outlined."""
         t = self.t
-        btn = self._plain_button(b)
+        btn = self._plain_button(b, fn)
         primary = b.primary and not b.muted
         fg = t["on_accent"] if primary else t["muted"] if b.muted else t["text"]
         btn.setAttributedTitle_(_attr(b.label, color(fg), bold=primary, size=12.5))
         btn.sizeToFit()
         f = btn.frame()
-        btn.setFrameSize_((f.size.width + 24, 30.0))
+        btn.setFrameSize_((f.size.width + 24, 28.0))
         layer = btn.layer()
         layer.setCornerRadius_(7.0)
         if primary:
@@ -436,103 +556,120 @@ class MacShot:
             layer.setBorderWidth_(1.0)
         return btn
 
-    def _plain_button(self, b: bm.ShotButton) -> Any:
-        btn = _Button.buttonWithTitle_target_action_(b.label, self._target, "fire:")
-        btn.setTag_(self._target.add(lambda: self._act(b.key)))
-        btn.setRefusesFirstResponder_(True)
-        btn.setBordered_(False)
-        btn.setWantsLayer_(True)
-        if b.tip:
-            btn.setToolTip_(b.tip)
-        btn.setAccessibilityIdentifier_(f"shot:{b.key}")
-        return btn
-
-    def _tool(self, b: bm.ShotButton) -> Any:
-        """Copy image, Save: small outlined buttons in the header."""
+    def _toolbar(self, view: bm.ShotBarView, card: Any) -> float:
+        """The slim bar, as the selection bar draws it: the mark, the tabs │ Mark · Copy ·
+        Save │ ✕. Laid into `card` at its top; gives back its width. It never moves while
+        the card grows under it."""
         t = self.t
-        btn = self._plain_button(b)
-        btn.setAttributedTitle_(_attr(b.label, color(t["text"]), size=12.5))
-        btn.sizeToFit()
-        f = btn.frame()
-        btn.setFrameSize_((f.size.width + 18, 26.0))
-        layer = btn.layer()
-        layer.setCornerRadius_(7.0)
-        layer.setBorderColor_(cgcolor(t["card_border"]))
-        layer.setBorderWidth_(1.0)
-        return btn
+        lead = _mark_view(16.0)
+        lead.setToolTip_(f"{bm.TITLE} · {view.size}")
+        parts: list[tuple[Any, float]] = [(lead, 6.0)]
+        for b in view.buttons:
+            if b.key != "close":
+                parts.append((_item(self._target, t, b, lambda k=b.key: self._act(k, {})), 1.0))
+        parts.append((_separator(t), 1.0))
+        for b in view.tools:
+            parts.append((_item(self._target, t, b, lambda k=b.key: self._act(k, {})), 1.0))
+        parts.append((_separator(t), 1.0))
+        close = bm.ShotButton("close", f"{look.CLOSE} (Esc)")
+        parts.append((_item(self._target, t, close, lambda: self._act("close", {}),
+                            label=False), 0.0))
+        x = TOOLBAR_PAD + 4
+        for v, gap in parts:
+            f = v.frame()
+            if v.isKindOfClass_(_Sep):
+                x += 4
+                v.setFrameOrigin_(NSMakePoint(x, (TOOLBAR_H - f.size.height) / 2))
+                x += 1 + 5
+            else:
+                v.setFrameOrigin_(NSMakePoint(x, (TOOLBAR_H - f.size.height) / 2))
+                x += f.size.width + gap
+            card.addSubview_(v)
+        return x + TOOLBAR_PAD
 
-    def _tabs(self, view: bm.ShotBarView, width: float) -> Any:
-        """The tab row: one rounded group, equal widths, the selected tab tinted."""
+    def _status(self, view: bm.ShotBarView, width: float, right: bool = False) -> Any:
         t = self.t
-        tabs = [b for b in view.buttons if b.key != "close"]
-        group = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, TAB_ROW_H))
-        group.fill, group.border, group.radius = color(t["group"]), color(t["card_border"]), 9.0
-        if not tabs:
-            return group
-        inner = width - 2 * TAB_PAD
-        tw = (inner - TAB_GAP * (len(tabs) - 1)) / len(tabs)
-        x = TAB_PAD
-        for b in tabs:
-            btn = self._plain_button(b)
-            fg = t["accent"] if b.selected else t["muted"]
-            btn.setAttributedTitle_(_attr(b.label, color(fg), bold=b.selected, size=13.0))
-            btn.setFrame_(NSMakeRect(x, TAB_PAD, tw, TAB_ROW_H - 2 * TAB_PAD))
-            layer = btn.layer()
-            layer.setCornerRadius_(7.0)
-            if b.selected:
-                layer.setBackgroundColor_(color(t["highlight_rgba"]).CGColor())
-            if b.muted:
-                btn.setAlphaValue_(0.5)
-            group.addSubview_(btn)
-            x += tw + TAB_GAP
-        return group
+        ink = t["warn_text"] if view.warn else t["accent"]
+        status = _label(view.banner or "", color(ink), max(40.0, width), lines=1, size=12.5)
+        if right:
+            status.setAlignment_(2)
+        status.setToolTip_(view.banner)
+        status.setAccessibilityIdentifier_("shot:status")
+        return status
 
     def _body(self, view: bm.ShotBarView, width: float) -> Any:
-        """The hint, the notice, or the result, in one box of at least BODY_MIN_H."""
+        """The notice, the question's entry, or the result (its choices, text, skeleton or
+        why it failed)."""
         t = self.t
         inner = width - 2 * BODY_PAD
-        views: list[tuple[Any, float]] = []  # (view, gap after it)
         fill, border = t["card"], t["card_border"]
         if view.notice is not None:
             fill, border = t["warn_bg"], t["warn_border"]
-            views.append((_label(view.notice.text, color(t["warn_text"]), inner, size=13.0), 0))
-        elif view.result is not None:
-            views.extend(self._result(view.result, inner))
-        else:
-            views.append((_label(view.hint or bm.HINT, color(t["text"]), inner, bold=True,
-                                 size=13.5), 6))
-            views.append((_label(bm.HINT_SUB, color(t["muted"]), inner, size=12.0), 0))
-        box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, BODY_MIN_H))
+        box = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, width, 40))
         box.fill, box.border, box.radius = color(fill), color(border), 8.0
-        y = BODY_PAD
-        for v, gap in views:
-            v.setFrameOrigin_(NSMakePoint(BODY_PAD, y))
-            box.addSubview_(v)
-            y += v.frame().size.height + gap
-        box.setFrameSize_((width, max(BODY_MIN_H, y + BODY_PAD)))
         box.setAccessibilityIdentifier_("shot:body")
+        rows = _Rows(box, inner, top=BODY_PAD, left=BODY_PAD)
+        if view.notice is not None:
+            rows.full(_label(view.notice.text, color(t["warn_text"]), inner, size=13.0), gap=0)
+        elif view.asking:
+            self._ask_body(rows, inner)
+        elif view.result is not None:
+            self._result(rows, view.result, inner)
+        box.setFrameSize_((width, max(36.0, rows.y + BODY_PAD - 6)))
         return box
 
-    def _result(self, r: bm.ShotResult, inner: float) -> list[tuple[Any, float]]:
+    def _ask_body(self, rows: Any, inner: float) -> None:
         t = self.t
-        head = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, inner, 18))
+        rows.full(_label(bm.ASK_PROMPT, color(t["muted"]), inner, bold=True, lines=1,
+                         size=12.0), gap=8)
+        field = _ShotField.alloc().initWithFrame_(NSMakeRect(0, 0, inner, 28))
+        field.setPlaceholderString_(bm.ASK_PLACEHOLDER)
+        field.setFont_(_font(size=13.0))
+        field.setBezelStyle_(1)  # rounded
+        field.setFocusRingType_(1)  # none: the bezel says where it is
+        field.setAccessibilityIdentifier_("shot:ask")
+        self._ask_delegate.owner = self
+        field.setDelegate_(self._ask_delegate)
+        rows.full(field, gap=8)
+        hint: list[Any] = []
+        for key, what in ((look.RETURN_KEY, "ask"), (look.ESC_KEY, "back")):
+            hint.append(_keycap(key, t))
+            lab = _label(what, color(t["muted"]), 60, lines=1, size=12.0)
+            lab.sizeToFit()
+            hint.append(lab)
+        rows.run(hint, gap=6)
+        self._field = field
+
+    def _result(self, rows: Any, r: bm.ShotResult, inner: float) -> None:
+        t = self.t
         title = _label(r.title, color(t["muted"]), inner, bold=True, lines=1, size=12.0)
         title.sizeToFit()
-        title.setFrameOrigin_(NSMakePoint(0, 0))
-        head.addSubview_(title)
-        if r.state == "failed":
-            why = _label(r.note or "That did not work. Try again", color(t["warn_text"]), inner,
-                         size=12.5)
-            return [(head, 8), (why, 0)]
-        if r.note:
+        right = []
+        if r.note and r.state != "failed":
             room = inner - title.frame().size.width - 12
             note = _label(r.note, color(t["muted"]), room, lines=1, size=12.0)
-            note.setAlignment_(2)  # right
-            note.setFrame_(NSMakeRect(inner - room, 0, room, title.frame().size.height))
-            head.addSubview_(note)
-        out: list[tuple[Any, float]] = [(head, 8)]
+            note.sizeToFit()
+            if note.frame().size.width > room:
+                note.setFrameSize_((room, note.frame().size.height))
+            right.append(note)
+        rows.run([title], gap=8, right=right)
+        if r.state == "choose":
+            rows.run([_chip(self._target, t, c.label, c.selected,
+                            lambda k=c.key: self._act(k, {}), f"shot:{c.key}", c.tip)
+                      for c in r.choices], gap=6)
+            return
+        if r.state == "failed":
+            rows.full(_label(r.note or "That did not work. Try again", color(t["warn_text"]),
+                             inner, size=12.5), gap=6)
+            return
         if r.text is not None:
-            text = _label(r.text, color(t["text"]), inner - 14, size=13.5)
+            width = inner - 14
+            if r.title == "Text":  # what was read, line for line
+                text = _label(r.text, color(t["text"]), width, size=12.5)
+                text.setFont_(_mono(12.5))
+                _fit(text, width)
+            else:
+                text = _label(r.text, color(t["text"]), width, size=13.5)
             full = text.frame().size.height
             th = min(RESULT_MAX_H, full)
             scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, inner, th))
@@ -540,123 +677,176 @@ class MacShot:
             scroll.setAutohidesScrollers_(True)
             scroll.setDrawsBackground_(False)
             scroll.setBorderType_(0)  # NSNoBorder
-            doc = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, inner - 14, full))
+            doc = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, width, full))
             doc.addSubview_(text)
             scroll.setDocumentView_(doc)
-            out.append((scroll, 0))
+            rows.full(scroll, gap=6)
         elif r.state == "loading":
             for share in look.SKELETON_SUGGESTED:  # skeleton lines, the answer's shape
-                out.append((_skeleton(t, inner * share), look.SKELETON_GAP + 4))
-        return out
+                rows.full(_skeleton(t, inner * share), gap=look.SKELETON_GAP + 4)
 
-    def _footer(self, view: bm.ShotBarView, width: float) -> Any:
+    def _footer(self, view: bm.ShotBarView, width: float) -> Any | None:
         """The notice's buttons or the result's actions on the left; the status on the
-        right."""
-        t = self.t
-        row = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, width, FOOT_H))
+        right. None when there is neither."""
         actions: tuple[bm.ShotButton, ...] = ()
         if view.notice is not None:
             actions = view.notice.buttons
-        elif view.result is not None and view.result.text is not None:
+        elif view.result is not None and view.result.text is not None and not view.asking:
             actions = view.result.actions
-        x = 0.0
-        for b in actions:
-            btn = self._button(b)
-            btn.setFrameOrigin_(NSMakePoint(x, (FOOT_H - btn.frame().size.height) / 2))
-            row.addSubview_(btn)
-            x += btn.frame().size.width + 6
+        if not actions and not view.banner:
+            return None
+        row = _Flipped.alloc().initWithFrame_(NSMakeRect(0, 0, width, FOOT_H))
+        rows = _Rows(row, width, top=0, left=0)
+        buttons = [self._button(b) for b in actions]
+        right = []
         if view.banner:
-            room = width - x - 8
-            ink = t["warn_text"] if view.warn else t["accent"]
-            status = _label(view.banner, color(ink), max(40.0, room), lines=1, size=12.5)
-            status.setAlignment_(2)  # right
-            sh = status.frame().size.height
-            status.setFrame_(NSMakeRect(width - max(40.0, room), (FOOT_H - sh) / 2,
-                                        max(40.0, room), sh))
-            status.setToolTip_(view.banner)
-            status.setAccessibilityIdentifier_("shot:status")
-            row.addSubview_(status)
+            used = sum(b.frame().size.width + 6 for b in buttons)
+            room = max(80.0, width - used - 8) if used < width else width
+            right.append(self._status(view, room, right=True))
+        if buttons and right and sum(b.frame().size.width + 6 for b in buttons) \
+                + right[0].frame().size.width > width:
+            rows.run(buttons)  # no room beside them: the status goes under
+            rows.run([], right=right)
+        else:
+            rows.run(buttons, right=right)
+        row.setFrameSize_((width, max(FOOT_H, rows.y - 6)))
+        # centre a lone status line on the buttons' row
         return row
 
     def show_bar(self, view: bm.ShotBarView, region: Rect) -> None:
+        self._view_shown = (view, region)
+        if self._marker is not None:  # marking: the card comes back when it is done
+            return
         self._region = region
         self.t = t = tokens()
         key = (view, region, t["surface"])
         if key != self._bar_key:
             self._bar_key = key
+            self._release_keys()
             self._target.reset()
-            self._bar_h = self._build(view)
-        h = self._bar_h
-        x, y = geo.bar_position(region, (round(BAR_W), h), monitors())
-        # One frame change, content already in place: the card does not flicker; on the
-        # same side its top-left stays put and it only grows down.
-        place(self._bar, Rect(x, y, round(BAR_W), h))
+            self._bar_wh = self._build(view)
+        w, h = self._bar_wh
+        x, y = self._position(region, (w, h))
+        # One frame change, content already in place: the card does not flicker, and its
+        # top-left (the toolbar) stays put for the whole shot.
+        place(self._bar, Rect(x, y, w, h))
         self._bar.invalidateShadow()
         self._show_frame(region)
         if not self._bar.isVisible():
             self._bar.orderFrontRegardless()
+        if view.asking and self._field is not None and not self._keys_taken:
+            self._take_keys()
 
-    def _build(self, view: bm.ShotBarView) -> int:
+    def _position(self, region: Rect, size: tuple[int, int]) -> tuple[int, int]:
+        """Placed once per shot (beside the region, as the selection bar); after that the
+        top-left stays where it is while the card grows and shrinks under it, moved up only
+        if it would leave the screen."""
+        w, h = size
+        mons = monitors()
+        if self._placed is not None and self._placed[0] == region:
+            x, y = self._placed[1]
+            mon = geo.monitor_at(x, y, mons)
+            if mon is not None and y + h > mon.y + mon.h:
+                y = max(mon.y, mon.y + mon.h - h)
+        else:
+            x, y = geo.bar_position(region, (w, h), mons)
+        self._placed = (region, (x, y))
+        return x, y
+
+    def _build(self, view: bm.ShotBarView) -> tuple[int, int]:
         t = self.t
-        inner = BAR_W - 2 * CARD_PAD
-        card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, BAR_W, 10))
-        card.fill, card.border, card.radius = color(t["surface"]), color(t["hairline"]), 12.0
-        # the header: logo, "Glance Shot", the size; Copy image, Save, Esc Close
-        y = 14.0
-        mark = _mark_view(20.0)
-        mark.setFrameOrigin_(NSMakePoint(CARD_PAD, y + 6))
-        card.addSubview_(mark)
-        title = _label(bm.TITLE, color(t["text"]), 160, bold=True, lines=1, size=14.0)
-        title.setFrameOrigin_(NSMakePoint(CARD_PAD + 28, y))
-        card.addSubview_(title)
-        size = _label(view.size, color(t["muted"]), 160, lines=1, size=12.0)
-        size.setFrameOrigin_(NSMakePoint(CARD_PAD + 28, y + 18))
-        card.addSubview_(size)
-        esc = _keycap(look.ESC_KEY, t)
-        close = _Button.buttonWithTitle_target_action_(look.CLOSE, self._target, "fire:")
-        close.setTag_(self._target.add(lambda: self._act("close")))
-        close.setBordered_(False)
-        close.setRefusesFirstResponder_(True)
-        close.setAttributedTitle_(_attr(look.CLOSE, color(t["muted"]), size=12.0))
-        close.sizeToFit()
-        close.setAccessibilityIdentifier_("shot:close")
-        mid = y + HEADER_H / 2
-        cx = BAR_W - CARD_PAD - close.frame().size.width
-        close.setFrameOrigin_(NSMakePoint(cx, mid - close.frame().size.height / 2))
-        ex = cx - esc.frame().size.width - 5
-        esc.setFrameOrigin_(NSMakePoint(ex, mid - esc.frame().size.height / 2))
-        card.addSubview_(esc)
-        card.addSubview_(close)
-        x = ex - 12
-        for b in reversed(view.tools):
-            tool = self._tool(b)
-            x -= tool.frame().size.width
-            tool.setFrameOrigin_(NSMakePoint(x, mid - tool.frame().size.height / 2))
-            card.addSubview_(tool)
-            x -= 8
-        y += HEADER_H + 12
-        tabs = self._tabs(view, inner)
-        tabs.setFrameOrigin_(NSMakePoint(CARD_PAD, y))
-        card.addSubview_(tabs)
-        y += TAB_ROW_H + 12
-        body = self._body(view, inner)
-        body.setFrameOrigin_(NSMakePoint(CARD_PAD, y))
-        card.addSubview_(body)
-        y += body.frame().size.height + 12
-        foot = self._footer(view, inner)
-        foot.setFrameOrigin_(NSMakePoint(CARD_PAD, y))
-        card.addSubview_(foot)
-        y += FOOT_H + CARD_PAD - 2
-        card.setFrameSize_((BAR_W, y))
+        self._field = None
+        card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, 400, TOOLBAR_H))
+        card.fill, card.border, card.radius = color(t["surface"]), color(t["hairline"]), 10.0
+        bar_w = self._toolbar(view, card)
+        width = max(bar_w, CARD_MIN_W) if view.expanded else bar_w
+        y = TOOLBAR_H
+        if view.expanded:
+            inner = width - 2 * INSET
+            body = self._body(view, inner)
+            body.setFrameOrigin_(NSMakePoint(INSET, y))
+            card.addSubview_(body)
+            y += body.frame().size.height + 8
+            foot = self._footer(view, inner)
+            if foot is not None:
+                foot.setFrameOrigin_(NSMakePoint(INSET, y))
+                card.addSubview_(foot)
+                y += foot.frame().size.height + 8
+            y += 2
+        elif view.banner:
+            status = self._status(view, width - 2 * INSET - 4)
+            status.setFrameOrigin_(NSMakePoint(INSET + 4, y - 4))
+            card.addSubview_(status)
+            y += status.frame().size.height + 4
+        card.setFrameSize_((width, y))
         self._bar.setContentView_(card)
-        return round(y)
+        return round(width), round(y)
 
     def ask_point(self) -> tuple[int, int] | None:
-        """Where Ask…'s one-line entry goes: over the card's body (top-left space)."""
+        """Where a one-line entry of its own goes ("Other…" language): under the toolbar."""
         if not self._bar.isVisible():
             return None
         x, y, _w, _h = frame_of(self._bar)
-        return x + 16, y + 104
+        return x + 8, y + round(TOOLBAR_H) + 6
+
+    # ------------------------------------------------------------------ Ask, in the card
+
+    inline_ask = True  # the controller has Ask's question typed in the card, not a window
+
+    def _take_keys(self) -> None:
+        """The question's field gets the keyboard: the card becomes key, as a
+        non-activating panel can (the app in front stays in front); Escape is no longer
+        Glance's hotkey meanwhile, so it reaches the field."""
+        field = self._field
+        if field is None:
+            return
+        self._bar.allow_key = True
+        self._keys_taken = True
+        self._keys(True)
+        self._bar.makeKeyWindow()
+        self._bar.makeFirstResponder_(field)
+
+    def _release_keys(self) -> None:
+        if not self._keys_taken:
+            return
+        self._keys_taken = False
+        self._bar.allow_key = False
+        self._keys(False)
+        if self._bar.isKeyWindow():  # the keyboard goes back to the app in front
+            self._bar.orderOut_(None)
+
+    def ask_key(self, what: str) -> None:
+        """The field's Return ("submit") or Escape ("cancel")."""
+        field = self._field
+        text = str(field.stringValue() or "") if field is not None else ""
+        self._release_keys()
+        if what == "submit":
+            self._act("ask_submit", {"text": text})
+        else:
+            self._act("ask_cancel", {})
+
+    # ------------------------------------------------------------------ Mark
+
+    def annotate(self, shot: Shot, done: Callable[[bytes | None], None]) -> None:
+        """Mark up the shot (`Marker`); the card steps aside meanwhile and comes back."""
+        if self._marker is not None:
+            self._marker.cancel()
+        self._release_keys()
+        self._bar.orderOut_(None)
+        self._hide_frame()
+
+        def finished(png: bytes | None) -> None:
+            self._marker = None
+            done(png)
+            if self._marker is None and self._view_shown is not None \
+                    and self._region is not None and not self._bar.isVisible():
+                self.show_bar(*self._view_shown)  # (the controller usually did already)
+
+        self._marker = Marker(self, shot, finished)
+
+    @property
+    def marker(self) -> Any:
+        return self._marker
 
     # ------------------------------------------------------------------ the region outline
 
@@ -687,10 +877,16 @@ class MacShot:
         return frame_of(f) if f is not None and f.isVisible() else None
 
     def hide_bar(self) -> None:
+        self._release_keys()
+        self._region = None
+        self._view_shown = None  # (first: a Mark cancelled here does not bring it back)
+        if self._marker is not None:
+            self._marker.cancel()
         self._hide_frame()
         self._bar.orderOut_(None)
         self._bar_key = None
-        self._region = None
+        self._placed = None
+        self._field = None
 
     def bar_geometry(self) -> tuple[int, int, int, int] | None:
         return frame_of(self._bar) if self._bar.isVisible() else None
@@ -706,3 +902,269 @@ class MacShot:
         self.cancel_pick()
         self.hide_bar()
 
+
+# ---------------------------------------------------------------------- Mark
+
+MARK_TOOLS = (("pen", "Pen", "pen"), ("box", "Box", "box"), ("arrow", "Arrow", "arrow"),
+              ("highlight", "Highlight", "lines"))
+MARK_INK = (0.937, 0.267, 0.267, 1.0)        # red: pen, box, arrow
+MARK_HIGHLIGHT = (0.98, 0.80, 0.08, 0.38)    # a highlighter's yellow, see-through
+MARK_WIDTH, HIGHLIGHT_WIDTH = 3.0, 16.0
+ARROW_HEAD, ARROW_SPREAD = 14.0, 0.45
+
+Strokes = list[tuple[str, list[tuple[float, float]]]]
+
+
+def draw_marks(ctx: Any, strokes: Strokes, scale: float = 1.0) -> None:
+    """The marks on a CGContext whose y runs down, in the region's logical coordinates
+    times `scale` (the PNG's pixels). The same colours and widths as the GTK renderer's."""
+    import math
+
+    import Quartz as Q
+
+    Q.CGContextSetLineJoin(ctx, Q.kCGLineJoinRound)
+    for tool, pts in strokes:
+        if not pts:
+            continue
+        p = [(x * scale, y * scale) for x, y in pts]
+        if tool == "highlight":
+            Q.CGContextSetRGBStrokeColor(ctx, *MARK_HIGHLIGHT)
+            Q.CGContextSetLineWidth(ctx, HIGHLIGHT_WIDTH * scale)
+            Q.CGContextSetLineCap(ctx, Q.kCGLineCapButt)
+        else:
+            Q.CGContextSetRGBStrokeColor(ctx, *MARK_INK)
+            Q.CGContextSetLineWidth(ctx, MARK_WIDTH * scale)
+            Q.CGContextSetLineCap(ctx, Q.kCGLineCapRound)
+        (x0, y0), (x1, y1) = p[0], p[-1]
+        if tool == "box":
+            Q.CGContextStrokeRect(ctx, Q.CGRectMake(min(x0, x1), min(y0, y1), abs(x1 - x0),
+                                                    abs(y1 - y0)))
+        elif tool == "arrow":
+            Q.CGContextBeginPath(ctx)
+            Q.CGContextMoveToPoint(ctx, x0, y0)
+            Q.CGContextAddLineToPoint(ctx, x1, y1)
+            angle = math.atan2(y1 - y0, x1 - x0)
+            head = ARROW_HEAD * scale
+            for side in (-ARROW_SPREAD, ARROW_SPREAD):
+                Q.CGContextMoveToPoint(ctx, x1, y1)
+                Q.CGContextAddLineToPoint(ctx, x1 - head * math.cos(angle + side),
+                                          y1 - head * math.sin(angle + side))
+            Q.CGContextStrokePath(ctx)
+        else:
+            Q.CGContextBeginPath(ctx)
+            Q.CGContextMoveToPoint(ctx, *p[0])
+            for q in p[1:]:
+                Q.CGContextAddLineToPoint(ctx, *q)
+            if len(p) == 1:
+                Q.CGContextAddLineToPoint(ctx, p[0][0] + 0.1, p[0][1])
+            Q.CGContextStrokePath(ctx)
+
+
+def marked_png(shot: Shot, strokes: Strokes) -> bytes | None:
+    """The shot's PNG with the marks drawn on it, at its own pixel size."""
+    import Quartz as Q
+
+    src = Q.CGImageSourceCreateWithData(NSData.dataWithBytes_length_(shot.png, len(shot.png)),
+                                        None)
+    img = Q.CGImageSourceCreateImageAtIndex(src, 0, None) if src is not None else None
+    if img is None:
+        return None
+    w, h = Q.CGImageGetWidth(img), Q.CGImageGetHeight(img)
+    space = Q.CGColorSpaceCreateWithName(Q.kCGColorSpaceSRGB)
+    ctx = Q.CGBitmapContextCreate(None, w, h, 8, 0, space, Q.kCGImageAlphaPremultipliedLast)
+    Q.CGContextDrawImage(ctx, Q.CGRectMake(0, 0, w, h), img)
+    Q.CGContextTranslateCTM(ctx, 0, h)
+    Q.CGContextScaleCTM(ctx, 1, -1)
+    draw_marks(ctx, strokes, w / max(1, shot.rect.w))
+    out = Q.CGBitmapContextCreateImage(ctx)
+    return png_of(out) if out is not None else None
+
+
+class _MarkCanvas(_Flipped):
+    """The frozen region with the marks on it; hears the pointer and the keys (`marker`)."""
+
+    def acceptsFirstResponder(self):
+        return True
+
+    def acceptsFirstMouse_(self, _event):
+        return True
+
+    def resetCursorRects(self):
+        self.addCursorRect_cursor_(self.bounds(), NSCursor.crosshairCursor())
+
+    @objc.python_method
+    def _at(self, event: Any) -> tuple[float, float]:
+        p = self.convertPoint_fromView_(event.locationInWindow(), None)
+        return float(p.x), float(p.y)
+
+    def mouseDown_(self, event):
+        self.marker.press(*self._at(event))
+
+    def mouseDragged_(self, event):
+        self.marker.drag(*self._at(event))
+
+    def mouseUp_(self, event):
+        self.marker.release(*self._at(event))
+
+    def keyDown_(self, event):
+        code = int(event.keyCode())
+        if code == 53:
+            self.marker.cancel()
+        elif code in (36, 76):
+            self.marker.finish()
+        elif code == 6 and event.modifierFlags() & (1 << 20):  # ⌘Z
+            self.marker.act("mark_undo")
+
+    def performKeyEquivalent_(self, event):
+        if int(event.keyCode()) == 6 and event.modifierFlags() & (1 << 20):
+            self.marker.act("mark_undo")
+            return True
+        return False
+
+    def drawRect_(self, _rect):
+        m = getattr(self, "marker", None)
+        if m is None:
+            return
+        b = self.bounds()
+        if m.image is not None:
+            m.image.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
+                b, NSZeroRect, 2, 1.0, True, None)  # source-over
+        ctx = NSGraphicsContext.currentContext()
+        cg = ctx.CGContext() if hasattr(ctx, "CGContext") else ctx.graphicsPort()
+        draw_marks(cg, m.strokes)
+        color(m.owner.t["accent_fill"]).setStroke()
+        ring = NSBezierPath.bezierPathWithRect_(
+            NSMakeRect(1, 1, b.size.width - 2, b.size.height - 2))
+        ring.setLineWidth_(2.0)
+        ring.stroke()
+
+
+class Marker:
+    """Draw on a shot: the frozen region in a borderless, non-activating panel right where
+    it was taken (key while it is up: the app in front stays in front), and a small bar of
+    tools above it. Pen, Box, Arrow, Highlight; Undo (⌘Z); Done (Return) gives the marked-up
+    PNG, Cancel (Esc) None. Escape is not Glance's hotkey meanwhile."""
+
+    def __init__(self, owner: MacShot, shot: Shot, done: Callable[[bytes | None], None]) -> None:
+        self.owner, self._shot, self._done = owner, shot, done
+        self.tool = "pen"
+        self.strokes: Strokes = []
+        self._drawing = False
+        self._finished = False
+        self._target = Target.alloc().init()
+        self.image = NSImage.alloc().initWithData_(
+            NSData.dataWithBytes_length_(shot.png, len(shot.png)))
+        r = shot.rect
+        self.panel = make_panel(can_key=True)
+        self.panel.setHasShadow_(False)
+        self.canvas = _MarkCanvas.alloc().initWithFrame_(NSMakeRect(0, 0, r.w, r.h))
+        self.canvas.marker = self
+        self.panel.setContentView_(self.canvas)
+        self.panel.on_cancel = self.cancel
+        place(self.panel, r)
+        self.bar = make_panel()
+        self._build_bar()
+        owner._keys(True)
+        self.panel.orderFrontRegardless()
+        self.bar.orderFrontRegardless()
+        self.panel.makeKeyWindow()
+        self.panel.makeFirstResponder_(self.canvas)
+        log_event("shot_mark_open")
+
+    # -- the bar of tools
+    def _build_bar(self) -> None:
+        t = self.owner.t
+        self._target.reset()
+        card = _Card.alloc().initWithFrame_(NSMakeRect(0, 0, 400, TOOLBAR_H))
+        card.fill, card.border, card.radius = color(t["surface"]), color(t["hairline"]), 10.0
+        parts: list[Any] = [_mark_view(16.0)]
+        for key, label, glyph in MARK_TOOLS:
+            b = bm.ShotButton(f"mark_{key}", label, selected=key == self.tool)
+            parts.append(_item(self._target, t, b, lambda k=b.key: self.act(k), glyph=glyph))
+        parts.append(_separator(t))
+        for key, label in (("mark_undo", "Undo"), ("mark_cancel", "Cancel")):
+            parts.append(_item(self._target, t, bm.ShotButton(key, label),
+                               lambda k=key: self.act(k)))
+        done = self.owner._plain_button(bm.ShotButton("mark_done", "Done", primary=True))
+        done.setTarget_(self._target)
+        done.setTag_(self._target.add(self.finish))
+        done.setAttributedTitle_(_attr("Done", color(t["on_accent"]), bold=True, size=13.0))
+        done.sizeToFit()
+        done.setFrameSize_((done.frame().size.width + 28, ITEM_H))
+        done.layer().setCornerRadius_(7.0)
+        done.layer().setBackgroundColor_(cgcolor(t["accent_fill"]))
+        parts.append(done)
+        x = TOOLBAR_PAD + 4
+        for v in parts:
+            f = v.frame()
+            if v.isKindOfClass_(_Sep):
+                x += 4
+            v.setFrameOrigin_(NSMakePoint(x, (TOOLBAR_H - f.size.height) / 2))
+            card.addSubview_(v)
+            x += f.size.width + (6 if v is parts[0] else 5 if v.isKindOfClass_(_Sep) else 1)
+        w = x + TOOLBAR_PAD + 2
+        card.setFrameSize_((w, TOOLBAR_H))
+        self.bar.setContentView_(card)
+        self._place_bar(round(w), round(TOOLBAR_H))
+
+    def _place_bar(self, w: int, h: int) -> None:
+        r = self._shot.rect
+        mons = monitors()
+        mon = geo.monitor_at(r.x + r.w // 2, r.y + r.h // 2, mons) or Rect(0, 0, 10 ** 5, 10 ** 5)
+        y = r.y - h - 8 if r.y - h - 8 >= mon.y else r.y + r.h + 8
+        if y + h > mon.y + mon.h:
+            y = r.y + 8  # no room around it: inside the region's top
+        x = max(mon.x, min(r.x, mon.x + mon.w - w))
+        place(self.bar, Rect(x, y, w, h))
+        self.bar.invalidateShadow()
+
+    def act(self, key: str) -> None:
+        if key.startswith("mark_") and key[5:] in {k for k, _l, _g in MARK_TOOLS}:
+            self.tool = key[5:]
+            self._build_bar()
+        elif key == "mark_undo":
+            if self.strokes:
+                self.strokes.pop()
+                self.canvas.setNeedsDisplay_(True)
+        elif key == "mark_cancel":
+            self.cancel()
+        elif key == "mark_done":
+            self.finish()
+
+    # -- drawing (view coordinates: the region's, top-left)
+    def press(self, x: float, y: float) -> None:
+        self._drawing = True
+        self.strokes.append((self.tool, [(x, y)]))
+        self.canvas.setNeedsDisplay_(True)
+
+    def drag(self, x: float, y: float) -> None:
+        if self._drawing and self.strokes:
+            tool, pts = self.strokes[-1]
+            if tool in ("box", "arrow"):
+                pts[1:] = [(x, y)]
+            else:
+                pts.append((x, y))
+            self.canvas.setNeedsDisplay_(True)
+
+    def release(self, x: float, y: float) -> None:
+        if self._drawing:
+            self.drag(x, y)
+            self._drawing = False
+
+    # -- the end
+    def finish(self) -> None:
+        png = marked_png(self._shot, self.strokes) if self.strokes else None
+        self._end(png)
+
+    def cancel(self) -> None:
+        self._end(None)
+
+    def _end(self, png: bytes | None) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self.panel.orderOut_(None)
+        self.bar.orderOut_(None)
+        self.owner._keys(False)
+        log_event("shot_mark_closed", marked=png is not None)
+        self._done(png)
