@@ -275,6 +275,8 @@ class Controller:
         if s is None or self._locked or not (
                 typing_ok or may_open(self._clock.now(), self._typed_at)):
             return None
+        if typing_ok and (self._strip_visible or self._panel_open):
+            self.close_panel()  # one Glance window by the field at a time: the toolbar now
         inputs = self._chip_inputs(s)
         tones = () if s.gated else self._call("icon_tones", self.icon_tones, default=())
         return icon_toolbar(self.status_icon(), check_chord,

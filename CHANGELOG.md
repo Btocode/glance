@@ -14,6 +14,8 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
   login agent on macOS) and waits until it answers.
 - Glance Shot ▸ Translate ▸ Other…: the language is typed in the card, not in a window of
   its own.
+- One Glance window beside a field at a time: right-clicking the icon closes the suggestion
+  strip or panel before its toolbar opens, and a suggestion that comes up closes the toolbar.
 - Glance Shot ▸ Mark: draw on a shot (pen, box, arrow, highlighter, undo) before it is
   copied, saved or sent to the AI.
 - Glance Shot ▸ Text ▸ Exact text (AI): the image read word for word by a vision AI, on

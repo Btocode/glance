@@ -131,6 +131,17 @@ def test_controller_offers_none_while_typing_unless_right_clicked(tmp_path):
     assert rig.c.icon_toolbar("Super+Alt+G").item_keys()[0] == "check"
 
 
+def test_right_click_closes_the_strip_first(tmp_path):
+    rig = cs.Rig(tmp_path)
+    router = PanelRouter(rig.c)
+    rig.c.handle_snapshot(ct.snap())
+    router.action(ACTION, {"key": "check"})
+    rig.clock.advance(0)
+    assert rig.overlay.strip is not None
+    assert rig.c.icon_toolbar("Super+Alt+G", typing_ok=True) is not None
+    assert rig.overlay.strip is None and rig.overlay.panel is None  # never two at once
+
+
 def test_controller_toolbar_uses_the_profiles_tones(tmp_path):
     d = aw.Daemon(tmp_path)
     d.focus()

@@ -506,6 +506,8 @@ class GtkOverlay:
         self._animate()
 
     def show_strip(self, view: StripView, anchor: Anchor) -> None:
+        if not self._strip.get_visible():
+            self._hide_menu()  # a suggestion came up: it takes the toolbar's place
         self._fresh = True
         rebuilt = view != self._strip_view
         if rebuilt:
@@ -527,6 +529,7 @@ class GtkOverlay:
             self._layout(force=True)
 
     def show_panel(self, view: PanelView, x: int, y: int, anchor: Anchor | None = None) -> None:
+        self._hide_menu()  # one window by the field at a time
         mode_changed = (anchor is None) != (self._panel_anchor is None) \
             or self._panel_view is None
         self._panel_anchor = anchor
