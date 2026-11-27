@@ -531,8 +531,16 @@ class GtkShot:
         if b.tip:
             button.set_tooltip_text(b.tip)
         button.set_name(f"shot:{b.key}")
-        button.connect("clicked", lambda _b: self._act(b.key))
+        button.connect("clicked", lambda _b: self._act_later(b.key))
         return button
+
+    def _act_later(self, key: str) -> None:
+        """A click acts once GTK is done with it: the action rebuilds the card, and the
+        clicked button must not be destroyed while its own signal is still running."""
+        def run() -> bool:
+            self._act(key)
+            return False
+        GLib.idle_add(run)
 
     def _glyph(self, name: str, px: int = 14, token: str = "accent") -> Gtk.Widget:
         area = Gtk.DrawingArea()
@@ -569,7 +577,7 @@ class GtkShot:
         button.add(inner)
         button.set_tooltip_text(b.tip or (None if label else b.label))
         button.set_name(f"shot:{b.key}")
-        button.connect("clicked", lambda _b: self._act(b.key))
+        button.connect("clicked", lambda _b: self._act_later(b.key))
         return button
 
     def _toolbar(self, view: bm.ShotBarView) -> Gtk.Widget:
@@ -643,17 +651,17 @@ class GtkShot:
             _classes(body, "glance-banner")
             body.pack_start(_label(view.notice.text, chars=52), False, False, 0)
         elif view.asking:
-            body.pack_start(_label(bm.ASK_PROMPT, "glance-section", wrap=False),
+            body.pack_start(_label(view.ask_prompt, "glance-section", wrap=False),
                             False, False, 0)
             entry = Gtk.Entry(max_length=500)
-            entry.set_placeholder_text(bm.ASK_PLACEHOLDER)
+            entry.set_placeholder_text(view.ask_placeholder)
             entry.set_name("shot:ask")
             entry.connect("activate", lambda e: self._submit(e.get_text()))
             entry.connect("key-press-event", self._entry_key)
             body.pack_start(entry, False, False, 0)
             hint = Gtk.Box(spacing=6)
             hint.pack_start(_kbd(look.RETURN_KEY), False, False, 0)
-            hint.pack_start(_label("ask", "glance-meta", wrap=False), False, False, 0)
+            hint.pack_start(_label(view.ask_go, "glance-meta", wrap=False), False, False, 0)
             hint.pack_start(_kbd(look.ESC_KEY), False, False, 6)
             hint.pack_start(_label("back", "glance-meta", wrap=False), False, False, 0)
             body.pack_start(hint, False, False, 0)

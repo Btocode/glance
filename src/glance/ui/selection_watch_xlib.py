@@ -80,6 +80,7 @@ class XlibSelectionWatch:
         from gi.repository import GLib
 
         self._d = d
+        log_event("selection_watch_started")
         self._watch = GLib.io_add_watch(d.fileno(), GLib.PRIORITY_DEFAULT, GLib.IO_IN,
                                         lambda *_a: self._pump())
         self._pump()
@@ -171,6 +172,7 @@ class XlibSelectionWatch:
         now = self._now()
         if not (self._held or now - self._released_at <= RECENT_RELEASE_S):
             # Made with the keyboard: the user is working in that field (the strip's job).
+            log_event("selection_not_mouse")
             self._cancel()
             self._on_cleared()
             return

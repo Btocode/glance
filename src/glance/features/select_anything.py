@@ -183,6 +183,7 @@ class SelectAnything:
             say(PRIVATE)
             return
         if not terminals and _contains(cfg.privacy.terminal_wm_classes, active.wm_class):
+            log_event("select_anything_refused", reason="terminal")
             return
         if not _contains(cfg.privacy.browser_wm_classes, active.wm_class):
             self._allow(active, None, (active.title,), on_allowed, say)
@@ -205,6 +206,7 @@ class SelectAnything:
                  current: Callable[[], bool]) -> None:
         now = self._selection.active()
         if not current() or now is None or now.xid != active.xid:
+            log_event("select_anything_refused", reason="moved_on")
             return  # the user moved on while the page was being looked up
         url, title = info if info is not None else (None, None)
         titles = (active.title, title) if title else (active.title,)

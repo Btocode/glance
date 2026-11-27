@@ -91,7 +91,8 @@ class _Session:
     text: str | None = None  # the OCR text, once read (Translate and Explain reuse it)
     ticket: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
-    asking: bool = False  # the body is Ask's entry (renderers with `inline_ask`)
+    asking: bool = False  # the body is an entry (renderers with `inline_ask`)
+    asking_for: str = "ask"  # what the entry is for: "ask" (a question) or "language"
     marking: bool = False  # the region is being marked up (`annotate`)
 
     @property
@@ -370,6 +371,12 @@ class ShotController:
     def _other_language(self) -> None:
         s = self._sess
         assert s is not None
+        if getattr(self._ui, "inline_ask", False):
+            s.asking, s.asking_for, s.notice = True, "language", None  # typed in the card
+            s.banner, s.warn = None, False
+            s.shown = "translate"
+            self._render()
+            return
         at = getattr(self._ui, "ask_point", lambda: None)()
         self._overlay.ask_text(bm.OTHER_PROMPT,
                                lambda lang, _back: self._sess is s and self._translate_to(lang),
@@ -499,7 +506,9 @@ class ShotController:
         assert s is not None
         if key == "ask":
             if getattr(self._ui, "inline_ask", False):
-                s.asking, s.notice = True, None  # the question is typed in the card itself
+                if s.asking and s.asking_for == "ask":
+                    return  # already open: rebuilding it would only lose what is typed
+                s.asking, s.asking_for, s.notice = True, "ask", None  # the question is typed in the card itself
                 s.banner, s.warn = None, False
                 s.shown = "ask"
                 self._render()
@@ -513,9 +522,12 @@ class ShotController:
         s = self._sess
         if s is None or not s.asking:
             return
-        s.asking = False
         if not question.strip():
             self._ask_cancel()
+            return
+        s.asking = False
+        if s.asking_for == "language":
+            self._translate_to(question)
             return
         self._asked(s, question)
 
@@ -524,7 +536,9 @@ class ShotController:
         if s is None:
             return
         s.asking = False
-        if s.shown == "ask" and "ask" not in s.results:
+        if s.asking_for == "language":
+            s.shown = "translate"  # back to the language chips
+        elif s.shown == "ask" and "ask" not in s.results:
             s.shown = None
         self._render()
 
@@ -652,10 +666,14 @@ class ShotController:
         result = None if notice is not None or s.asking else s.result
         tools = tuple(replace(t, selected=t.key == "mark" and s.marking)
                       for t in bm.tools())
+        words = ((bm.OTHER_PROMPT, bm.OTHER_PLACEHOLDER, "translate")
+                 if s.asking_for == "language" else
+                 (bm.ASK_PROMPT, bm.ASK_PLACEHOLDER, "ask"))
         return bm.ShotBarView(size_label(s.pick.shot.rect), self._buttons(s), s.banner, s.warn,
                               notice, result, tools=tools,
                               expanded=notice is not None or result is not None or s.asking,
-                              asking=s.asking)
+                              asking=s.asking, ask_prompt=words[0], ask_placeholder=words[1],
+                              ask_go=words[2])
 
     def refresh(self) -> None:
         """Draw the bar again (the desktop switched between light and dark)."""

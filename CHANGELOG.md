@@ -11,6 +11,8 @@ The grammar engine `glance_core` is versioned and released on its own (`core-v*`
 
 ### Added
 - `glance start` starts Glance again after Quit in the tray (systemd user unit on Linux, the
+- Glance Shot ▸ Translate ▸ Other…: the language is typed in the card, not in a window of
+  its own.
   login agent on macOS) and waits until it answers.
 - Glance Shot ▸ Mark: draw on a shot (pen, box, arrow, highlighter, undo) before it is
   copied, saved or sent to the AI.

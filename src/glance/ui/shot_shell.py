@@ -168,8 +168,8 @@ class ShellShot:
                    "tokens": self._tokens(), "look": SHOT_LOOK,
                    "words": {"title": bm.TITLE, "esc": look.ESC_KEY, "close": look.CLOSE,
                              "hint": bm.HINT, "hint_sub": bm.HINT_SUB,
-                             "return": look.RETURN_KEY, "ask_prompt": bm.ASK_PROMPT,
-                             "ask_placeholder": bm.ASK_PLACEHOLDER, "ask_go": "ask",
+                             "return": look.RETURN_KEY, "ask_prompt": view.ask_prompt,
+                             "ask_placeholder": view.ask_placeholder, "ask_go": view.ask_go,
                              "ask_back": "back", "glyphs": bm.GLYPHS}}
         try:
             answer = self._bus.call("ShotBar", payload)

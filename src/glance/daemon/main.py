@@ -416,6 +416,9 @@ class _DesktopNotifier:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import faulthandler
+
+    faulthandler.enable()  # a crash in GTK or a C library leaves its Python stack in the log
     # >>> macOS: glanced runs on AppKit there (src/glance/platform/macos/daemon.py)
     if sys.platform == "darwin":
         from glance.platform.macos.daemon import main as macos_main

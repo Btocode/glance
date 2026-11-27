@@ -164,12 +164,16 @@ class SelectionActions:
         self._ticket += 1
         cfg = self._cfg()
         if not cfg.selection.enabled or self._c.status()["paused"]:
+            log_event("selection_skipped", reason="off_or_paused")
             return
         if self._sa.is_open or self._res is not None:
+            log_event("selection_skipped", reason="panel_open")
             return  # a panel is up: one thing at a time
         if self._typing():
+            log_event("selection_skipped", reason="typing")
             return
         if length is not None and length < 2 * cfg.selection.min_words - 1:
+            log_event("selection_skipped", reason="short")
             return
         ticket = self._ticket
         self._sa.gated(lambda active: self._show_mark(active, (x, y), ticket),

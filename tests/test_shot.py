@@ -437,6 +437,39 @@ def test_inline_ask_in_the_card(tmp_path):
     assert "what is the error?" in r.sup.images[0][3] and r.ui.view.result.title == "Answer"
 
 
+def test_ask_again_while_open_keeps_the_entry(tmp_path):
+    r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")))
+    r.ui.inline_ask = True
+    r.shoot()
+    r.c.action("ask")
+    shown = len(r.ui.views) if hasattr(r.ui, "views") else None
+    first = r.ui.view
+    r.c.action("ask")
+    r.c.action("ask")
+    assert r.ui.view is first  # not drawn again: what is typed stays
+    if shown is not None:
+        assert len(r.ui.views) == shown
+
+
+def test_other_language_is_typed_in_the_card(tmp_path):
+    r = Rig(tmp_path, cfg=dataclasses.replace(Config(), shot=ShotCfg(ai_images="allow")))
+    r.ui.inline_ask = True
+    r.shoot()
+    r.c.action("translate")
+    r.c.action("lang_other")
+    v = r.ui.view
+    assert r.overlay.asked is None  # no window of its own
+    assert v.asking and v.ask_prompt == bm.OTHER_PROMPT and v.ask_go == "translate"
+    assert [b.key for b in v.buttons if b.selected] == ["translate"]
+    r.c.action("ask_cancel")  # Esc: back to the language chips
+    assert not r.ui.view.asking and r.ui.view.result.state == "choose"
+    r.c.action("lang_other")
+    r.c.action("ask_submit", {"text": "  Swahili "})
+    assert "Swahili" in r.sup.texts[0][0] and r.ui.view.result.note == "Into Swahili"
+    r.c.action("ask")  # Ask afterwards is a question again
+    assert r.ui.view.ask_prompt == bm.ASK_PROMPT
+
+
 def test_exact_text_reads_the_image_with_the_ai(tmp_path):
     r = Rig(tmp_path, sup=FakeSup(out="Build failed\n  client.push(release)\n"))
     png = r.shoot()

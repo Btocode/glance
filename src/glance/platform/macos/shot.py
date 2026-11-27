@@ -612,18 +612,18 @@ class MacShot:
         if view.notice is not None:
             rows.full(_label(view.notice.text, color(t["warn_text"]), inner, size=13.0), gap=0)
         elif view.asking:
-            self._ask_body(rows, inner)
+            self._ask_body(rows, inner, view)
         elif view.result is not None:
             self._result(rows, view.result, inner)
         box.setFrameSize_((width, max(36.0, rows.y + BODY_PAD - 6)))
         return box
 
-    def _ask_body(self, rows: Any, inner: float) -> None:
+    def _ask_body(self, rows: Any, inner: float, view: bm.ShotBarView) -> None:
         t = self.t
-        rows.full(_label(bm.ASK_PROMPT, color(t["muted"]), inner, bold=True, lines=1,
+        rows.full(_label(view.ask_prompt, color(t["muted"]), inner, bold=True, lines=1,
                          size=12.0), gap=8)
         field = _ShotField.alloc().initWithFrame_(NSMakeRect(0, 0, inner, 28))
-        field.setPlaceholderString_(bm.ASK_PLACEHOLDER)
+        field.setPlaceholderString_(view.ask_placeholder)
         field.setFont_(_font(size=13.0))
         field.setBezelStyle_(1)  # rounded
         field.setFocusRingType_(1)  # none: the bezel says where it is
@@ -632,7 +632,7 @@ class MacShot:
         field.setDelegate_(self._ask_delegate)
         rows.full(field, gap=8)
         hint: list[Any] = []
-        for key, what in ((look.RETURN_KEY, "ask"), (look.ESC_KEY, "back")):
+        for key, what in ((look.RETURN_KEY, view.ask_go), (look.ESC_KEY, "back")):
             hint.append(_keycap(key, t))
             lab = _label(what, color(t["muted"]), 60, lines=1, size=12.0)
             lab.sizeToFit()

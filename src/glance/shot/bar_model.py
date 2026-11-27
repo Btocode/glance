@@ -54,6 +54,7 @@ GLYPHS = {"extract": "lines", "explain": "spark", "translate": "globe", "ask": "
 TRANSLATE_TO = "Translate to"
 OTHER_LANGUAGE = "Other…"
 OTHER_PROMPT = "Translate to which language?"
+OTHER_PLACEHOLDER = "e.g. Italian, Korean, Tagalog"
 MARK_UNAVAILABLE = "Marking up a shot is not available on this desktop yet"
 EXACT_NOTE = "Read by {backend}, exactly as shown"
 AI_ACTIONS = frozenset({"ask"})                     # the image goes to the AI
@@ -110,6 +111,9 @@ class ShotBarView:
     hint: str | None = HINT  # (unused since the toolbar: kept for older renderers)
     expanded: bool = False  # the card's body is open (a result, the notice, a choice, Ask)
     asking: bool = False  # the body is the question's entry (Enter asks, Esc goes back)
+    ask_prompt: str = ASK_PROMPT  # the entry's heading: Ask's, or "Translate to which language?"
+    ask_placeholder: str = ASK_PLACEHOLDER
+    ask_go: str = "ask"  # beside ↵
 
 
 def notice_text(backend_label: str) -> str:
